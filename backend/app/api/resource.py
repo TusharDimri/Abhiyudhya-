@@ -1,0 +1,388 @@
+"""Generic resource controller - list/detail/create/update/delete.
+
+One blueprint serves every registered resource. Every request is:
+  1. authenticated (login_required),
+  2. row-scoped via apply_scope (tenant + role isolation),
+  3. write-gated by the resource's write_roles,
+  4. audited on every write.
+
+Query params (list):  ?page=&page_size=&search=&sort=&order=&<filter_col>=value
+"""
+import uuid
+from datetime import datetime, date
+
+from flask import Blueprint, request, jsonify, abort, current_app
+from sqlalchemy import or_, asc, desc
+
+from app.extensions import db
+from app.models.base import GUID
+from app.api.registry import REGISTRY
+from app.rbac import login_required, current_user, apply_scope, can_access_row
+from app.rbac.roles import Role
+from app.services import audit
+
+bp = Blueprint("resources", __name__, url_prefix="/api")
+
+
+def _cfg(name):
+    cfg = REGISTRY.get(name)
+    if cfg is None:
+        abort(404, description=f"Unknown resource '{name}'")
+    return cfg
+
+
+def _require_view(cfg, user):
+    """Block roles that may not view this resource at all (defence in depth)."""
+    if cfg.view_roles and user.role not in cfg.view_roles:
+        abort(403, description="This section is not available for your role")
+
+
+def _serialise(cfg, obj):
+    data = obj.to_dict()
+    if cfg.computed:
+        try:
+            data.update(cfg.computed(obj) or {})
+        except Exception:  # computed display fields must never break a read
+            pass
+    for child in cfg.children:
+        rows = (
+            db.session.query(child.model)
+            .filter(
+                getattr(child.model, child.parent_fk) == obj.id,
+                child.model.is_deleted.is_(False),
+            )
+            .all()
+        )
+        data[child.payload_key] = [
+            {f: (str(getattr(r, f)) if isinstance(getattr(r, f), uuid.UUID) else getattr(r, f))
+             for f in child.fields}
+            for r in rows
+        ]
+    return data
+
+
+def _write_children(cfg, obj, payload, user):
+    """Replace a parent's child collections from the request body.
+
+    Sent as a whole list (`student_marks: [{student_id, present}, ...]`), so a
+    re-save of the entry is the full truth for that day - rows that disappear
+    from the list are removed rather than left behind as ghosts. A key that is
+    absent from the body leaves the existing collection untouched.
+    """
+    for child in cfg.children:
+        if child.payload_key not in payload:
+            continue
+        incoming = payload.get(child.payload_key) or []
+        if not isinstance(incoming, list):
+            abort(400, description=f"'{child.payload_key}' must be a list")
+        existing = (
+            db.session.query(child.model)
+            .filter(getattr(child.model, child.parent_fk) == obj.id)
+            .all()
+        )
+        for row in existing:
+            db.session.delete(row)
+        db.session.flush()
+        for item in incoming:
+            if not isinstance(item, dict):
+                continue
+            data = {f: _coerce(child.model, f, item.get(f)) for f in child.fields}
+            if not data.get(child.fields[0]):
+                continue  # no subject (e.g. no student_id) - skip the row
+            data[child.parent_fk] = obj.id
+            if hasattr(child.model, "organisation_id"):
+                data["organisation_id"] = obj.organisation_id
+            row = child.model(**data)
+            if hasattr(row, "created_by"):
+                row.created_by = user.id
+            db.session.add(row)
+        db.session.flush()
+
+
+def _coerce(model, fieldname, value):
+    """Best-effort coercion of query/body strings to column python types."""
+    col = model.__table__.columns.get(fieldname)
+    if col is None or value is None:
+        return value
+    # UUID/GUID columns: coerce strings to UUID regardless of python_type support
+    if isinstance(col.type, GUID) or fieldname == "id" or fieldname.endswith("_id"):
+        if isinstance(value, str):
+            try:
+                return uuid.UUID(value)
+            except (ValueError, TypeError):
+                return value
+        return value
+    try:
+        pytype = col.type.python_type
+    except NotImplementedError:
+        return value
+    try:
+        if pytype is bool:
+            if isinstance(value, bool):
+                return value
+            return str(value).lower() in ("1", "true", "yes", "on")
+        if pytype in (int,):
+            return int(value)
+        if pytype is float:
+            return float(value)
+        if pytype is uuid.UUID:
+            return uuid.UUID(str(value))
+        if pytype is datetime and isinstance(value, str):
+            return datetime.fromisoformat(value)
+        if pytype is date and isinstance(value, str):
+            return date.fromisoformat(value[:10])
+    except (ValueError, TypeError):
+        return value
+    return value
+
+
+@bp.get("/<resource>")
+@login_required
+def list_resource(resource):
+    cfg = _cfg(resource)
+    user = current_user()
+    _require_view(cfg, user)
+    model = cfg.model
+
+    q = db.session.query(model)
+    if hasattr(model, "is_deleted"):
+        q = q.filter(model.is_deleted.is_(False))
+    q = apply_scope(q, model, user)
+
+    # Super Admin is cross-org: let them slice any tenant list by organisation.
+    oid = request.args.get("organisation_id")
+    if oid and user.role == Role.SUPER_ADMIN.value and hasattr(model, "organisation_id"):
+        q = q.filter(model.organisation_id == _coerce(model, "organisation_id", oid))
+
+    # --- search ---
+    term = request.args.get("search", "").strip()
+    if term and cfg.search:
+        clauses = [getattr(model, c).ilike(f"%{term}%") for c in cfg.search]
+        q = q.filter(or_(*clauses))
+
+    # --- filters ---
+    # A comma-separated value means "any of these" - needed because sections
+    # are picked as a set ("9A and 9B"), and handy for every other filter too.
+    for col in cfg.filters:
+        if col in request.args and request.args.get(col) != "":
+            raw = request.args.get(col)
+            column = getattr(model, col)
+            if "," in raw:
+                vals = [_coerce(model, col, v.strip()) for v in raw.split(",") if v.strip()]
+                q = q.filter(column.in_(vals or [None]))
+            else:
+                q = q.filter(column == _coerce(model, col, raw))
+
+    # filters that need a join or subquery rather than a column comparison
+    for param, fn in (cfg.extra_filters or {}).items():
+        val = request.args.get(param)
+        if val:
+            q = fn(q, model, _coerce(model, param, val))
+
+    # --- sort ---
+    sort_col, sort_dir = cfg.default_sort
+    req_sort = request.args.get("sort")
+    if req_sort in cfg.sortable:
+        sort_col = req_sort
+    if request.args.get("order") in ("asc", "desc"):
+        sort_dir = request.args.get("order")
+    if hasattr(model, sort_col):
+        col = getattr(model, sort_col)
+        q = q.order_by(asc(col) if sort_dir == "asc" else desc(col))
+
+    # --- pagination ---
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+    max_size = current_app.config["MAX_PAGE_SIZE"]
+    try:
+        page_size = int(request.args.get("page_size", current_app.config["DEFAULT_PAGE_SIZE"]))
+    except ValueError:
+        page_size = current_app.config["DEFAULT_PAGE_SIZE"]
+    page_size = max(1, min(page_size, max_size))
+
+    total = q.count()
+    rows = q.limit(page_size).offset((page - 1) * page_size).all()
+
+    return jsonify({
+        "data": [_serialise(cfg, r) for r in rows],
+        "pagination": {
+            "page": page, "page_size": page_size, "total": total,
+            "pages": (total + page_size - 1) // page_size,
+        },
+    })
+
+
+@bp.get("/<resource>/trash")
+@login_required
+def list_trash(resource):
+    """Soft-deleted rows (Recycle Bin) - visible to writers, for restore."""
+    cfg = _cfg(resource)
+    user = current_user()
+    if user.role not in cfg.write_roles:
+        abort(403, description="Only editors can view the recycle bin")
+    model = cfg.model
+    if not hasattr(model, "is_deleted"):
+        return jsonify({"data": [], "pagination": {"page": 1, "pages": 1, "total": 0, "page_size": 25}})
+    q = db.session.query(model).filter(model.is_deleted.is_(True))
+    q = apply_scope(q, model, user).order_by(model.updated_at.desc())
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+    page_size = current_app.config["DEFAULT_PAGE_SIZE"]
+    total = q.count()
+    rows = q.limit(page_size).offset((page - 1) * page_size).all()
+    return jsonify({
+        "data": [_serialise(cfg, r) for r in rows],
+        "pagination": {"page": page, "page_size": page_size, "total": total,
+                       "pages": (total + page_size - 1) // page_size},
+    })
+
+
+@bp.post("/<resource>/<uid>/restore")
+@login_required
+def restore_resource(resource, uid):
+    cfg = _cfg(resource)
+    user = current_user()
+    if user.role not in cfg.write_roles:
+        abort(403, description="You cannot restore this record")
+    obj = db.session.get(cfg.model, uid)
+    if obj is None or not getattr(obj, "is_deleted", False):
+        abort(404)
+    if not can_access_row(obj, user):
+        abort(403, description="Outside your scope")
+    obj.is_deleted = False
+    obj.status = "active"
+    if hasattr(obj, "updated_by"):
+        obj.updated_by = user.id
+    audit.record(user, "restore", cfg.model.__tablename__, obj.id, after={"restored": True})
+    db.session.commit()
+    return jsonify({"restored": True, "id": str(obj.id)})
+
+
+@bp.get("/<resource>/<uid>")
+@login_required
+def get_resource(resource, uid):
+    cfg = _cfg(resource)
+    user = current_user()
+    _require_view(cfg, user)
+    obj = db.session.get(cfg.model, uid)
+    if obj is None or getattr(obj, "is_deleted", False):
+        abort(404)
+    if not can_access_row(obj, user):
+        abort(403, description="Outside your scope")
+    return jsonify(_serialise(cfg, obj))
+
+
+@bp.post("/<resource>")
+@login_required
+def create_resource(resource):
+    cfg = _cfg(resource)
+    user = current_user()
+    if user.role not in cfg.write_roles:
+        abort(403, description="You cannot create this record")
+
+    payload = request.get_json(silent=True) or {}
+    data = {k: payload.get(k) for k in cfg.writable if k in payload}
+    for k, v in list(data.items()):
+        data[k] = _coerce(cfg.model, k, v)
+
+    # tenant stamp - never trust a client-supplied org id (spec 7.8)
+    if hasattr(cfg.model, "organisation_id"):
+        from app.rbac.roles import Role
+        if user.role == Role.SUPER_ADMIN.value and payload.get("organisation_id"):
+            data["organisation_id"] = _coerce(cfg.model, "organisation_id", payload["organisation_id"])
+        elif user.role != Role.SUPER_ADMIN.value:
+            data["organisation_id"] = user.organisation_id
+
+    obj = cfg.model(**data)
+    if hasattr(obj, "created_by"):
+        obj.created_by = user.id
+    db.session.add(obj)
+    db.session.flush()
+
+    # Business-rule check (e.g. a trainer logging outside their own subject).
+    if cfg.validate:
+        err = cfg.validate(obj, user, True)
+        if err:
+            db.session.rollback()
+            abort(400, description=err)
+
+    if cfg.children:
+        _write_children(cfg, obj, payload, user)
+
+    # Verify the newly created row is inside the creator's scope.
+    if not can_access_row(obj, user):
+        db.session.rollback()
+        abort(403, description="Record would fall outside your scope")
+
+    audit.record(user, "create", cfg.model.__tablename__, obj.id, after=obj.to_dict())
+    db.session.commit()
+    return jsonify(_serialise(cfg, obj)), 201
+
+
+@bp.route("/<resource>/<uid>", methods=["PUT", "PATCH"])
+@login_required
+def update_resource(resource, uid):
+    cfg = _cfg(resource)
+    user = current_user()
+    if user.role not in cfg.write_roles:
+        abort(403, description="You cannot edit this record")
+
+    obj = db.session.get(cfg.model, uid)
+    if obj is None or getattr(obj, "is_deleted", False):
+        abort(404)
+    if not can_access_row(obj, user):
+        abort(403, description="Outside your scope")
+
+    before = obj.to_dict()
+    payload = request.get_json(silent=True) or {}
+    for k in cfg.writable:
+        if k in payload:
+            setattr(obj, k, _coerce(cfg.model, k, payload[k]))
+    if hasattr(obj, "updated_by"):
+        obj.updated_by = user.id
+    db.session.flush()
+
+    if cfg.validate:
+        err = cfg.validate(obj, user, False)
+        if err:
+            db.session.rollback()
+            abort(400, description=err)
+
+    if cfg.children:
+        _write_children(cfg, obj, payload, user)
+
+    if not can_access_row(obj, user):
+        db.session.rollback()
+        abort(403, description="Edit would move record outside your scope")
+
+    audit.record(user, "update", cfg.model.__tablename__, obj.id, before=before, after=obj.to_dict())
+    db.session.commit()
+    return jsonify(_serialise(cfg, obj))
+
+
+@bp.delete("/<resource>/<uid>")
+@login_required
+def delete_resource(resource, uid):
+    cfg = _cfg(resource)
+    user = current_user()
+    if user.role not in cfg.write_roles:
+        abort(403, description="You cannot delete this record")
+
+    obj = db.session.get(cfg.model, uid)
+    if obj is None or getattr(obj, "is_deleted", False):
+        abort(404)
+    if not can_access_row(obj, user):
+        abort(403, description="Outside your scope")
+
+    before = obj.to_dict()
+    obj.is_deleted = True  # soft-delete (spec 0.5)
+    obj.status = "deleted"
+    if hasattr(obj, "updated_by"):
+        obj.updated_by = user.id
+    audit.record(user, "delete", cfg.model.__tablename__, obj.id, before=before)
+    db.session.commit()
+    return jsonify({"deleted": True, "id": str(obj.id)})

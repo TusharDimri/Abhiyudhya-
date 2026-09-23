@@ -1,0 +1,77 @@
+# Local development stack (spec Part 7.5).
+# Bring up:  docker compose -f docker-compose.local.yml up
+# Postgres, Redis, MinIO (local S3), Flask API (hot-reload), Celery worker.
+# The frontend runs separately via `npm run dev` for fastest hot-reload.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: rnaf
+      POSTGRES_PASSWORD: rnaf
+      POSTGRES_DB: rnaf
+    ports: ["5433:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rnaf"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["miniodata:/data"]
+
+  # creates the bucket once MinIO is up
+  minio-setup:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "
+      until (mc alias set local http://minio:9000 minioadmin minioadmin) do sleep 2; done;
+      mc mb --ignore-existing local/rnaf-media;
+      mc anonymous set download local/rnaf-media;
+      exit 0;
+      "
+
+  backend:
+    build:
+      context: ./backend
+      target: dev
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://rnaf:rnaf@postgres:5432/rnaf
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://minio:9000
+    ports: ["5001:5000"]
+    volumes: ["./backend:/app"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+
+  celery-worker:
+    build:
+      context: ./backend
+      target: dev
+    command: celery -A app.celery_app.celery worker --loglevel=info
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://rnaf:rnaf@postgres:5432/rnaf
+      REDIS_URL: redis://redis:6379/0
+    volumes: ["./backend:/app"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+
+volumes:
+  pgdata:
+  miniodata:

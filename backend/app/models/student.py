@@ -1,0 +1,83 @@
+"""Student lifecycle - spec Part 2 (registration, verification, assessment)."""
+from app.extensions import db
+from app.models.base import BaseModel, GUID
+
+
+class Student(BaseModel):
+    """Student Registration - spec Part 2.6 (Class 9 & 11 entry). No Aadhaar."""
+    __tablename__ = "student"
+    organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
+    school_id = db.Column(GUID(), db.ForeignKey("school.id"), nullable=False, index=True)
+    lab_id = db.Column(GUID(), db.ForeignKey("lab.id"), index=True)
+    job_role_id = db.Column(GUID(), db.ForeignKey("job_role.id"), index=True)
+    academic_year = db.Column(db.String(20), index=True)
+
+    class_grade = db.Column(db.String(5))   # 9/10/11/12
+    section = db.Column(db.String(10))
+    roll_number = db.Column(db.String(30))
+
+    first_name = db.Column(db.String(80), nullable=False)
+    middle_name = db.Column(db.String(80))
+    last_name = db.Column(db.String(80))
+    gender = db.Column(db.String(20))
+    dob = db.Column(db.Date)
+    email = db.Column(db.String(120))
+
+    father_name = db.Column(db.String(120))
+    mother_name = db.Column(db.String(120))
+    guardian_name = db.Column(db.String(120))
+    stream = db.Column(db.String(80))
+
+    mobile_primary = db.Column(db.String(30))
+    mobile_secondary = db.Column(db.String(30))
+    whatsapp_number = db.Column(db.String(30))
+
+    cwsn = db.Column(db.Boolean, default=False)  # Children With Special Needs
+    social_category_id = db.Column(GUID(), db.ForeignKey("social_category.id"))
+    date_of_enrolment = db.Column(db.Date)
+    photo_url = db.Column(db.String(500))  # optional
+
+    # Class 11 only
+    had_vocational_9_10 = db.Column(db.Boolean)
+    continuing_same_trade = db.Column(db.Boolean)
+
+    # Verification (spec Part 2.7)
+    verification_status = db.Column(db.String(20), default="pending", index=True)
+    verified_by = db.Column(
+        GUID(),
+        db.ForeignKey("app_user.id", use_alter=True, name="fk_student_verified_by_app_user"),
+    )
+    verified_on = db.Column(db.DateTime)
+    verification_remarks = db.Column(db.Text)
+
+    user_id = db.Column(  # internship login
+        GUID(),
+        db.ForeignKey("app_user.id", use_alter=True, name="fk_student_user_id_app_user"),
+    )
+
+    school = db.relationship("School", lazy="joined")
+
+    @property
+    def full_name(self):
+        return " ".join(p for p in [self.first_name, self.middle_name, self.last_name] if p)
+
+
+class Assessment(BaseModel):
+    """Assessment / Marks / Certification - spec Part 2.10."""
+    __tablename__ = "assessment"
+    organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
+    student_id = db.Column(GUID(), db.ForeignKey("student.id"), nullable=False, index=True)
+    academic_year = db.Column(db.String(20), index=True)
+    class_grade = db.Column(db.String(5))
+    job_role_id = db.Column(GUID(), db.ForeignKey("job_role.id"))
+    nsqf_level = db.Column(db.Integer)
+    assessment_type = db.Column(db.String(30))  # internal/continuous/year-end board
+    name = db.Column(db.String(160))
+    date = db.Column(db.Date)
+    max_marks = db.Column(db.Float)
+    marks_obtained = db.Column(db.Float)
+    result = db.Column(db.String(10))  # pass/fail
+    level_certification_status = db.Column(db.String(20))  # L1-L4
+    certificate_number = db.Column(db.String(80))
+    remarks = db.Column(db.Text)
+    evidence_url = db.Column(db.String(500))

@@ -1,0 +1,23 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+*.db
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Secrets & env (spec 7.5 - never commit real env)
+.env
+.env.prod
+backend/.env
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Certs
+certbot/

@@ -1,0 +1,39 @@
+# Production stack for a single EC2 instance (spec Part 7.9).
+# RDS PostgreSQL and S3 are external AWS services (NOT containers here).
+# Bring up:  docker compose -f docker-compose.prod.yml up -d --build
+#
+# Reads secrets from a .env.prod file in this directory (never commit it).
+
+services:
+  backend:
+    build:
+      context: ./backend
+      target: production
+    env_file: ./.env.prod
+    restart: unless-stopped          # self-heal on crash (spec 7.11)
+    expose: ["5000"]
+    depends_on: [redis]
+
+  celery-worker:
+    build:
+      context: ./backend
+      target: production
+    command: celery -A app.celery_app.celery worker --loglevel=info
+    env_file: ./.env.prod
+    restart: unless-stopped
+    depends_on: [redis]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      target: production
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]      # Certbot/TLS wired in the deploy doc
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    depends_on: [backend]
