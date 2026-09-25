@@ -9,7 +9,6 @@ const DEMO = [
   ["District Mgr", "dm@rnaf.demo"],
   ["Principal", "pr@rnaf.demo"],
   ["Trainer", "vt@rnaf.demo"],
-  ["Student", "student@rnaf.demo"],
 ];
 
 export default function Login() {

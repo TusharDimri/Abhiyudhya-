@@ -19,7 +19,6 @@ const FILTER_PROFILE_ALIAS = {
   district_id: "district_id",
   job_role_id: "job_role_id",
   trainer_id: "trainer_id",
-  student_id: "student_id",
   class_grade: "class_grade",
   section: "section",
 };
@@ -42,7 +41,6 @@ export function visibleColumns(columns, options, profile, role) {
   const hide = {
     school_name: singleton(options?.schools),
     lab_name: !!profile?.lab_id,
-    student_name: !!profile?.student_id,
     trainer_name: !!profile?.trainer_id,
   };
   return columns.filter(

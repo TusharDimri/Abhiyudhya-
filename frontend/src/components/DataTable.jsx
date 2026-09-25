@@ -1,4 +1,5 @@
 import Badge from "./Badge";
+import { isISODate, toDMY } from "../lib/dates";
 
 // Presentational, server-driven table with sortable headers + skeleton loader.
 export default function DataTable({ columns, rows, loading, sort, order, onSort, onEdit, onDelete, onRowAction, rowActions, canWrite, emptyHint, emptyAction, onEmptyAction }) {
@@ -54,6 +55,11 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                           {rowActions?.includes("verify") && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("verify", r)}>Verify</button>
                           )}
+                          {rowActions?.includes("status") && r.enrolment_status !== "Completed" && (
+                            <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("status", r)}>
+                              {r.enrolment_status === "Studying" ? "Left?" : "Rejoin"}
+                            </button>
+                          )}
                           {canWrite && <button className="btn btn-ghost btn-sm" onClick={() => onEdit(r)}>Edit</button>}
                           {canWrite && <button className="btn btn-danger btn-sm" onClick={() => onDelete(r)}>Delete</button>}
                         </div>
@@ -84,6 +90,7 @@ function format(v) {
   if (v === null || v === undefined || v === "") return <span className="muted">—</span>;
   if (v === true) return "Yes";
   if (v === false) return "No";
-  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v)) return v.slice(0, 10);
+  if (isISODate(v)) return toDMY(v);
+  if (typeof v === "string" && /^\d{2}:\d{2}:\d{2}$/.test(v)) return v.slice(0, 5);
   return String(v);
 }

@@ -44,6 +44,9 @@ class Config:
 
     # --- Rate limiting ---
     RATELIMIT_STORAGE_URI = os.getenv("REDIS_URL", "memory://")
+    # Redis cache for read endpoints (services/cache.py)
+    CACHE_ENABLED = _bool("CACHE_ENABLED", True)
+    CACHE_PREFIX = os.getenv("CACHE_PREFIX", "rnaf")
 
     # --- Pagination ---
     DEFAULT_PAGE_SIZE = int(os.getenv("DEFAULT_PAGE_SIZE", "25"))
@@ -51,6 +54,8 @@ class Config:
 
     # --- S3 / storage ---
     S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL")  # set for MinIO locally
+    # the same store as the browser reaches it (pre-signed upload links); blank = S3_ENDPOINT_URL
+    S3_PUBLIC_ENDPOINT_URL = os.getenv("S3_PUBLIC_ENDPOINT_URL")
     S3_BUCKET = os.getenv("S3_BUCKET", "rnaf-media")
     S3_REGION = os.getenv("S3_REGION", "us-east-1")
     S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
@@ -89,6 +94,9 @@ class TestConfig(Config):
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": False}
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=30)
     RATELIMIT_ENABLED = False
+    # off unless a test switches it on (tests/test_cache.py)
+    CACHE_ENABLED = False
+    CACHE_PREFIX = "rnaf-test"
 
 
 def get_config():

@@ -58,7 +58,6 @@ export const QUICK_ACTIONS = {
   DM: [
     { label: "Issues needing action", icon: "⚠️", to: "/app/issues?workflow_status=open" },
     { label: "Students awaiting verification", icon: "🕓", to: "/app/students?verification_status=pending" },
-    { label: "Register a student", icon: "🧑‍🎓", to: create("/app/students") },
     { label: "Schools in my district", icon: "🏫", to: "/app/schools" },
   ],
   PR: [
@@ -67,15 +66,11 @@ export const QUICK_ACTIONS = {
     { label: "Trainers at my school", icon: "👨‍🏫", to: "/app/trainers" },
   ],
   VT: [
-    { label: "Log today's attendance", icon: "🗓️", to: create("/app/attendance") },
+    { label: "Mark today's attendance", icon: "🗓️", to: create("/app/attendance") },
+    { label: "Mark class attendance", icon: "🧑‍🏫", to: create("/app/class-attendance") },
     { label: "Register a student", icon: "🧑‍🎓", to: create("/app/students") },
     { label: "Report an issue", icon: "⚠️", to: create("/app/issues") },
     { label: "Record a field visit", icon: "🚌", to: create("/app/field-visits") },
-  ],
-  ST: [
-    { label: "Add today's diary entry", icon: "📔", to: create("/app/diaries") },
-    { label: "My diary entries", icon: "📖", to: "/app/diaries" },
-    { label: "My assessments", icon: "🎯", to: "/app/assessments" },
   ],
 };
 
@@ -86,17 +81,15 @@ export const DASHBOARD_SUBTITLE = {
   DM: "The schools and labs in your district",
   PR: "Your school at a glance",
   VT: "Your lab, your classes, your day",
-  ST: "Your internship progress",
 };
 
 // What an empty list should say - and offer - for the role looking at it.
 export const EMPTY_HINTS = {
-  attendance: { VT: "No entries yet. Log today's day and it will appear here.", PR: "Nothing submitted for endorsement yet." },
+  attendance: { VT: "No attendance yet. Mark today's and it will appear here.", PR: "Nothing submitted for endorsement yet." },
+  "class-attendance": { VT: "No classes marked yet." },
   students: { VT: "No students registered for your lab yet.", PR: "No students registered at your school yet." },
   issues: { VT: "You haven't reported any issues.", DM: "No issues reported in your district." },
-  diaries: { ST: "No diary entries yet. Add today's and start your log." },
   "field-visits": { VT: "No field visits recorded yet." },
   "guest-lectures": { VT: "No guest lectures recorded yet." },
-  "employer-student-maps": { ST: "You haven't been mapped to an employer yet." },
-  "ojt-placements": { ST: "No OJT record yet — your trainer creates this." },
+  "ojt-placements": { VT: "No OJT records for your students yet." },
 };

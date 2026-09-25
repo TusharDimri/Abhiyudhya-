@@ -12,7 +12,8 @@ and **React (JavaScript) + Vite** on the frontend, deployable to AWS.
 
 ## What it does
 
-Six roles, each seeing only their slice of the data:
+Five roles, each seeing only their slice of the data. Students are records
+managed by staff — they do not log in.
 
 | Role | Sees / does |
 |------|-------------|
@@ -20,8 +21,7 @@ Six roles, each seeing only their slice of the data:
 | **Organisation Admin** | Everything inside one organisation |
 | **District Manager** | Their assigned district(s) |
 | **Principal** | Their school; **endorses** trainer attendance & reports |
-| **Vocational Trainer** | Their lab(s): daily attendance, visits, lectures, students |
-| **Student** | Their own internship diary |
+| **Vocational Trainer** | Their lab(s): daily attendance, visits, lectures, students, internship diaries |
 
 It covers the full lifecycle: master data (schools, labs, sectors, job roles,
 curriculum) → students (registration, verification, assessment) → daily
@@ -86,7 +86,7 @@ Tests run against **PostgreSQL**, not SQLite — the same engine production uses
 They use a separate `rnaf_test` database, created automatically on first run,
 so your development data is never touched.
 
-Demo logins (local): `sa@rnaf.demo` … `student@rnaf.demo`, password `Password@123`.
+Demo logins (local): `sa@rnaf.demo` … `vt@rnaf.demo`, password `Password@123`.
 
 ### Database changes
 

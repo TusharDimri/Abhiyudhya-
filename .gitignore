@@ -21,3 +21,6 @@ backend/.env
 
 # Certs
 certbot/
+
+# Salesforce CLI / VS Code extension cache - not part of this project
+.sf/

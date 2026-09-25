@@ -6,7 +6,8 @@ Roles (from spec Part 0.2):
   DM  District Manager       - scoped to one or more districts
   PR  Principal / Headmaster  - scoped to their school; endorses attendance/reports
   VT  Vocational Trainer     - scoped to their lab(s) + job role(s)
-  ST  Student                - internship/OJT students; own diary only
+
+Students are records managed by staff; they never log in.
 """
 from enum import Enum
 
@@ -17,7 +18,6 @@ class Role(str, Enum):
     DISTRICT_MANAGER = "DM"
     PRINCIPAL = "PR"
     TRAINER = "VT"
-    STUDENT = "ST"
 
 
 ROLE_LABELS = {
@@ -26,7 +26,6 @@ ROLE_LABELS = {
     Role.DISTRICT_MANAGER: "District Manager",
     Role.PRINCIPAL: "Principal / Headmaster",
     Role.TRAINER: "Vocational Trainer",
-    Role.STUDENT: "Student",
 }
 
 # Roles that are not bound to a single organisation.
@@ -34,7 +33,6 @@ CROSS_ORG_ROLES = {Role.SUPER_ADMIN}
 
 # Ordering used for "at least this privileged" style checks (higher = more).
 ROLE_RANK = {
-    Role.STUDENT: 0,
     Role.TRAINER: 1,
     Role.PRINCIPAL: 2,
     Role.DISTRICT_MANAGER: 3,

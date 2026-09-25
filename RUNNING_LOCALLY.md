@@ -4,7 +4,7 @@ This guide is written for someone who has **never used Docker or Flask before**.
 Follow it top to bottom and you'll have the whole app running on your laptop.
 
 You will end up with:
-- The **backend** (the "brain" / API) running at `http://localhost:5000`
+- The **backend** (the "brain" / API) running at `http://localhost:5001`
 - The **frontend** (the website you click around in) at `http://localhost:5173`
 - A **database**, a **cache**, and a **local file store** — all running automatically in Docker
 
@@ -131,7 +131,6 @@ The seed command prints the demo logins. They are:
 | District Manager | `dm@rnaf.demo` | `Password@123` |
 | Principal | `pr@rnaf.demo` | `Password@123` |
 | Vocational Trainer | `vt@rnaf.demo` | `Password@123` |
-| Student | `student@rnaf.demo` | `Password@123` |
 
 ---
 
@@ -163,7 +162,6 @@ On the login screen you'll see **"Demo logins"** buttons — click any role (e.g
 Try logging in as different roles to see how the menu and data change:
 - **Super Admin** sees everything across all organisations.
 - **Trainer** only sees their own lab, students, and daily-entry screens.
-- **Student** only sees their own diary.
 
 That role-based filtering is the core of the app and it's enforced on the
 **server**, not just hidden in the UI.
@@ -200,14 +198,14 @@ be up (it is, if you followed the steps above).
 
 - **MinIO console** (see uploaded files locally): http://localhost:9001
   — login `minioadmin` / `minioadmin`.
-- **API health check:** open http://localhost:5000/health — should show `{"status":"ok"}`.
+- **API health check:** open http://localhost:5001/health — should show `{"status":"ok"}`.
 
 ---
 
 ## Troubleshooting
 
 **"port is already allocated" / "address already in use"**
-Something else is using port 5000, 5173, 5432, etc. Close the other program, or
+Something else is using port 5001, 5173, 5433, 6379, 9000, etc. Close the other program, or
 stop the stack with `docker compose -f docker-compose.local.yml down` and retry.
 
 **The website loads but says "Unauthorized" or nothing appears**
@@ -217,6 +215,17 @@ Make sure the backend is running (Step 4) and that you ran the `db upgrade` and
 **"docker: command not found" or Docker errors**
 Docker Desktop isn't running. Open the Docker Desktop app and wait for the green
 "running" status, then retry.
+
+**Pulled new code and the app errors about missing columns/tables**
+Someone added a database change. Apply it:
+`docker compose -f docker-compose.local.yml exec backend flask db upgrade`.
+If `docker compose ... up -d --build` was not run since `requirements.txt`
+changed (e.g. PostGIS support), rebuild first.
+
+**A trainer can't mark attendance: "school's location hasn't been set up"**
+Attendance is only accepted within 1 km of the school. Log in as an admin,
+open **Schools**, edit the school and set its **Location** (the
+*Use my current location* button works if you are at the school).
 
 **Changed backend code but don't see the change**
 The backend auto-reloads. If it seems stuck, restart it:

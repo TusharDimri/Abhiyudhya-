@@ -10,6 +10,8 @@ import DataTable from "./DataTable";
 import ResourceForm from "./ResourceForm";
 import WorkflowDialog from "./WorkflowDialog";
 import Filters from "./Filters";
+import TargetProgress from "./TargetProgress";
+import PromoteDialog from "./PromoteDialog";
 import { visibleFilters, visibleColumns } from "../lib/scope";
 import { EMPTY_HINTS } from "../lib/roleUi";
 
@@ -33,6 +35,7 @@ export default function ResourcePage() {
 
   const [editing, setEditing] = useState(null);
   const [workflow, setWorkflow] = useState(null);
+  const [pageAction, setPageAction] = useState(null);
   const [searchInput, setSearchInput] = useState(sp.get("q") || "");
 
   const perm = boot?.resources?.[resource];
@@ -135,13 +138,18 @@ export default function ResourcePage() {
       setEditing(null);
       qc.invalidateQueries({ queryKey: ["list", resource] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["targets", resource] });
     },
     onError: (e) => push(apiError(e), "error"),
   });
 
   const del = useMutation({
     mutationFn: async (row) => api.delete(`/${resource}/${row.id}`),
-    onSuccess: () => { push("Deleted", "success"); qc.invalidateQueries({ queryKey: ["list", resource] }); },
+    onSuccess: () => {
+      push("Deleted", "success");
+      qc.invalidateQueries({ queryKey: ["list", resource] });
+      qc.invalidateQueries({ queryKey: ["targets", resource] });
+    },
     onError: (e) => push(apiError(e), "error"),
   });
 
@@ -164,10 +172,24 @@ export default function ResourcePage() {
           <div className="crumb">{mod.group}</div>
           <h1>{mod.icon} {mod.label}</h1>
         </div>
-        {canWrite && (
-          <button className="btn btn-accent" onClick={() => setEditing({})}>＋ New {mod.singular}</button>
-        )}
+        <div className="page-actions">
+          {(mod.pageActions || []).filter((a) => a.roles.includes(user?.role)).map((a) => (
+            <button key={a.key} className="btn btn-ghost" onClick={() => setPageAction(a.key)}>{a.label}</button>
+          ))}
+          {canWrite && (
+            <button className="btn btn-accent" onClick={() => setEditing({})}>＋ New {mod.singular}</button>
+          )}
+        </div>
       </div>
+
+      {mod.yearlyTarget && (
+        <TargetProgress
+          resource={resource}
+          picked={{ academic_year: sp.get("academic_year"), class_grade: sp.get("class_grade"), lab_id: sp.get("lab_id") }}
+          // show exactly the records counted towards that level and year
+          onPick={(r) => patch({ academic_year: r.academic_year, class_grade: r.class_grade, lab_id: r.lab_id })}
+        />
+      )}
 
       <div className="toolbar">
         {mod.searchable !== false && (
@@ -233,6 +255,7 @@ export default function ResourcePage() {
 
       {editing !== null && (
         <ResourceForm
+          resource={resource}
           mod={mod}
           initial={editing.id ? editing : null}
           boot={boot}
@@ -244,6 +267,18 @@ export default function ResourcePage() {
           saving={save.isPending}
           onClose={() => setEditing(null)}
           onSubmit={(payload) => save.mutate(payload)}
+        />
+      )}
+
+      {pageAction === "promote" && (
+        <PromoteDialog
+          onClose={() => setPageAction(null)}
+          onDone={() => {
+            setPageAction(null);
+            qc.invalidateQueries({ queryKey: ["list", resource] });
+            qc.invalidateQueries({ queryKey: ["promotion"] });
+            qc.invalidateQueries({ queryKey: ["roster"] });
+          }}
         />
       )}
 

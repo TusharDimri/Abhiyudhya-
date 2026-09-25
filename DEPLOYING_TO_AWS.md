@@ -61,7 +61,9 @@ each step is small. Expect it to take an afternoon the first time.
 ## Part C — Create the RDS PostgreSQL database
 
 1. Console search → **RDS** → **Create database**.
-2. Choose **Standard create**, engine **PostgreSQL**.
+2. Choose **Standard create**, engine **PostgreSQL**, version **16**. (The app
+   uses the **PostGIS** extension for locations; RDS includes it, and the first
+   `flask db upgrade` switches it on - the master user is allowed to.)
 3. **Templates:** choose **Free tier** if offered, otherwise **Dev/Test**.
 4. **DB instance identifier:** `rnaf-db`.
 5. **Master username:** `rnaf` · **Master password:** make a strong one and
@@ -179,6 +181,8 @@ CELERY_RESULT_BACKEND=redis://redis:6379/0
 
 # S3 — real bucket. Leave S3_ENDPOINT_URL blank so it uses real AWS S3.
 S3_ENDPOINT_URL=
+# Leave blank too: only needed locally, where the browser reaches MinIO at localhost
+S3_PUBLIC_ENDPOINT_URL=
 S3_BUCKET=rnaf-media-yourname
 S3_REGION=ap-south-1
 S3_ACCESS_KEY=your-iam-access-key

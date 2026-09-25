@@ -1,4 +1,7 @@
 // Date-range selector with presets + custom range. Value = {from, to} (ISO or "").
+import DateInput from "./DateInput";
+import { isoDaysAgo } from "../lib/dates";
+
 const PRESETS = [
   { key: "30d", label: "30 days", days: 30 },
   { key: "90d", label: "90 days", days: 90 },
@@ -6,11 +9,6 @@ const PRESETS = [
   { key: "all", label: "All time", days: null },
 ];
 
-function isoDaysAgo(days) {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
-}
 
 export default function DateRange({ value, onChange, preset, onPreset }) {
   return (
@@ -32,9 +30,9 @@ export default function DateRange({ value, onChange, preset, onPreset }) {
       </div>
       {preset === "custom" && (
         <div className="custom-dates">
-          <input className="input" type="date" value={value.from || ""} onChange={(e) => onChange({ ...value, from: e.target.value })} />
+          <DateInput value={value.from || ""} onChange={(v) => onChange({ ...value, from: v })} placeholder="From" />
           <span className="muted">→</span>
-          <input className="input" type="date" value={value.to || ""} onChange={(e) => onChange({ ...value, to: e.target.value })} />
+          <DateInput value={value.to || ""} onChange={(v) => onChange({ ...value, to: v })} placeholder="To" />
         </div>
       )}
     </div>

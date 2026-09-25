@@ -4,6 +4,7 @@ import api, { apiError } from "../../lib/api";
 import { useBootstrap } from "../../hooks/useBootstrap";
 import { useToast } from "../../lib/toast";
 import { MODULES } from "../../lib/modules";
+import { isISODate, toDMY } from "../../lib/dates";
 
 export default function Trash() {
   const { data: boot } = useBootstrap();
@@ -63,7 +64,7 @@ export default function Trash() {
                 : rows.map((r) => (
                     <tr key={r.id}>
                       {cols.map((c) => <td key={c.key}>{fmt(r[c.key])}</td>)}
-                      <td className="muted mono-sm">{r.updated_at?.slice(0, 10)}</td>
+                      <td className="muted mono-sm">{toDMY(r.updated_at)}</td>
                       <td><button className="btn btn-accent btn-sm" onClick={() => restore.mutate(r)}>Restore</button></td>
                     </tr>
                   ))}
@@ -80,6 +81,6 @@ function fmt(v) {
   if (v === null || v === undefined || v === "") return "—";
   if (v === true) return "Yes";
   if (v === false) return "No";
-  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v)) return v.slice(0, 10);
+  if (isISODate(v)) return toDMY(v);
   return String(v);
 }

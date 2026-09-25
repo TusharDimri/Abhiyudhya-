@@ -1,6 +1,7 @@
 import { Suspense, lazy } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useAuth } from "./lib/auth";
+import { isSectionHidden } from "./lib/modules";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 
@@ -31,6 +32,14 @@ function Protected({ children }) {
   return children;
 }
 
+// A section hidden from this role (lib/modules.js) is not reachable by URL either.
+function SectionRoute() {
+  const { resource } = useParams();
+  const { user } = useAuth();
+  if (isSectionHidden(user?.role, resource)) return <Navigate to="/app/dashboard" replace />;
+  return <ResourcePage />;
+}
+
 export default function App() {
   const { user, loading } = useAuth();
   return (
@@ -42,7 +51,7 @@ export default function App() {
         <Route path="admin/users" element={<Suspense fallback={<PageFallback />}><AdminUsers /></Suspense>} />
         <Route path="admin/audit" element={<Suspense fallback={<PageFallback />}><AdminAudit /></Suspense>} />
         <Route path="admin/trash" element={<Suspense fallback={<PageFallback />}><AdminTrash /></Suspense>} />
-        <Route path=":resource" element={<Suspense fallback={<PageFallback />}><ResourcePage /></Suspense>} />
+        <Route path=":resource" element={<Suspense fallback={<PageFallback />}><SectionRoute /></Suspense>} />
       </Route>
       <Route path="*" element={<Navigate to="/app/dashboard" replace />} />
     </Routes>

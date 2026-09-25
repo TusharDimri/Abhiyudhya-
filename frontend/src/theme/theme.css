@@ -105,6 +105,18 @@ button { font-family: inherit; }
   box-shadow: 0 0 0 3px rgba(39, 77, 125, .14);
 }
 .hint { font-size: .75rem; color: var(--muted); }
+
+/* DD/MM/YYYY date field: typed box + calendar button over a hidden native picker */
+.date-input { position: relative; display: flex; align-items: center; }
+.date-input > .input { padding-right: 2.2rem; }
+.date-input .date-btn {
+  position: absolute; right: .3rem; border: 0; background: none; cursor: pointer;
+  font-size: 1rem; line-height: 1; padding: .25rem;
+}
+.date-input .date-native {
+  position: absolute; right: 0; bottom: 0; width: 1px; height: 1px;
+  opacity: 0; pointer-events: none; border: 0; padding: 0;
+}
 .field-error { font-size: .75rem; color: var(--danger); }
 
 /* ---------- badges ---------- */

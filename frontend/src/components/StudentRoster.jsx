@@ -3,20 +3,25 @@ import { useQuery } from "@tanstack/react-query";
 import api from "../lib/api";
 import { splitList } from "../lib/fieldOptions";
 
-/* Marks the class present/absent inside the entry that records the class.
+/* Marks the class inside the entry that records it.
 
    The roster is whoever is registered against the lab + class + section(s)
    already chosen higher up the form, so the trainer never picks students by
-   hand. Everyone starts present - marking the two who didn't come is a
-   two-tap job, where marking the thirty who did is not. */
+   hand. Two ways of marking:
+     default          a day's class: everyone starts present - marking the two
+                      who didn't come is a two-tap job
+     mode: "attend"   a visit or lecture: everyone starts not attended, with an
+                      Attend button at the end of each name */
 export default function StudentRoster({ field, values, value, onChange }) {
+  const attendMode = field.mode === "attend";
+  const startsPresent = !attendMode;
   const classGrade = values[field.classField || "class_taught"];
   const sections = splitList(values[field.sectionField || "section_taught"]);
   const labId = values.lab_id;
   const schoolId = values.school_id;
 
   const params = useMemo(() => {
-    const p = new URLSearchParams({ page_size: "200", sort: "roll_number", order: "asc" });
+    const p = new URLSearchParams({ page_size: "200", sort: "roll_number", order: "asc", enrolment_status: "Studying" });
     if (labId) p.set("lab_id", labId);
     else if (schoolId) p.set("school_id", schoolId);
     if (classGrade) p.set("class_grade", classGrade);
@@ -39,16 +44,17 @@ export default function StudentRoster({ field, values, value, onChange }) {
     for (const r of marks) m[String(r.student_id)] = r.present !== false;
     return m;
   }, [marks]);
+  const isPresent = (id) => presentById[String(id)] ?? startsPresent;
 
-  // A student who joins the class after the entry was first opened defaults to
-  // present, like everyone else.
+  // A student who joins the class after the entry was first opened starts
+  // like everyone else did.
   useEffect(() => {
     if (!students.length) return;
     const missing = students.filter((s) => presentById[String(s.id)] === undefined);
     if (!missing.length) return;
     onChange([
       ...marks.filter((r) => students.some((s) => String(s.id) === String(r.student_id))),
-      ...missing.map((s) => ({ student_id: String(s.id), present: true })),
+      ...missing.map((s) => ({ student_id: String(s.id), present: startsPresent })),
     ]);
   }, [students]); // eslint-disable-line
 
@@ -59,9 +65,7 @@ export default function StudentRoster({ field, values, value, onChange }) {
     onChange(
       students.map((s) => ({
         student_id: String(s.id),
-        present: String(s.id) === String(id)
-          ? !(presentById[String(s.id)] ?? true)
-          : presentById[String(s.id)] ?? true,
+        present: String(s.id) === String(id) ? !isPresent(s.id) : isPresent(s.id),
       }))
     );
 
@@ -83,7 +87,45 @@ export default function StudentRoster({ field, values, value, onChange }) {
     );
   }
 
-  const presentCount = students.filter((s) => presentById[String(s.id)] ?? true).length;
+  const presentCount = students.filter((s) => isPresent(s.id)).length;
+
+  if (attendMode) {
+    return (
+      <div className="roster">
+        <div className="roster-head">
+          <span className="roster-count">
+            <b>{presentCount}</b> attended <span className="muted">of {students.length}</span>
+          </span>
+          <div className="roster-actions">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAll(true)}>Mark all attended</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAll(false)}>Clear</button>
+          </div>
+        </div>
+        <ul className="roster-list">
+          {students.map((s) => {
+            const attended = isPresent(s.id);
+            return (
+              <li key={s.id} className={`roster-row attend-row ${attended ? "present" : ""}`}>
+                <span className="roster-name">{s.full_name}</span>
+                <span className="roster-meta">
+                  {[s.roll_number, s.section && `Sec ${s.section}`].filter(Boolean).join(" · ")}
+                </span>
+                <button
+                  type="button"
+                  className={`attend-btn ${attended ? "on" : ""}`}
+                  aria-pressed={attended}
+                  onClick={() => toggle(s.id)}
+                  title={attended ? "Click to undo" : "Mark as attended"}
+                >
+                  {attended ? "✓ Attended" : "Attend"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    );
+  }
 
   return (
     <div className="roster">
@@ -99,7 +141,7 @@ export default function StudentRoster({ field, values, value, onChange }) {
       </div>
       <ul className="roster-list">
         {students.map((s) => {
-          const present = presentById[String(s.id)] ?? true;
+          const present = isPresent(s.id);
           return (
             <li key={s.id}>
               <button

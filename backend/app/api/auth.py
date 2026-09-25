@@ -12,6 +12,7 @@ from app.rbac import login_required, current_user
 from app.rbac.roles import ROLE_LABELS, Role
 from app.services import audit
 from app.utils.security import validate_password
+from app.services.cache import cached_json
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
@@ -69,6 +70,7 @@ def refresh():
 
 @bp.get("/me")
 @login_required
+@cached_json("me", ttl=300)
 def me():
     user = current_user()
     org = None

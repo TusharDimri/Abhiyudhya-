@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { AuthProvider } from "./lib/auth";
 import { ToastProvider } from "./lib/toast";
+import { LocationProvider } from "./lib/location";
 import "./theme/theme.css";
 import "./theme/layout.css";
 
@@ -18,7 +19,9 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <BrowserRouter>
         <ToastProvider>
           <AuthProvider>
-            <App />
+            <LocationProvider>
+              <App />
+            </LocationProvider>
           </AuthProvider>
         </ToastProvider>
       </BrowserRouter>

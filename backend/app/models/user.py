@@ -34,17 +34,8 @@ class User(BaseModel):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(4), nullable=False, index=True)  # Role enum value
 
-    # Direct single-value scopes (used by PR/VT/ST)
+    # Direct single-value scope (used by PR/VT)
     school_id = db.Column(GUID(), db.ForeignKey("school.id"), index=True)
-    # Back-edge of a cycle (app_user -> school -> principal -> app_user and
-    # app_user <-> student). use_alter adds these constraints after the tables
-    # exist, so the tables have a valid creation order on a database that
-    # enforces one - and metadata sorting stops warning about cycles.
-    student_id = db.Column(
-        GUID(),
-        db.ForeignKey("student.id", use_alter=True, name="fk_app_user_student_id_student"),
-        index=True,
-    )
 
     last_login_at = db.Column(db.DateTime)
     must_change_password = db.Column(db.Boolean, default=False)
@@ -74,7 +65,6 @@ class User(BaseModel):
             "district_ids": [d.id for d in self.districts],
             "school_id": self.school_id,
             "lab_ids": [l.id for l in self.labs],
-            "student_id": self.student_id,
         }
 
     def public_dict(self):
@@ -86,7 +76,6 @@ class User(BaseModel):
             "role": self.role,
             "organisation_id": str(self.organisation_id) if self.organisation_id else None,
             "school_id": str(self.school_id) if self.school_id else None,
-            "student_id": str(self.student_id) if self.student_id else None,
             "district_ids": [str(d.id) for d in self.districts],
             "lab_ids": [str(l.id) for l in self.labs],
             "must_change_password": self.must_change_password,

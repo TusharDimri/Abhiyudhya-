@@ -50,10 +50,13 @@ class Student(BaseModel):
     verified_on = db.Column(db.DateTime)
     verification_remarks = db.Column(db.Text)
 
-    user_id = db.Column(  # internship login
-        GUID(),
-        db.ForeignKey("app_user.id", use_alter=True, name="fk_student_user_id_app_user"),
-    )
+    # Where the student is now: studying, finished the course, or left.
+    # Changed by promotion (Completed) or the Change Status action - never
+    # by editing the record (api/promotion.py).
+    enrolment_status = db.Column(db.String(20), default="Studying", server_default="Studying",
+                                 nullable=False, index=True)
+    left_on = db.Column(db.Date)
+    left_reason = db.Column(db.Text)
 
     school = db.relationship("School", lazy="joined")
 
@@ -81,3 +84,18 @@ class Assessment(BaseModel):
     certificate_number = db.Column(db.String(80))
     remarks = db.Column(db.Text)
     evidence_url = db.Column(db.String(500))
+
+
+class StudentPromotion(BaseModel):
+    """One student's end-of-year outcome: moved up a class, held back to
+    repeat it, or completed the course. The history behind their current
+    class and year."""
+    __tablename__ = "student_promotion"
+    organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
+    student_id = db.Column(GUID(), db.ForeignKey("student.id"), nullable=False, index=True)
+    from_academic_year = db.Column(db.String(20), nullable=False)
+    to_academic_year = db.Column(db.String(20))
+    from_class = db.Column(db.String(5), nullable=False)
+    to_class = db.Column(db.String(5))  # none when the course is completed
+    section = db.Column(db.String(10))
+    outcome = db.Column(db.String(20), nullable=False)  # Promoted / Held Back / Completed

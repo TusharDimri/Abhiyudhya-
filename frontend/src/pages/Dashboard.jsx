@@ -6,6 +6,7 @@ import { useAuth } from "../lib/auth";
 import { useBootstrap } from "../hooks/useBootstrap";
 import { BarCard, StatusPie, TrendCard } from "../components/Charts";
 import DateRange from "../components/DateRange";
+import { isoDaysAgo } from "../lib/dates";
 import { cardHref, QUICK_ACTIONS, DASHBOARD_SUBTITLE } from "../lib/roleUi";
 
 const ICONS = {
@@ -27,8 +28,7 @@ const ROLE_CHARTS = {
   OA: ["trend", "activity", "verification", "endorsement", "school"],
   DM: ["trend", "activity", "verification", "school"],
   PR: ["trend", "activity", "endorsement"],
-  VT: ["trend", "activity", "verification"],
-  ST: ["trend"],
+  VT: ["trend", "verification"],
 };
 
 export default function Dashboard() {
@@ -39,8 +39,7 @@ export default function Dashboard() {
   const [org, setOrg] = useState("");
   const [preset, setPreset] = useState("90d");
   const [range, setRange] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 90);
-    return { from: d.toISOString().slice(0, 10), to: "" };
+    return { from: isoDaysAgo(90), to: "" };
   });
 
   const qs = useMemo(() => {
@@ -54,11 +53,8 @@ export default function Dashboard() {
   const use = (name, url) =>
     useQuery({ queryKey: ["dashboard", name, qs], queryFn: async () => (await api.get(url)).data });
 
-  // the metric each role actually generates - a student never sees
-  // attendance (rbac/scope.py), so their trend is their own diary
-  const trendMetric = user?.role === "ST" ? "diaries" : "attendance";
   const summary = use("summary", `/dashboard/summary?${qs}`);
-  const trend = use("trend", `/dashboard/timeseries?metric=${trendMetric}&${qs}`);
+  const trend = use("trend", `/dashboard/timeseries?metric=attendance&${qs}`);
   const byAct = use("activity", `/dashboard/attendance-by-activity?${qs}`);
   const bySchool = use("school", `/dashboard/students-by-school?${qs}`);
   const byVerif = use("verification", `/dashboard/students-by-verification?${qs}`);
@@ -136,7 +132,7 @@ export default function Dashboard() {
       <div className="chart-grid">
         {show("trend") && (
           <TrendCard
-            title={trendMetric === "diaries" ? "Your diary entries over time" : "Attendance entries over time"}
+            title="Attendance entries over time"
             subtitle="Daily entries in the selected period"
             data={trend.data?.data}
           />

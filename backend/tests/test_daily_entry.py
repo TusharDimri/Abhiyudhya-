@@ -5,7 +5,7 @@ tests pin the two halves of that - the branch fields actually persist, and the
 rules behind the dropdowns are enforced server-side, not just in the UI.
 """
 import os
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -121,151 +121,131 @@ def test_bootstrap_ships_lab_sections_and_enums(client, world):
 
 
 # --------------------------------------------------------------- attendance
-def test_teaching_entry_saves_curriculum_and_marks_the_class(client, world):
-    h = _login(client)
-    ids = [str(s.id) for s in world["students"]]
-    r = client.post("/api/attendance", headers=h, json={
-        "date": "2025-07-01", "day_type": "Working day",
-        "school_id": str(world["school"].id), "lab_id": str(world["lab"].id),
-        "job_role_id": str(world["jr_low"].id), "academic_year": "2025-26",
-        "activity_type": "Teaching Vocational Education",
-        "class_taught": "9", "section_taught": "A,B",
-        "theory_or_practical": "Practical", "class_type": "regular", "duration_mins": 45,
-        "module_id": str(world["module"].id), "unit_id": str(world["unit"].id),
-        "student_marks": [
-            {"student_id": ids[0], "present": True},
-            {"student_id": ids[1], "present": False},
-            {"student_id": ids[2], "present": True},
-        ],
-    })
+# The trainer's own daily attendance and their class attendance are both
+# marked at the school: the sealed location must be within 1 km of it.
+MUMBAI = {"lat": 19.0760, "lng": 72.8777}          # ~120 km from the school
+NEARBY = {"lat": 18.5276, "lng": 73.8567}          # ~800 m north of it
+
+
+def _school_located(world):
+    from app.models.geo import point_wkt
+    world["school"].location = point_wkt(18.5204, 73.8567)   # PUNE, as sealed by _save
+    db.session.commit()
+
+
+def _vt_attendance(**extra):
+    return {"lab_id": None, "date": date.today().isoformat(), "attendance_time": "09:05",
+            "details": "Reached early", **extra}
+
+
+def _day(world, **extra):
+    return _vt_attendance(lab_id=str(world["lab"].id), **extra)
+
+
+def test_trainer_marks_attendance_at_the_school(client, world):
+    _school_located(world)
+    r = _save(client, "/api/attendance", _day(world))
     assert r.status_code == 201, r.get_json()
     body = r.get_json()
-    assert len(body["student_marks"]) == 3
-    assert sum(1 for m in body["student_marks"] if m["present"]) == 2
-
-    # re-saving is the full truth for that day: a removed student leaves
-    got = client.put(f"/api/attendance/{body['id']}", headers=h, json={
-        "student_marks": [{"student_id": ids[0], "present": False}],
-    })
-    assert got.status_code == 200
-    assert got.get_json()["student_marks"] == [{"student_id": ids[0], "present": False}]
-    assert db.session.query(AttendanceStudentMark).filter_by(is_deleted=False).count() == 1
+    assert body["attendance_time"] == "09:05:00"
+    assert body["distance_from_school_m"] == 0
+    assert body["trainer_name"] == "VT"
+    assert body["endorsement_status"] == "submitted"   # the Principal endorses it next
+    assert body["school_id"] == str(world["school"].id)
 
 
-@pytest.mark.parametrize("activity,payload,check", [
-    ("Visit to Industry",
-     {"industry_name": "Tata", "industry_contact_person": "R", "industry_contact_phone": "9000000000"},
-     "industry_name"),
-    ("Visit to Educational Institution",
-     {"institute_name": "IIT", "institute_contact_person": "P", "institute_contact_phone": "9000000001"},
-     "institute_name"),
-    ("On-Job Training Coordination", {"ojt_activity_type": "Orientation of Students"}, "ojt_activity_type"),
-    ("Parent Teachers Meeting", {"parents_count": 22}, "parents_count"),
-    ("Community Home Visit", {"parents_count": 4}, "parents_count"),
-    ("Teaching Non-Vocational Subject",
-     {"other_class_details": "Maths cover", "other_class_duration_mins": 40}, "other_class_details"),
-    ("Assignment from Vocational Department",
-     {"assignment_number": "A-12", "assignment_photo_url": "s3://x.jpg"}, "assignment_number"),
-    ("Assessor in Other School",
-     {"assessor_school_name": "Other Sch", "assessor_udise": "U9", "assessor_class": "10",
-      "boys_present": 15, "girls_present": 18}, "assessor_udise"),
-    ("Training of Teacher/Trainer", {"training_type": "VTP Training Programme"}, "training_type"),
-    ("Guidance & Counselling", {"students_count": 30}, "students_count"),
+def test_within_a_kilometre_is_fine(client, world):
+    _school_located(world)
+    r = _save(client, "/api/attendance", _day(world), **NEARBY)
+    assert r.status_code == 201, r.get_json()
+    assert 700 < r.get_json()["distance_from_school_m"] < 900
+
+
+def test_too_far_from_the_school_is_refused(client, world):
+    _school_located(world)
+    r = _save(client, "/api/attendance", _day(world), **MUMBAI)
+    assert r.status_code == 400
+    assert "within 1.0 km" in r.get_json()["message"]
+
+
+def test_school_must_have_a_location(client, world):
+    r = _save(client, "/api/attendance", _day(world))
+    assert r.status_code == 400
+    assert "location hasn't been set up" in r.get_json()["message"]
+
+
+def test_attendance_once_a_day_and_only_for_today(client, world):
+    _school_located(world)
+    assert _save(client, "/api/attendance", _day(world)).status_code == 201
+    again = _save(client, "/api/attendance", _day(world))
+    assert again.status_code == 400
+    assert "already marked" in again.get_json()["message"]
+    old = _save(client, "/api/attendance", _day(world, date="2026-01-05"))
+    assert old.status_code == 400
+    assert "only be marked for today" in old.get_json()["message"]
+
+
+def test_attendance_needs_a_location(client, world):
+    _school_located(world)
+    r = _save(client, "/api/attendance", _day(world), fix=None)
+    assert r.status_code == 400
+    assert "Detect My Location" in r.get_json()["message"]
+
+
+# --------------------------------------------------------- class attendance
+def _class(world, **extra):
+    return {"lab_id": str(world["lab"].id), "date": date.today().isoformat(), "time": "11:30",
+            "class_grade": "9", "sections": "A,B", "activity": "Practical: typing speed drill",
+            "comment": "Two computers down", **extra}
+
+
+def test_class_attendance_with_students(client, world):
+    _school_located(world)
+    a, b, c = (str(s.id) for s in world["students"])
+    marks = [{"student_id": a, "present": True}, {"student_id": b, "present": True},
+             {"student_id": c, "present": False}]
+    r = _save(client, "/api/class-attendance", _class(world, student_marks=marks))
+    assert r.status_code == 201, r.get_json()
+    body = r.get_json()
+    assert body["attended"] == "2 of 3"
+    assert body["job_role_id"] == str(world["jr_low"].id)   # follows the class
+    assert body["distance_from_school_m"] == 0
+    assert body["time"] == "11:30:00"
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"activity": " "}, "activity"),
+    ({"class_grade": None}, "class"),
 ])
-def test_every_activity_branch_persists_its_own_fields(client, world, activity, payload, check):
-    h = _login(client)
-    r = client.post("/api/attendance", headers=h, json={
-        "date": "2025-07-02", "day_type": "Working day",
-        "school_id": str(world["school"].id), "lab_id": str(world["lab"].id),
-        "job_role_id": str(world["jr_low"].id), "activity_type": activity,
-        "details": "narrative", **payload,
-    })
-    assert r.status_code == 201, r.get_json()
-    body = r.get_json()
-    assert body[check] == payload[check]
-    assert body["details"] == "narrative"
-
-
-def test_leave_day_keeps_its_school_and_lab(client, world):
-    """A leave day is still the trainer's day: blanking school/lab would push
-    the record outside their own scope and the save would be refused."""
-    h = _login(client)
-    r = client.post("/api/attendance", headers=h, json={
-        "date": "2025-07-05", "day_type": "On leave", "leave_reason": "Medical",
-        "school_id": str(world["school"].id), "lab_id": str(world["lab"].id),
-        "activity_type": None, "class_taught": None,
-    })
-    assert r.status_code == 201, r.get_json()
-    body = r.get_json()
-    assert body["leave_reason"] == "Medical"
-    assert body["lab_id"] == str(world["lab"].id)
-    assert body["activity_type"] is None
-
-    # and it comes back in the trainer's own list
-    listed = client.get("/api/attendance?day_type=On leave", headers=h).get_json()
-    assert listed["pagination"]["total"] == 1
-
-
-def test_switching_activity_clears_the_previous_branch(client, world):
-    """Re-saving a day as a different activity must not leave the old
-    branch's answers behind on the record."""
-    h = _login(client)
-    created = client.post("/api/attendance", headers=h, json={
-        "date": "2025-07-06", "day_type": "Working day",
-        "school_id": str(world["school"].id), "lab_id": str(world["lab"].id),
-        "job_role_id": str(world["jr_low"].id),
-        "activity_type": "Visit to Industry", "industry_name": "Tata",
-    }).get_json()
-    assert created["industry_name"] == "Tata"
-
-    # the form sends every field it is no longer showing as null
-    updated = client.put(f"/api/attendance/{created['id']}", headers=h, json={
-        "activity_type": "Parent Teachers Meeting", "parents_count": 12,
-        "industry_name": None, "industry_contact_person": None, "industry_contact_phone": None,
-    }).get_json()
-    assert updated["parents_count"] == 12
-    assert updated["industry_name"] is None
-
-
-def test_trainer_cannot_log_a_class_their_lab_does_not_teach(client, world):
-    h = _login(client)
-    r = client.post("/api/attendance", headers=h, json={
-        "date": "2025-07-03", "day_type": "Working day",
-        "school_id": str(world["school"].id), "lab_id": str(world["lab"].id),
-        "job_role_id": str(world["jr_low"].id),
-        "activity_type": "Teaching Vocational Education",
-        "class_taught": "11",  # 11 belongs to the other job-role slot
-    })
+def test_class_attendance_required_answers(client, world, change, message):
+    _school_located(world)
+    r = _save(client, "/api/class-attendance", _class(world, **change))
     assert r.status_code == 400
-    assert "not taught" in r.get_json()["message"]
+    assert message in r.get_json()["message"]
 
 
-# ------------------------------------------------------------------- issues
-def test_sub_issue_must_belong_to_its_main_issue(client, world):
-    h = _login(client)
-    bad = client.post("/api/issues", headers=h, json={
-        "reporting_date": "2025-07-04", "lab_id": str(world["lab"].id),
-        "main_issue": "Lab-Room/Infrastructure", "sub_issue": "VT Salary",
-    })
-    assert bad.status_code == 400
-    assert "not a sub-issue" in bad.get_json()["message"]
-
-    ok = client.post("/api/issues", headers=h, json={
-        "reporting_date": "2025-07-04", "lab_id": str(world["lab"].id),
-        "main_issue": "Lab-Room/Infrastructure", "sub_issue": "Room Not Allotted",
-        "students_affected": "all",
-    })
-    assert ok.status_code == 201, ok.get_json()
-
-
-def test_some_students_affected_needs_a_number(client, world):
-    h = _login(client)
-    r = client.post("/api/issues", headers=h, json={
-        "reporting_date": "2025-07-04", "lab_id": str(world["lab"].id),
-        "main_issue": "Other", "sub_issue": "Other", "students_affected": "some",
-    })
+def test_class_attendance_too_far_is_refused(client, world):
+    _school_located(world)
+    r = _save(client, "/api/class-attendance", _class(world), **MUMBAI)
     assert r.status_code == 400
-    assert "how many" in r.get_json()["message"]
+    assert "within 1.0 km" in r.get_json()["message"]
+
+
+# ---------------------------------------------------------- school location
+def test_admin_sets_a_schools_location(client, world):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    h = _login(client, email="oa@x.com")
+    url = f"/api/schools/{world['school'].id}"
+    r = client.patch(url, headers=h, json={"location_lat": 18.5204, "location_lng": 73.8567})
+    assert r.status_code == 200, r.get_json()
+    assert (r.get_json()["location_lat"], r.get_json()["location_lng"]) == (18.5204, 73.8567)
+    assert client.patch(url, headers=h, json={"location_lat": 123, "location_lng": 73}).status_code == 400
+    # an edit that doesn't mention the location leaves it alone
+    r = client.patch(url, headers=h, json={"phone": "020-1234"})
+    assert r.get_json()["location_lat"] == 18.5204
 
 
 # ------------------------------------------------------------- students etc.
@@ -277,6 +257,34 @@ def test_registration_is_class_9_or_11_only(client, world):
     })
     assert r.status_code == 400
     assert "Class 9 or Class 11" in r.get_json()["message"]
+
+
+def _new_student(world):
+    return {
+        "school_id": str(world["school"].id), "lab_id": str(world["lab"].id),
+        "class_grade": "9", "section": "A", "first_name": "New", "last_name": "Kid",
+    }
+
+
+def test_trainer_adds_students(client, world):
+    r = client.post("/api/students", headers=_login(client), json=_new_student(world))
+    assert r.status_code == 201, r.get_json()
+
+
+# One login per test: the fixture's app context outlives each request, so the
+# user cached on `g` would otherwise carry over from one login to the next.
+@pytest.mark.parametrize("role", ["OA", "DM", "PR"])
+def test_other_roles_only_view_students(client, world, role):
+    """Students are registered by their trainer; other roles only view them."""
+    u = User(organisation_id=world["org"].id, full_name=role, email=f"{role.lower()}@x.com",
+             role=role, school_id=world["school"].id)
+    u.set_password("Password@123")
+    db.session.add(u)
+    db.session.commit()
+
+    h = _login(client, email=f"{role.lower()}@x.com")
+    assert client.post("/api/students", headers=h, json=_new_student(world)).status_code == 403
+    assert client.get("/api/students", headers=h).status_code == 200
 
 
 def test_roster_filter_accepts_several_sections(client, world):
@@ -330,3 +338,465 @@ def test_lab_slot_rejects_a_job_role_from_the_wrong_band(client, world):
     })
     assert r.status_code == 400
     assert "cannot fill the 9-10 slot" in r.get_json()["message"]
+
+
+# ------------------------------------------------------------- lab equipment
+def _other_trainer(world):
+    t = Trainer(organisation_id=world["org"].id, full_name="Someone Else",
+                school_id=world["school"].id, lab_id=world["lab"].id)
+    db.session.add(t)
+    db.session.commit()
+    return t
+
+
+def _equipment(world, **extra):
+    return {"lab_id": str(world["lab"].id), "name": "Desktop computer",
+            "receipt_date": date.today().isoformat(), **extra}
+
+
+def test_trainer_owns_the_equipment_they_add(client, world):
+    other = _other_trainer(world)
+    h = _login(client)
+    # even if another trainer is sent, a trainer's equipment is their own
+    r = client.post("/api/equipment", headers=h, json=_equipment(world, trainer_id=str(other.id)))
+    assert r.status_code == 201, r.get_json()
+    body = r.get_json()
+    assert body["trainer_name"] == "VT"
+    assert body["school_id"] == str(world["school"].id)  # follows the lab
+    assert body["lab_name"] == world["lab"].name
+
+
+def test_trainer_cannot_reassign_equipment(client, world):
+    other = _other_trainer(world)
+    h = _login(client)
+    eq = client.post("/api/equipment", headers=h, json=_equipment(world)).get_json()
+    r = client.patch(f"/api/equipment/{eq['id']}", headers=h, json={"trainer_id": str(other.id)})
+    assert r.status_code == 400
+    assert "Principal" in r.get_json()["message"]
+    # other edits are fine
+    r = client.patch(f"/api/equipment/{eq['id']}", headers=h, json={"note": "Kept in cupboard 2"})
+    assert r.status_code == 200, r.get_json()
+
+
+def test_equipment_needs_a_name_and_a_past_date(client, world):
+    h = _login(client)
+    assert client.post("/api/equipment", headers=h, json=_equipment(world, name="  ")).status_code == 400
+    future = (date.today() + timedelta(days=5)).isoformat()
+    r = client.post("/api/equipment", headers=h, json=_equipment(world, receipt_date=future))
+    assert r.status_code == 400
+    assert "future" in r.get_json()["message"]
+
+
+def test_maintenance_log_entry(client, world):
+    h = _login(client)
+    eq = client.post("/api/equipment", headers=h, json=_equipment(world)).get_json()
+    entry = {"equipment_id": eq["id"], "date": date.today().isoformat(),
+             "issue": "Screen flickers", "maintenance_status": "Reported", "note": "Reported to vendor"}
+    r = client.post("/api/equipment-maintenance", headers=h, json=entry)
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["equipment_name"] == "Desktop computer"
+
+    bad = client.post("/api/equipment-maintenance", headers=h, json={**entry, "maintenance_status": "lost"})
+    assert bad.status_code == 400
+    future = (date.today() + timedelta(days=5)).isoformat()
+    assert client.post("/api/equipment-maintenance", headers=h, json={**entry, "date": future}).status_code == 400
+
+
+# -------------------------------------------------------- location (sealed)
+PUNE = {"lat": 18.5204, "lng": 73.8567, "accuracy": 12.5, "captured_at": "2026-09-25T09:30:00Z"}
+
+
+def _sealed(client, h, **where):
+    """A fix as the browser gets it: detected, then sealed by the server."""
+    r = client.post("/api/location/seal", headers=h, json={**PUNE, **where})
+    assert r.status_code == 200, r.get_json()
+    return r.get_json()
+
+
+def _save(client, url, body, fix="seal", **where):
+    """Post a form the way a trainer's browser does, with the sealed fix."""
+    h = _login(client)
+    if fix == "seal":
+        fix = _sealed(client, h, **where)
+    return client.post(url, headers=h, json={**body, **({"location_fix": fix} if fix else {})})
+
+
+def test_seal_refuses_nonsense(client, world):
+    h = _login(client)
+    for bad in ({"lat": 95}, {"lng": "east"}, {"accuracy": -3}):
+        r = client.post("/api/location/seal", headers=h, json={**PUNE, **bad})
+        assert r.status_code == 400, bad
+
+
+# ------------------------------------------------------------ guest lectures
+def _lecture(world, **extra):
+    return {"lab_id": str(world["lab"].id), "job_role_id": str(world["jr_low"].id),
+            "class_grade": "9", "sections": "A,B", "reporting_date": date.today().isoformat(),
+            "lecturer_name": "Dr. Meera Rao", "lecturer_qualification": "M.Tech",
+            "lecturer_email": "meera@example.com", "lecturer_phone": "9800000000",
+            "lecturer_experience": "8 years", "topic": "Networking basics", **extra}
+
+
+def test_guest_lecture_with_only_the_simple_fields(client, world):
+    r = _save(client, "/api/guest-lectures", _lecture(world))
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["school_id"] == str(world["school"].id)  # follows the lab
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"lecturer_name": ""}, "lecturer's name"),
+    ({"topic": " "}, "topic"),
+    ({"class_grade": None}, "class"),
+])
+def test_guest_lecture_required_answers(client, world, change, message):
+    r = _save(client, "/api/guest-lectures", _lecture(world, **change))
+    assert r.status_code == 400
+    assert message in r.get_json()["message"]
+
+
+def test_guest_lecture_cannot_be_dated_in_the_future(client, world):
+    future = (date.today() + timedelta(days=5)).isoformat()
+    r = _save(client, "/api/guest-lectures", _lecture(world, reporting_date=future))
+    assert r.status_code == 400
+
+
+def test_guest_lecture_records_where_it_was_logged(client, world):
+    from sqlalchemy import text
+    r = _save(client, "/api/guest-lectures", _lecture(world))
+    assert r.status_code == 201, r.get_json()
+    body = r.get_json()
+    assert (body["location_lat"], body["location_lng"]) == (18.5204, 73.8567)
+    assert body["location_accuracy_m"] == 12.5
+    assert body["location_captured_at"].startswith("2026-09-25T09:30")
+    # it is a real geographic point: PostGIS measures from it in metres
+    metres = db.session.execute(text(
+        "SELECT ST_Distance(location, ST_MakePoint(73.8567, 18.5304)::geography) "
+        "FROM guest_lecture WHERE id = :id"), {"id": body["id"]}).scalar()
+    assert 1100 < metres < 1120  # 0.01 degree of latitude is ~1.1 km
+
+
+def test_trainer_must_share_location(client, world):
+    r = _save(client, "/api/guest-lectures", _lecture(world), fix=None)
+    assert r.status_code == 400
+    assert "Detect My Location" in r.get_json()["message"]
+
+
+@pytest.mark.parametrize("edit", [
+    {"lat": 19.0760},                            # moved to Mumbai in dev tools
+    {"accuracy": 3.0},                           # made to look more precise
+    {"issued_at": "2099-01-01T00:00:00+00:00"},  # kept "fresh" forever
+    {"sig": "0" * 64},
+])
+def test_an_edited_location_is_refused(client, world, edit):
+    h = _login(client)
+    fix = {**_sealed(client, h), **edit}
+    r = client.post("/api/guest-lectures", headers=h, json={**_lecture(world), "location_fix": fix})
+    assert r.status_code == 400
+    assert "couldn't be verified" in r.get_json()["message"]
+
+
+def test_someone_elses_location_is_refused(client, world, app):
+    from app.services.location_seal import seal
+    other = User(organisation_id=world["org"].id, full_name="Other", email="other@x.com", role="VT")
+    other.set_password("Password@123")
+    db.session.add(other)
+    db.session.commit()
+    with app.test_request_context():
+        fix = seal(other.id, 18.5204, 73.8567, 12.5)
+    r = _save(client, "/api/guest-lectures", _lecture(world), fix=fix)
+    assert r.status_code == 400
+
+
+def test_a_stale_location_is_refused(client, world, app, monkeypatch):
+    from datetime import datetime, timezone
+    from app.services import location_seal
+    vt = db.session.query(User).filter_by(email="vt@x.com").one()
+    long_ago = datetime(2026, 1, 1, 9, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(location_seal, "_now", lambda: long_ago)
+    with app.test_request_context():
+        fix = location_seal.seal(vt.id, 18.5204, 73.8567, 12.5)
+    monkeypatch.undo()
+    r = _save(client, "/api/guest-lectures", _lecture(world), fix=fix)
+    assert r.status_code == 400
+    assert "out of date" in r.get_json()["message"]
+
+
+# -------------------------------------------------------------- field visits
+def _visit(world, **extra):
+    return {"lab_id": str(world["lab"].id), "job_role_id": str(world["jr_low"].id),
+            "class_grade": "9", "sections": "A", "reporting_date": date.today().isoformat(),
+            "organisation_name": "Tata Motors", "address": "Pimpri, Pune",
+            "activities": "Assembly line walkthrough", "purpose": "See industrial automation",
+            "contact_person": "R. Kulkarni", "contact_designation": "HR Manager",
+            "contact_email": "hr@example.com", "contact_mobile": "9811111111", **extra}
+
+
+def test_field_visit_with_only_the_simple_fields(client, world):
+    r = _save(client, "/api/field-visits", _visit(world), lat=18.6298, lng=73.7997, accuracy=20)
+    assert r.status_code == 201, r.get_json()
+    body = r.get_json()
+    assert body["school_id"] == str(world["school"].id)  # follows the lab
+    assert (body["location_lat"], body["location_lng"]) == (18.6298, 73.7997)
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"organisation_name": "", "address": ""}, "organisation"),
+    ({"job_role_id": None}, "job role"),
+    ({"class_grade": None}, "class"),
+])
+def test_field_visit_required_answers(client, world, change, message):
+    r = _save(client, "/api/field-visits", _visit(world, **change))
+    assert r.status_code == 400
+    assert message in r.get_json()["message"]
+
+
+def test_field_visit_needs_a_location(client, world):
+    r = _save(client, "/api/field-visits", _visit(world), fix=None)
+    assert r.status_code == 400
+    assert "Detect My Location" in r.get_json()["message"]
+
+
+def test_field_visit_class_must_match_the_job_role(client, world):
+    ok = _save(client, "/api/field-visits", _visit(world, job_role_id=str(world["jr_high"].id), class_grade="11"))
+    assert ok.status_code == 201, ok.get_json()
+    bad = _save(client, "/api/field-visits", _visit(world, class_grade="11"))
+    assert bad.status_code == 400
+    assert "not taught under this job role" in bad.get_json()["message"]
+
+
+# ------------------------------------------------- who attended (Attend button)
+@pytest.mark.parametrize("url, body", [("/api/guest-lectures", _lecture), ("/api/field-visits", _visit)])
+def test_attendance_is_saved_and_read_back(client, world, url, body):
+    a, b, c = (str(s.id) for s in world["students"])
+    marks = [{"student_id": a, "present": True}, {"student_id": b, "present": False},
+             {"student_id": c, "present": True}]
+    r = _save(client, url, body(world, sections="A,B", student_marks=marks))
+    assert r.status_code == 201, r.get_json()
+    got = client.get(f"{url}/{r.get_json()['id']}", headers=_login(client)).get_json()
+    attended = {m["student_id"] for m in got["student_marks"] if m["present"]}
+    assert attended == {a, c}
+
+
+@pytest.mark.parametrize("url, body", [("/api/guest-lectures", _lecture), ("/api/field-visits", _visit)])
+def test_attendance_cannot_name_someone_elses_student(client, world, url, body):
+    # same school, but not in this trainer's lab
+    stranger = Student(organisation_id=world["org"].id, school_id=world["school"].id,
+                       first_name="Not", last_name="Yours", class_grade="9")
+    db.session.add(stranger)
+    db.session.commit()
+    marks = [{"student_id": str(stranger.id), "present": True}]
+    r = _save(client, url, body(world, student_marks=marks))
+    assert r.status_code == 400
+    assert "outside your classes" in r.get_json()["message"]
+
+
+# -------------------------------------------------------------------- issues
+def _issue(world, **extra):
+    return {"lab_id": str(world["lab"].id), "reporting_date": date.today().isoformat(),
+            "reporting_time": "10:45", "details": "Two computers won't start", **extra}
+
+
+def test_issue_with_date_time_location_and_text(client, world, app):
+    r = _save(client, "/api/issues", _issue(world))
+    assert r.status_code == 201, r.get_json()
+    body = r.get_json()
+    assert body["reporting_time"] == "10:45:00"
+    assert (body["location_lat"], body["location_lng"]) == (18.5204, 73.8567)
+    assert body["workflow_status"] == "open"
+    # filed as the trainer themselves
+    tr = db.session.query(Trainer).filter_by(full_name="VT").one()
+    assert body["trainer_id"] == str(tr.id)
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"details": "  "}, "Describe the issue"),
+    ({"reporting_date": (date.today() + timedelta(days=5)).isoformat()}, "future"),
+])
+def test_issue_required_answers(client, world, change, message):
+    r = _save(client, "/api/issues", _issue(world, **change))
+    assert r.status_code == 400
+    assert message in r.get_json()["message"]
+
+
+def test_issue_needs_a_location(client, world):
+    r = _save(client, "/api/issues", _issue(world), fix=None)
+    assert r.status_code == 400
+    assert "Detect My Location" in r.get_json()["message"]
+
+
+# ------------------------------------------- academic year + yearly targets
+@pytest.mark.parametrize("on, year", [
+    ("2024-08-01", "Custom 2024"),   # inside a year the organisation set up
+    ("2025-09-10", "2025-26"),       # none set up: June-May school year
+    ("2026-02-10", "2025-26"),
+    ("2026-06-01", "2026-27"),
+])
+def test_year_follows_the_date(client, world, on, year):
+    db.session.add(AcademicYear(organisation_id=world["org"].id, label="Custom 2024",
+                                start_date=date(2024, 1, 1), end_date=date(2024, 12, 31)))
+    db.session.commit()
+    # even a client that sends the "current" year gets the date's own year
+    r = _save(client, "/api/guest-lectures", _lecture(world, reporting_date=on, academic_year="2025-26"))
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["academic_year"] == year
+
+
+def test_field_visit_targets_per_level(client, world):
+    for cls, when in (("9", "2025-08-01"), ("9", "2025-11-12"), ("10", "2025-12-01")):
+        r = _save(client, "/api/field-visits", _visit(world, class_grade=cls, reporting_date=when))
+        assert r.status_code == 201, r.get_json()
+    h = _login(client)
+
+    body = client.get("/api/targets/field-visits?academic_year=2025-26", headers=h).get_json()
+    assert body["target"] == 2
+    by_class = {row["class_grade"]: row for row in body["rows"]}
+    assert set(by_class) == {"9", "10", "11", "12"}   # the lab runs both slots
+    assert (by_class["9"]["count"], by_class["9"]["met"], by_class["9"]["level"]) == (2, True, 1)
+    assert (by_class["10"]["count"], by_class["10"]["remaining"]) == (1, 1)
+    assert by_class["11"]["count"] == 0
+
+    met = client.get("/api/targets/field-visits?academic_year=2025-26&status=met", headers=h).get_json()
+    assert [row["class_grade"] for row in met["rows"]] == ["9"]
+    not_met = client.get("/api/targets/field-visits?academic_year=2025-26&status=not_met", headers=h).get_json()
+    assert sorted(row["class_grade"] for row in not_met["rows"]) == ["10", "11", "12"]
+    # another year starts from nothing
+    other = client.get("/api/targets/field-visits?academic_year=2024-25", headers=h).get_json()
+    assert all(row["count"] == 0 for row in other["rows"])
+
+
+def test_guest_lecture_target_is_fifteen(client, world):
+    body = client.get("/api/targets/guest-lectures", headers=_login(client)).get_json()
+    assert body["target"] == 15
+    assert body["academic_year"] == body["current_year"]
+    assert "2025-26" in body["years"]
+
+
+# ------------------------------------------------------ promotion + status
+def _class_of(world, year="2024-25", grade="9", verified=(True, True, True)):
+    for s, v in zip(world["students"], verified):
+        s.academic_year, s.class_grade = year, grade
+        s.verification_status = "verified" if v else "pending"
+    db.session.commit()
+    return [str(s.id) for s in world["students"]]
+
+
+def test_promotion_preview(client, world):
+    a, b, c = _class_of(world, verified=(True, True, False))
+    body = client.get("/api/promotion/preview?from_year=2024-25&class_grade=9", headers=_login(client)).get_json()
+    assert body["ended"] and body["to_year"] == "2025-26"
+    rows = {r["id"]: r for r in body["students"]}
+    assert rows[a]["to_class"] == "10" and rows[a]["eligible"]
+    assert not rows[c]["eligible"] and "Verify" in rows[c]["reason"]
+
+
+def test_promote_and_hold_back(client, world):
+    from app.models.student import StudentPromotion
+    a, b, c = _class_of(world)
+    r = client.post("/api/promotion", headers=_login(client), json={
+        "from_year": "2024-25", "class_grade": "9", "promote": [a, b], "hold_back": [c]})
+    assert r.status_code == 200, r.get_json()
+    assert (r.get_json()["promoted"], r.get_json()["held_back"]) == (2, 1)
+    s_a, s_c = (db.session.get(Student, x) for x in (a, c))
+    assert (s_a.class_grade, s_a.academic_year) == ("10", "2025-26")
+    assert (s_c.class_grade, s_c.academic_year) == ("9", "2025-26")      # repeats Class 9
+    outcomes = {str(p.student_id): p.outcome for p in db.session.query(StudentPromotion)}
+    assert outcomes == {a: "Promoted", b: "Promoted", c: "Held Back"}
+    # the same class can't be promoted twice
+    again = client.post("/api/promotion", headers=_login(client), json={
+        "from_year": "2024-25", "class_grade": "9", "promote": [a]})
+    assert again.status_code == 400
+
+
+def test_class_12_completes_the_course(client, world):
+    a, b, c = _class_of(world, grade="12")
+    r = client.post("/api/promotion", headers=_login(client), json={
+        "from_year": "2024-25", "class_grade": "12", "promote": [a]})
+    assert r.get_json()["completed"] == 1
+    s = db.session.get(Student, a)
+    assert (s.enrolment_status, s.class_grade) == ("Completed", "12")
+    # a finished student drops out of class rosters
+    roster = client.get("/api/students?enrolment_status=Studying&class_grade=12", headers=_login(client)).get_json()
+    assert a not in {row["id"] for row in roster["data"]}
+
+
+def test_promotion_waits_for_the_year_to_end(client, world):
+    a, b, c = _class_of(world, year="2026-27")
+    r = client.post("/api/promotion", headers=_login(client), json={
+        "from_year": "2026-27", "class_grade": "9", "promote": [a]})
+    assert r.status_code == 400
+    assert "once 2026-27 has ended" in r.get_json()["message"]
+
+
+def test_unverified_students_are_not_promoted(client, world):
+    a, b, c = _class_of(world, verified=(True, True, False))
+    r = client.post("/api/promotion", headers=_login(client), json={
+        "from_year": "2024-25", "class_grade": "9", "promote": [a, c]})
+    assert r.status_code == 400
+    assert "Verify these students first" in r.get_json()["message"]
+
+
+def test_trainer_cannot_change_class_by_editing(client, world):
+    a, b, c = _class_of(world)
+    r = client.patch(f"/api/students/{a}", headers=_login(client), json={"class_grade": "10"})
+    assert r.status_code == 400
+    assert "Promote Students" in r.get_json()["message"]
+
+
+def test_student_leaves_and_rejoins(client, world):
+    a, b, c = _class_of(world)
+    h = _login(client)
+    url = f"/api/promotion/students/{a}/status"
+    assert client.post(url, headers=h, json={"enrolment_status": "Dropped Out"}).status_code == 400  # needs a reason
+    r = client.post(url, headers=h, json={"enrolment_status": "Dropped Out", "reason": "Family moved"})
+    assert r.status_code == 200, r.get_json()
+    s = db.session.get(Student, a)
+    assert (s.enrolment_status, s.left_reason) == ("Dropped Out", "Family moved")
+    back = client.post(url, headers=h, json={"enrolment_status": "Studying"})
+    assert back.status_code == 200
+    assert db.session.get(Student, a).left_on is None
+    # only someone who left can rejoin
+    assert client.post(url, headers=h, json={"enrolment_status": "Studying"}).status_code == 400
+
+
+# --------------------------------------------------------------- redis cache
+@pytest.fixture
+def cache_on(app):
+    """The real Redis cache, under a prefix of its own."""
+    import uuid
+    app.config.update(CACHE_ENABLED=True, CACHE_PREFIX=f"rnaf-test-{uuid.uuid4().hex[:8]}")
+    yield
+    app.config["CACHE_ENABLED"] = False
+
+
+def test_reads_are_cached_until_something_changes(client, world, cache_on):
+    h = _login(client)
+    first = client.get("/api/equipment", headers=h)
+    assert first.headers["X-Cache"] == "MISS"
+    again = client.get("/api/equipment", headers=h)
+    assert again.headers["X-Cache"] == "HIT"
+    assert again.get_json() == first.get_json()
+
+    # a write in the organisation makes the next read fresh - and complete
+    made = client.post("/api/equipment", headers=h, json={
+        "lab_id": str(world["lab"].id), "name": "Projector", "receipt_date": date.today().isoformat()})
+    assert made.status_code == 201
+    after = client.get("/api/equipment", headers=h)
+    assert after.headers["X-Cache"] == "MISS"
+    assert [r["name"] for r in after.get_json()["data"]] == ["Projector"]
+
+
+def test_bootstrap_and_dashboards_are_cached(client, world, cache_on):
+    h = _login(client)
+    for url in ("/api/meta/bootstrap", "/api/dashboard/summary", "/api/targets/guest-lectures"):
+        assert client.get(url, headers=h).headers["X-Cache"] == "MISS", url
+        assert client.get(url, headers=h).headers["X-Cache"] == "HIT", url
+
+
+def test_app_works_when_redis_is_down(client, world, cache_on, app):
+    app.config["CACHE_REDIS_URL"] = "redis://localhost:1/0"   # nothing listens there
+    try:
+        r = client.get("/api/equipment", headers=_login(client))
+        assert r.status_code == 200
+        assert "X-Cache" not in r.headers
+    finally:
+        app.config.pop("CACHE_REDIS_URL")

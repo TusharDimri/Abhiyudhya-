@@ -9,9 +9,9 @@ from app.models.geography import School
 from app.models.student import Student
 from app.models.lab import Lab, Trainer
 from app.models.operations import DailyAttendance, VTIssue, GuestLecture, FieldVisit
-from app.models.internship import OJTPlacement, DailyDiary, EmployerStudentMap, Employer
-from app.models.student import Assessment
+from app.models.internship import OJTPlacement, DailyDiary
 from app.rbac import login_required, current_user, apply_scope
+from app.services.cache import cached_json
 
 bp = Blueprint("dashboard", __name__, url_prefix="/api/dashboard")
 
@@ -77,32 +77,9 @@ def _status_count(model, user, col, val, negate=False):
     return _scoped(q, model, user).scalar() or 0
 
 
-def _ojt_hours_card(user):
-    """Hours logged against the 50 the MoU requires (spec Part 4.19)."""
-    q = db.session.query(
-        func.coalesce(func.sum(OJTPlacement.ojt_hours_logged), 0),
-        func.coalesce(func.max(OJTPlacement.ojt_hours_required), 50),
-    ).filter(OJTPlacement.is_deleted.is_(False))
-    logged, required = _scoped(q, OJTPlacement, user).first() or (0, 50)
-    return {"key": "ojt_hours", "label": f"OJT Hours (of {int(required or 50)})",
-            "value": int(logged or 0), "icon": "clock"}
-
-
-def _employer_card(user):
-    """The employer this student is currently placed with, if any."""
-    q = db.session.query(Employer.org_name).select_from(EmployerStudentMap).join(
-        Employer, Employer.id == EmployerStudentMap.employer_id
-    ).filter(
-        EmployerStudentMap.is_deleted.is_(False),
-        EmployerStudentMap.status == "ongoing",
-    )
-    row = _scoped(q, EmployerStudentMap, user).first()
-    return {"key": "my_employer", "label": "Current Placement",
-            "value": row[0] if row else "Not placed yet", "icon": "briefcase"}
-
-
 @bp.get("/summary")
 @login_required
+@cached_json("summary", ttl=120)
 def summary():
     """Role-tailored KPI cards. Each role sees only what's relevant to it."""
     user = current_user()
@@ -123,10 +100,6 @@ def summary():
         "endorsed": lambda: {"key": "endorsed", "label": "Endorsed Attendance", "value": _status_count(DailyAttendance, user, "endorsement_status", "endorsed"), "icon": "check"},
         "diaries": lambda: {"key": "diaries", "label": "Diary Entries", "value": _count(DailyDiary, user, "date"), "icon": "book"},
         "placements": lambda: {"key": "placements", "label": "Students Placed", "value": _status_count(OJTPlacement, user, "placement_placed", True), "icon": "briefcase"},
-        # --- a student's own progress (spec Part 4: they only ever see themselves) ---
-        "ojt_hours": lambda: _ojt_hours_card(user),
-        "assessments": lambda: {"key": "assessments", "label": "My Assessments", "value": _count(Assessment, user, "date"), "icon": "target"},
-        "my_employer": lambda: _employer_card(user),
         "issues_resolved": lambda: {"key": "issues_resolved", "label": "Issues Resolved", "value": _status_count(VTIssue, user, "workflow_status", "resolved"), "icon": "check"},
         "pending_issues_action": lambda: {"key": "pending_issues_action", "label": "Issues Needing Action", "value": _status_count(VTIssue, user, "workflow_status", "open"), "icon": "alert"},
     }
@@ -137,10 +110,7 @@ def summary():
         "OA": ["schools", "labs", "trainers", "students", "pending_verification", "attendance", "guest_lectures", "field_visits", "open_issues", "placements"],
         "DM": ["schools", "labs", "trainers", "students", "pending_verification", "attendance", "pending_issues_action", "issues_resolved", "endorsed", "field_visits"],
         "PR": ["students", "trainers", "attendance", "pending_endorsement", "endorsed", "guest_lectures", "field_visits", "open_issues"],
-        "VT": ["students", "pending_verification", "attendance", "pending_endorsement", "guest_lectures", "field_visits", "open_issues", "diaries"],
-        # A student sees their own internship at a glance - the page used to be
-        # a single zero.
-        "ST": ["diaries", "ojt_hours", "my_employer", "assessments"],
+        "VT": ["students", "pending_verification", "attendance", "pending_endorsement", "guest_lectures", "field_visits", "open_issues"],
     }
     keys = ROLE_CARDS.get(role, ROLE_CARDS["OA"])
     return jsonify({"cards": [M[k]() for k in keys if k in M]})
@@ -148,6 +118,7 @@ def summary():
 
 @bp.get("/timeseries")
 @login_required
+@cached_json("timeseries", ttl=120)
 def timeseries():
     """Daily counts for a metric over the selected date range (line chart)."""
     user = current_user()
@@ -167,6 +138,7 @@ def timeseries():
 
 @bp.get("/attendance-by-activity")
 @login_required
+@cached_json("attendance_by_activity", ttl=120)
 def attendance_by_activity():
     user = current_user()
     q = db.session.query(
@@ -180,6 +152,7 @@ def attendance_by_activity():
 
 @bp.get("/students-by-school")
 @login_required
+@cached_json("students_by_school", ttl=120)
 def students_by_school():
     user = current_user()
     q = db.session.query(School.name, func.count(Student.id)).select_from(Student).join(
@@ -192,6 +165,7 @@ def students_by_school():
 
 @bp.get("/students-by-verification")
 @login_required
+@cached_json("students_by_verification", ttl=120)
 def students_by_verification():
     """Distribution across pending / verified / rejected (status palette donut)."""
     user = current_user()
@@ -206,6 +180,7 @@ def students_by_verification():
 
 @bp.get("/endorsement-status")
 @login_required
+@cached_json("endorsement_status", ttl=120)
 def endorsement_status():
     """Attendance endorsement funnel: submitted / endorsed / returned."""
     user = current_user()

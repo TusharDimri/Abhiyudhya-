@@ -5,7 +5,7 @@ Multi-tenant (multi-organisation) RBAC application for organisations that run NS
 **Legend**
 - ➕ = Addition (from the MoU or best practice).
 - ✅ = Decided this round.
-- Roles: **SA** Super Admin · **OA** Organisation Admin · **DM** District Manager · **PR** Principal/Headmaster ✅ (new) · **VT** Vocational Trainer · **ST** Student
+- Roles: **SA** Super Admin · **OA** Organisation Admin · **DM** District Manager · **PR** Principal/Headmaster ✅ (new) · **VT** Vocational Trainer (students do **not** log in)
 
 ---
 
@@ -21,8 +21,9 @@ Everything is scoped to an Organisation (tenant). SA sees all; every other role 
 2. **Organisation Admin** — full access inside one org.
 3. **District Manager** — scoped to **one or more districts** ✅ (default one; higher roles can assign more later).
 4. **Principal / Headmaster** ✅ — scoped to **their school**; views their school's data and **approves/endorses** VT attendance and monthly reports (MoU endorsing authority). Gets a login.
-5. **Vocational Trainer** — scoped to their lab(s) + job role(s); daily operational entry; creates login accounts for their **internship students** ✅.
-6. **Student** — internship/OJT students only; add their own daily diary.
+5. **Vocational Trainer** — scoped to their lab(s) + job role(s); daily operational entry, including their internship students' daily diaries.
+
+**Students** — no login. Students are records registered and maintained by staff.
 
 **Block** ✅ — no block-level login. Add **Block** as a field on schools purely for **filtering + reporting** (State → District → Block → School rollups).
 
@@ -90,7 +91,7 @@ Canonical tree confirmed: **Sector → Job Role → NSQF Level (≈Grade) → Mo
 
 ### 10. Assessment / Marks / Certification ✅ (kept)
 - **Fields:** Student, academic year, class, job role, NSQF level, assessment type (internal/continuous/year-end board), name, date, max marks, marks obtained, result (pass/fail), level-certification status (L1–4), certificate number, remarks, evidence upload.
-- **Add/Edit:** VT (internal/continuous), OA/DM (board/level), SA. **View:** all (scoped); PR (own school); ST (own).
+- **Add/Edit:** VT (internal/continuous), OA/DM (board/level), SA. **View:** all (scoped); PR (own school).
 
 ---
 
@@ -144,11 +145,11 @@ Canonical tree confirmed: **Sector → Job Role → NSQF Level (≈Grade) → Mo
 
 ### 17. Employer–Student Mapping
 - **Fields:** Student, employer, job role, academic year, start date, end date, status (ongoing/completed), OJT hours target/logged.
-- **Add/Edit:** VT (their students), DM (district). **View:** SA, OA, DM (district), PR (own school), VT (their students), ST (own).
+- **Add/Edit:** VT (their students), DM (district). **View:** SA, OA, DM (district), PR (own school), VT (their students).
 
 ### 18. Daily Diaries
 - **Fields:** Date, student, school, lab, class, section, employer, learning, hours spent, photo.
-- **Add/Edit:** Student (own) or their VT. **View:** SA, OA, DM (district), PR (own school), VT (their students), ST (own).
+- **Add/Edit:** VT (their students). **View:** SA, OA, DM (district), PR (own school), VT (their students).
 
 ### 19. OJT / Apprenticeship / Placement ✅ (kept as module)
 - **Fields:** Student, academic year, job role, OJT hours logged vs 50 required, OJT establishment, dates; apprenticeship interested/placed (Y/N) + employer; placement interested/placed (Y/N), placement letter date, employer, letter upload.
@@ -180,29 +181,29 @@ Notifications (issue raised, verification pending, endorsement pending, SLA warn
 
 ## RBAC QUICK MATRIX  (A = Add/Edit · V = View · Ap = Approve · — = none; scope in parentheses)
 
-| # | Feature | SA | OA | DM | PR | VT | ST |
-|---|---------|----|----|----|----|----|----|
-| 1 | School | A/V | A/V | A/V (dist) | V (own) | V (own) | — |
-| 2 | Principal | A/V | A/V | A/V (dist) | V (self) | V (school) | — |
-| 3 | Lab | A/V | A/V | A/V (dist) | V (school) | V (own) | — |
-| 4 | Curriculum/Syllabus | A/V | A/V | A/V | V | A/V | V |
-| 5 | Vocational Trainer | A/V | A/V | A/V (dist) | V (school) | V (self) | — |
-| 6 | Student Registration | A/V | A/V | A/V | V (school) | A/V (labs) | — |
-| 7 | Student Verification | A/V | A/V | A/V | V (school) | A/V (labs) | — |
-| 8 | All Students | V/A | V/A | V/A (dist) | V (school) | V/A (labs) | — |
-| 10 | Assessment/Marks | A/V | A/V | A/V | V (school) | A/V | V (own) |
-| 11 | Daily Attendance | V | V | V (dist) | V+**Ap** (school) | A/V (own) | — |
-| 12 | Issue Reporting | V | V | V/act (dist) | V (school) | A/V (own) | — |
-| 13 | Field/Industry Visit | V | V | V (dist) | V (school) | A/V (own) | — |
-| 14 | Guest Lecture | V | V | V (dist) | V (school) | A/V (own) | — |
-| 15 | Lab Equipment | A/V | A/V | A/V (dist) | V (school) | A/V (lab) | — |
-| 16 | Employer | A/V | A/V | A/V (dist) | V (school) | A/V | — |
-| 17 | Employer–Student Map | A/V | A/V | A/V (dist) | V (school) | A/V (students) | V (own) |
-| 18 | Daily Diaries | V | V | V (dist) | V (school) | A/V (students) | A/V (own) |
-| 19 | OJT/Apprenticeship/Placement | A/V | A/V | A/V (dist) | V (school) | A/V (students) | V (own) |
-| 20 | Dashboards & Reports | V (all) | V (org) | V (dist/block) | V (school) | V (lab) | V (self) |
-| 21 | Endorsement | V | A/V | A/V | **Ap** (school) | submit | — |
-| 22 | Feedback | V | V | V/A | A/V (school) | A | A (own) |
+| # | Feature | SA | OA | DM | PR | VT |
+|---|---------|----|----|----|----|----|
+| 1 | School | A/V | A/V | A/V (dist) | V (own) | V (own) |
+| 2 | Principal | A/V | A/V | A/V (dist) | V (self) | V (school) |
+| 3 | Lab | A/V | A/V | A/V (dist) | V (school) | V (own) |
+| 4 | Curriculum/Syllabus | A/V | A/V | A/V | V | A/V |
+| 5 | Vocational Trainer | A/V | A/V | A/V (dist) | V (school) | V (self) |
+| 6 | Student Registration | A/V | A/V | A/V | V (school) | A/V (labs) |
+| 7 | Student Verification | A/V | A/V | A/V | V (school) | A/V (labs) |
+| 8 | All Students | V/A | V/A | V/A (dist) | V (school) | V/A (labs) |
+| 10 | Assessment/Marks | A/V | A/V | A/V | V (school) | A/V |
+| 11 | Daily Attendance | V | V | V (dist) | V+**Ap** (school) | A/V (own) |
+| 12 | Issue Reporting | V | V | V/act (dist) | V (school) | A/V (own) |
+| 13 | Field/Industry Visit | V | V | V (dist) | V (school) | A/V (own) |
+| 14 | Guest Lecture | V | V | V (dist) | V (school) | A/V (own) |
+| 15 | Lab Equipment | A/V | A/V | A/V (dist) | V (school) | A/V (lab) |
+| 16 | Employer | A/V | A/V | A/V (dist) | V (school) | A/V |
+| 17 | Employer–Student Map | A/V | A/V | A/V (dist) | V (school) | A/V (students) |
+| 18 | Daily Diaries | V | V | V (dist) | V (school) | A/V (students) |
+| 19 | OJT/Apprenticeship/Placement | A/V | A/V | A/V (dist) | V (school) | A/V (students) |
+| 20 | Dashboards & Reports | V (all) | V (org) | V (dist/block) | V (school) | V (lab) |
+| 21 | Endorsement | V | A/V | A/V | **Ap** (school) | submit |
+| 22 | Feedback | V | V | V/A | A/V (school) | A |
 
 ---
 
@@ -280,7 +281,7 @@ For each module, build backend model → API → tests, then the matching fronte
 | **1. Master data** | Organisation, State/District/Block, School (+UDISE), Principal, Lab, Sector/Job Role/NSQF master lists, Curriculum/Syllabus tree, Academic Year | No operational data can exist without these |
 | **2. People & student lifecycle** | Vocational Trainer, Principal accounts, Student Registration, Verification + promotion/rollover, All-Students directory | Needed before any daily-operations module (they all reference students/VTs) |
 | **3. Daily operations** | Daily Attendance (all activity-type branches), VT Issue Reporting, Field/Industry Visit, Guest Lecture, Lab Equipment + maintenance log | The bulk of day-to-day VT usage; biggest module, build attendance first since others reuse its patterns |
-| **4. Internship** | Employer Details, Employer–Student Mapping, Daily Diaries, OJT/Apprenticeship/Placement, student login provisioning by VT | Depends on students + VT existing |
+| **4. Internship** | Employer Details, Employer–Student Mapping, Daily Diaries, OJT/Apprenticeship/Placement | Depends on students + VT existing |
 | **5. Assessment/Certification** | Marks, results, NSQF level certification | Depends on students + curriculum |
 | **6. Cross-cutting** | Dashboards/reports with rollups, Endorsement workflow (Principal approves), Feedback module, Notifications, Audit log UI | Needs all operational data to exist first to be meaningful |
 | **7. Hardening** | Manual/exploratory testing, security review (esp. tenant-isolation tests), accessibility pass, UAT with real VTs/DMs, bug fixing, apply Part 7.11 reliability hardening | Before real users touch it |

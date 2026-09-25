@@ -3,10 +3,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import { useBootstrap } from "../../hooks/useBootstrap";
+import { toDMY } from "../../lib/dates";
 
 const ROLE_LABELS = {
   SA: "Super Admin", OA: "Organisation Admin", DM: "District Manager",
-  PR: "Principal", VT: "Vocational Trainer", ST: "Student",
+  PR: "Principal", VT: "Vocational Trainer",
 };
 
 export default function Users() {
@@ -73,7 +74,7 @@ export default function Users() {
                       <td className="mono-sm">{u.email}</td>
                       <td><span className="badge info">{u.role_label || ROLE_LABELS[u.role]}</span></td>
                       <td><span className={`badge ${u.status === "active" ? "success" : "danger"}`}>{u.status}</span></td>
-                      <td className="muted">{u.last_login_at ? u.last_login_at.slice(0, 10) : "—"}</td>
+                      <td className="muted">{u.last_login_at ? toDMY(u.last_login_at) : "—"}</td>
                       <td>
                         <div className="cell-actions">
                           <button className="btn btn-ghost btn-sm" onClick={() => setResetFor(u)}>Reset PW</button>
@@ -124,7 +125,7 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
     onError: (e) => push(apiError(e), "error"),
   });
 
-  const needsSchool = ["PR", "VT", "ST"].includes(f.role);
+  const needsSchool = ["PR", "VT"].includes(f.role);
   const needsLab = f.role === "VT";
   const needsDistrict = f.role === "DM";
   const orgLocked = isSA && f.role !== "SA" && !f.organisation_id;

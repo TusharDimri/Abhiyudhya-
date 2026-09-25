@@ -4,7 +4,9 @@ Every enterprise concern from spec Part 0.5 (audit trail, soft-delete + status,
 tenant scoping) is expressed once here and mixed into every model.
 """
 import uuid
-from datetime import datetime
+from datetime import date, datetime, time
+
+from geoalchemy2 import Geography
 
 from sqlalchemy import Column, DateTime, String, Boolean, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -84,9 +86,16 @@ class BaseModel(PKMixin, TimestampMixin, SoftDeleteMixin, db.Model):
             if col.name in exclude:
                 continue
             val = getattr(self, col.name)
+            if isinstance(col.type, Geography):
+                from app.models.geo import point_to_latlng
+                lat, lng = point_to_latlng(val) or (None, None)
+                out[f"{col.name}_lat"], out[f"{col.name}_lng"] = lat, lng
+                continue
             if isinstance(val, uuid.UUID):
                 val = str(val)
-            elif isinstance(val, datetime):
+            elif isinstance(val, (datetime, date, time)):
+                # ISO for plain dates too - left to Flask they go out as
+                # "Tue, 10 Jun 2025 00:00:00 GMT", which a date field can't read
                 val = val.isoformat()
             out[col.name] = val
         return out

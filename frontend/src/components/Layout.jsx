@@ -2,12 +2,13 @@ import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useBootstrap } from "../hooks/useBootstrap";
-import { MODULES, NAV_GROUPS, NAV_GROUP_ORDER } from "../lib/modules";
+import { MODULES, NAV_GROUPS, NAV_GROUP_ORDER, isSectionHidden } from "../lib/modules";
+import LocationButton from "./LocationButton";
 import ScopeBadges from "./ScopeBadges";
 
 // Special admin pages (not resource modules) with the roles allowed to see them.
 const ADMIN_LINKS = [
-  { to: "/app/admin/users", label: "Users & Access", icon: "👥", roles: ["SA", "OA", "DM", "VT"] },
+  { to: "/app/admin/users", label: "Users & Access", icon: "👥", roles: ["SA", "OA", "DM"] },
   { to: "/app/admin/audit", label: "Audit Log", icon: "📜", roles: ["SA", "OA"] },
   { to: "/app/admin/trash", label: "Recycle Bin", icon: "♻️", roles: ["SA", "OA", "DM"] },
 ];
@@ -24,7 +25,7 @@ export default function Layout() {
   // group visible modules (backend already filtered by role via view_roles)
   const grouped = {};
   for (const [key, mod] of Object.entries(MODULES)) {
-    if (!visible[key]) continue;
+    if (!visible[key] || isSectionHidden(user?.role, key)) continue;
     (grouped[mod.group] ||= []).push({ key, ...mod });
   }
   const adminLinks = ADMIN_LINKS.filter((l) => l.roles.includes(user?.role));
@@ -109,6 +110,7 @@ export default function Layout() {
           ) : null}
 
           <div className="user-chip">
+            {user?.role === "VT" && <LocationButton />}
             <div style={{ textAlign: "right", lineHeight: 1.15 }} className="user-meta">
               <div style={{ fontWeight: 700, fontSize: ".85rem" }}>{user?.full_name}</div>
               <span className="role-pill">{roleLabel || user?.role}</span>

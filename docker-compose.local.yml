@@ -5,7 +5,9 @@
 
 services:
   postgres:
-    image: postgres:16
+    # Postgres 16 with PostGIS (geospatial: where each record was made). Same
+    # major version as plain postgres:16, so an existing data volume carries over.
+    image: postgis/postgis:16-3.5
     environment:
       POSTGRES_USER: rnaf
       POSTGRES_PASSWORD: rnaf
@@ -22,8 +24,11 @@ services:
     image: redis:7-alpine
     ports: ["6379:6379"]
 
+  # MinIO stopped publishing public images (minio/minio and minio/mc on Docker
+  # Hub, and quay.io, now refuse pulls). Chainguard's build is the same MinIO
+  # server, and it ships `mc` too, so it covers the bucket setup below as well.
   minio:
-    image: minio/minio:latest
+    image: cgr.dev/chainguard/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -33,8 +38,10 @@ services:
 
   # creates the bucket once MinIO is up
   minio-setup:
-    image: minio/mc:latest
+    image: cgr.dev/chainguard/minio:latest
     depends_on: [minio]
+    environment:
+      MC_CONFIG_DIR: /tmp/.mc   # the image runs as a non-root user with no writable home
     entrypoint: >
       /bin/sh -c "
       until (mc alias set local http://minio:9000 minioadmin minioadmin) do sleep 2; done;
@@ -52,6 +59,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://rnaf:rnaf@postgres:5432/rnaf
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
     ports: ["5001:5000"]
     volumes: ["./backend:/app"]
     depends_on:

@@ -1,7 +1,11 @@
-import { useState, useMemo, useEffect } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { useAuth } from "../lib/auth";
 import api from "../lib/api";
 import StudentRoster from "./StudentRoster";
+import DateInput from "./DateInput";
+import { toDMY } from "../lib/dates";
+import { useLocationFix, locationPayload, locationErrorMessage } from "../lib/location";
 import { staticOptionsFor, enumList, splitList, joinList } from "../lib/fieldOptions";
 
 // display label for an async-loaded option row
@@ -20,17 +24,32 @@ const OPTIONKEY_RESOURCE = {
 };
 
 // Field types that need the full width of the drawer.
-const WIDE = new Set(["textarea", "file", "multiselect", "studentmarks"]);
+const WIDE = new Set(["textarea", "file", "multiselect", "studentmarks", "geopoint"]);
 
 // A field may cascade off more than one answer (a curriculum module list is
 // narrowed by job role *and* by Employability/Vocational). The first parent
 // gates the fetch; the rest refine it once they have a value.
 const depsOf = (f) => (f.dependsOn ? (Array.isArray(f.dependsOn) ? f.dependsOn : [f.dependsOn]) : []);
 
+// Last answers a user gave on a form, per field marked `remember` - kept in
+// this browser only, as a convenience (nothing depends on it being there).
+const memoryKey = (userId, resource, field) => `rnaf.remember.${userId}.${resource}.${field}`;
+const recall = (key) => {
+  try { const v = localStorage.getItem(key); return v == null ? undefined : JSON.parse(v); } catch { return undefined; }
+};
+const keep = (key, value) => {
+  try {
+    if (value === "" || value == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(value));
+  } catch { /* private mode / storage full: just don't remember */ }
+};
+
 export default function ResourceForm({
-  mod, initial, boot, context, onClose, onSubmit, saving,
+  mod, resource, initial, boot, context, onClose, onSubmit, saving,
   isSA, orgScoped, orgOptions, role,
 }) {
+  const { user } = useAuth();
+  const fromMemory = useRef(new Set());
   const isNew = !initial;
   const ctx = context || {};
   const options = boot?.options;
@@ -71,15 +90,51 @@ export default function ResourceForm({
         if (ctx[f.name] != null) val = ctx[f.name];
         else if (f.defaults && role && f.defaults[role] != null) val = f.defaults[role];
         else if (f.defaultValue != null)
-          val = typeof f.defaultValue === "function" ? f.defaultValue() : f.defaultValue;
+          val = typeof f.defaultValue === "function"
+            ? f.defaultValue({ options, profile: ctx, role })
+            : f.defaultValue;
+        if ((val === "" || val == null) && f.remember && user?.id) {
+          const mem = recall(memoryKey(user.id, resource, f.name));
+          if (mem !== undefined) { val = mem; fromMemory.current.add(f.name); }
+        }
       }
       v[f.name] = val;
     }
     return v;
   });
+  // what was already filled in when the form opened
+  const [prefilled] = useState(() => new Set(fields.filter((f) => {
+    const v = values[f.name];
+    return v !== "" && v != null && v !== false && !fromMemory.current.has(f.name);
+  }).map((f) => f.name)));
   const [errors, setErrors] = useState({});
+  const [formError, setFormError] = useState("");
+  const [locating, setLocating] = useState(false);
+  const loc = useLocationFix();
+  // a trainer's new record is stamped with where they were (never shown here)
+  const needsLocation = !!mod.captureLocation && isNew && role === "VT";
   const [uploading, setUploading] = useState("");
   const [custom, setCustom] = useState({});
+
+  // `lookup`: typing a name that was used before fills in what went with it
+  // (a returning guest lecturer's details, a visited organisation's address).
+  const lookupField = fields.find((f) => f.lookup);
+  const pastRows = useQuery({
+    queryKey: ["lookup", resource],
+    queryFn: async () => (await api.get(`/${resource}?page_size=100&sort=created_at&order=desc`)).data.data,
+    enabled: !!lookupField && isNew && !!resource,
+    staleTime: 60000,
+  });
+  const pastByName = useMemo(() => {
+    const m = new Map();
+    if (!lookupField) return m;
+    for (const r of pastRows.data || []) {
+      const name = String(r[lookupField.name] || "").trim();
+      if (name && !m.has(name.toLowerCase())) m.set(name.toLowerCase(), r);
+    }
+    return m;
+  }, [pastRows.data, lookupField]);
+  const [filledFrom, setFilledFrom] = useState("");
 
   const asyncFields = useMemo(
     () => fields.filter((f) =>
@@ -159,6 +214,18 @@ export default function ResourceForm({
 
   const set = (name, val) => setValues((v) => clearDescendants({ ...v, [name]: val }, name));
 
+  const setLooked = (f, val) => {
+    const past = pastByName.get(String(val).trim().toLowerCase());
+    if (!past) { set(f.name, val); return; }
+    setValues((v) => {
+      const next = { ...v, [f.name]: val };
+      // fill what is still empty; never overwrite what they typed
+      for (const k of f.lookup.fill) if ((next[k] === "" || next[k] == null) && past[k] != null) next[k] = past[k];
+      return next;
+    });
+    setFilledFrom(String(past[f.name]));
+  };
+
   const visible = (f) => (f.showIf ? !!f.showIf(values, role) : true);
 
   const optionsFor = (f) => {
@@ -189,19 +256,25 @@ export default function ResourceForm({
 
   // A field is auto-known when: we're creating, the role is listed in autoFor,
   // and we already have a value for it. It is filled and shown read-only (in
-  // the "known" panel) rather than asked for.
+  // the "known" panel) rather than asked for. A field that is readOnlyFor the
+  // role is always shown there once it has a value, new or existing.
   const isKnown = (f) =>
-    isNew && !isSA && Array.isArray(f.autoFor) && role && f.autoFor.includes(role) &&
-    knownValue(f) !== undefined;
+    (isNew && !isSA && Array.isArray(f.autoFor) && role && f.autoFor.includes(role) &&
+      knownValue(f) !== undefined) ||
+    (Array.isArray(f.readOnlyFor) && role && f.readOnlyFor.includes(role) &&
+      values[f.name] !== "" && values[f.name] != null && (!isNew || prefilled.has(f.name)));
 
   const isDerived = (f) => derived[f.name] !== undefined && !isKnown(f);
 
   // human label for a known/derived read-only value (resolves ids via options)
   const knownLabel = (f) => {
     const val = values[f.name];
-    if (f.name === "student_id" || f.name === "trainer_id") return "You (this account)";
+    if (f.type === "date") return toDMY(val);
+    if (f.type === "time") return String(val ?? "").slice(0, 5);
     const opt = optionsFor(f).find((o) => String(o.value) === String(val));
-    if (opt) return opt.label;
+    const isMe = f.name === "trainer_id" && String(val) === String(ctx.trainer_id);
+    if (opt) return isMe ? `${opt.label} (you)` : opt.label;
+    if (isMe) return "You (this account)";
     const fromBoot = Object.values(options || {})
       .flat()
       .find((o) => o && String(o.value) === String(val));
@@ -224,8 +297,9 @@ export default function ResourceForm({
     }
   };
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
+    setFormError("");
     const errs = {};
     for (const f of fields) {
       if (!visible(f) || isKnown(f) || isDerived(f)) continue;
@@ -259,6 +333,20 @@ export default function ResourceForm({
       }
       payload[f.name] = values[f.name] === "" ? null : values[f.name];
     }
+    if (isNew && user?.id) {
+      for (const f of fields) if (f.remember) keep(memoryKey(user.id, resource, f.name), values[f.name]);
+    }
+    if (needsLocation && loc) {
+      setLocating(true);
+      try {
+        Object.assign(payload, locationPayload(await loc.getFresh()));
+      } catch (err) {
+        setFormError(locationErrorMessage(err));
+        return;
+      } finally {
+        setLocating(false);
+      }
+    }
     onSubmit(payload);
   };
 
@@ -271,8 +359,9 @@ export default function ResourceForm({
     return !values[deps[0].field];
   };
 
-  const shown = fields.filter(visible);
-  const autoFields = shown.filter((f) => isKnown(f) || isDerived(f));
+  const shown = fields.filter((f) => visible(f) && !f.hidden);
+  // `quiet` fields are filled in and saved but not worth showing
+  const autoFields = shown.filter((f) => (isKnown(f) || isDerived(f)) && !f.quiet);
   const bodyFields = shown.filter((f) => !isKnown(f) && !isDerived(f));
 
   // group the remaining questions into labelled sections, in the order the
@@ -364,22 +453,51 @@ export default function ResourceForm({
       );
     }
 
+    if (f.type === "date")
+      return (
+        <DateInput
+          value={val ?? ""}
+          min={typeof f.min === "function" ? f.min() : f.min}
+          max={typeof f.max === "function" ? f.max() : f.max}
+          onChange={(v) => set(f.name, v)}
+        />
+      );
+
+    if (f.type === "geopoint") return <GeoPointInput f={f} values={values} setValues={setValues} />;
+
     if (f.type === "file")
       return (
         <>
           <input type="file" className="input" accept={f.accept || "image/*,application/pdf"} onChange={(e) => upload(f, e.target.files[0])} />
           {uploading === f.name && <span className="hint">Uploading…</span>}
+          {uploading !== f.name && val && !/^https?:/.test(val) && <span className="hint">✓ Uploaded</span>}
           <input className="input" placeholder="…or paste file URL" value={val ?? ""} onChange={(e) => set(f.name, e.target.value)} style={{ marginTop: 4 }} />
         </>
       );
 
+    if (f.lookup) {
+      const listId = `past-${f.name}`;
+      return (
+        <>
+          <input className="input" list={listId} placeholder={f.placeholder || ""} value={val ?? ""}
+            onChange={(e) => setLooked(f, e.target.value)} autoComplete="off" />
+          <datalist id={listId}>
+            {[...pastByName.values()].map((r) => <option key={r.id} value={r[f.name]} />)}
+          </datalist>
+          {filledFrom && filledFrom.toLowerCase() === String(val ?? "").trim().toLowerCase() && (
+            <span className="hint">✓ Details filled in from an earlier entry - check they're still right.</span>
+          )}
+        </>
+      );
+    }
+
     return (
       <input
         className="input"
-        type={f.type === "number" ? "number" : f.type === "date" ? "date" : f.type === "email" ? "email" : f.type === "tel" ? "tel" : "text"}
+        type={["number", "email", "tel", "time"].includes(f.type) ? f.type : "text"}
         placeholder={f.placeholder || ""}
-        min={f.min}
-        max={f.max}
+        min={typeof f.min === "function" ? f.min() : f.min}
+        max={typeof f.max === "function" ? f.max() : f.max}
         value={val ?? ""}
         onChange={(e) => set(f.name, e.target.value)}
       />
@@ -432,13 +550,54 @@ export default function ResourceForm({
             </fieldset>
           ))}
         </div>
+        {formError && <div className="form-error" role="alert">📍 {formError}</div>}
         <footer>
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? "Saving…" : initial ? "Save changes" : `Create ${mod.singular}`}
+          <button type="submit" className="btn btn-primary" disabled={saving || locating}>
+            {locating ? "Getting your location…" : saving ? "Saving…" : initial ? "Save changes" : `Create ${mod.singular}`}
           </button>
         </footer>
       </form>
+    </div>
+  );
+}
+
+/* A place as latitude + longitude (e.g. where a school is): typed in, or taken
+   from this device's current position. Writes `f.name` (latitude) and
+   `f.lngField` (longitude). */
+function GeoPointInput({ f, values, setValues }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const lat = values[f.name] ?? "";
+  const lng = values[f.lngField] ?? "";
+  const put = (patch) => setValues((v) => ({ ...v, ...patch }));
+  const useHere = () => {
+    if (!("geolocation" in navigator)) { setErr("This browser can't share its location."); return; }
+    setBusy(true); setErr("");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        put({
+          [f.name]: Number(pos.coords.latitude.toFixed(6)),
+          [f.lngField]: Number(pos.coords.longitude.toFixed(6)),
+        });
+        setBusy(false);
+      },
+      (e) => { setErr(e.code === 1 ? "Location access is blocked for this site." : "Couldn't get a location - try again."); setBusy(false); },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
+    );
+  };
+  return (
+    <div className="geopoint">
+      <div className="geopoint-row">
+        <input className="input" type="number" step="any" placeholder="Latitude e.g. 18.5204" value={lat}
+          onChange={(e) => put({ [f.name]: e.target.value })} aria-label="Latitude" />
+        <input className="input" type="number" step="any" placeholder="Longitude e.g. 73.8567" value={lng}
+          onChange={(e) => put({ [f.lngField]: e.target.value })} aria-label="Longitude" />
+      </div>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={useHere} disabled={busy}>
+        {busy ? "Getting location…" : "📍 Use my current location"}
+      </button>
+      {err && <span className="field-error">{err}</span>}
     </div>
   );
 }

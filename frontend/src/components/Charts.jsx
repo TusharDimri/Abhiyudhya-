@@ -2,6 +2,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
   PieChart, Pie, Legend, AreaChart, Area,
 } from "recharts";
+import { toDMY } from "../lib/dates";
 
 /* Chart colours (dataviz method):
    - magnitude bars = single sequential hue (navy)
@@ -72,9 +73,9 @@ export function TrendCard({ title, subtitle, data, height = 260, span = 2 }) {
             </defs>
             <CartesianGrid vertical={false} stroke={GRID} />
             <XAxis dataKey="date" tick={{ fill: AXIS, fontSize: 11 }} axisLine={{ stroke: GRID }} tickLine={false}
-                   tickFormatter={(d) => String(d).slice(5)} minTickGap={24} />
+                   tickFormatter={(d) => String(toDMY(d)).slice(0, 5)} minTickGap={24} />
             <YAxis allowDecimals={false} tick={{ fill: AXIS, fontSize: 11 }} axisLine={false} tickLine={false} width={40} />
-            <Tooltip {...tooltipStyle} />
+            <Tooltip {...tooltipStyle} labelFormatter={(d) => toDMY(d)} />
             <Area type="monotone" dataKey="value" stroke={NAVY} strokeWidth={2} fill="url(#trendFill)" dot={false} activeDot={{ r: 4 }} />
           </AreaChart>
         </ResponsiveContainer>

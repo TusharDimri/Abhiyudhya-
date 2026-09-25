@@ -31,10 +31,9 @@ OA = Role.ORG_ADMIN.value
 DM = Role.DISTRICT_MANAGER.value
 PR = Role.PRINCIPAL.value
 VT = Role.TRAINER.value
-ST = Role.STUDENT.value
 
 
-ALL_ROLES = [SA, OA, DM, PR, VT, ST]
+ALL_ROLES = [SA, OA, DM, PR, VT]
 
 
 @dataclass
@@ -77,6 +76,15 @@ class ResourceConfig:
     # query params that need more than a column comparison:
     # {param: (query, model, value) -> query}
     extra_filters: dict = field(default_factory=dict)
+    # fields a role may set when creating but never change afterwards:
+    # {role: {field: message shown when they try}}
+    locked_on_update: dict = field(default_factory=dict)
+    # stamp new records with where the user was (model mixes in
+    # CapturesLocation); required from trainers
+    captures_location: bool = False
+    # a `location` point typed in by an admin (location_lat / location_lng) -
+    # e.g. where a school is
+    manual_location: bool = False
 
 
 REGISTRY = {}
@@ -121,23 +129,232 @@ def _own_job_role_validator(job_role_field="job_role_id"):
     return _validate
 
 
-def _validate_attendance(instance, user, is_create=False):
+# A record can be back-dated but not forward-dated. One day of slack: the
+# server runs on UTC while trainers are on IST, so "today" for a trainer just
+# after midnight is still "tomorrow" here.
+def _future_date_error(value, label="Date"):
+    from datetime import date, timedelta
+    if value and value > date.today() + timedelta(days=1):
+        return f"{label} can't be in the future."
+    return None
+
+
+def _equipment_display(obj):
+    from app.extensions import db
+    lab = db.session.get(M.Lab, obj.lab_id) if obj.lab_id else None
+    tr = db.session.get(M.Trainer, obj.trainer_id) if obj.trainer_id else None
+    return {"lab_name": lab.name if lab else None,
+            "trainer_name": tr.full_name if tr else None}
+
+
+def _validate_equipment(instance, user, is_create=False):
+    from app.extensions import db
+
+    if not (instance.name or "").strip():
+        return "Give the equipment a name."
+    if not instance.lab_id:
+        return "Choose the lab this equipment belongs to."
+    err = _future_date_error(instance.receipt_date)
+    if err:
+        return err
+
+    # the school always follows the lab - never asked for, never out of step
+    lab = db.session.get(M.Lab, instance.lab_id)
+    instance.school_id = lab.school_id if lab else None
+
+    if user.role == VT and is_create:
+        # A trainer's equipment is theirs. Handing it to someone else is the
+        # Principal's call (when a trainer leaves), not the trainer's - see
+        # locked_on_update on the resource.
+        own = db.session.query(M.Trainer.id).filter(
+            M.Trainer.user_id == user.id, M.Trainer.is_deleted.is_(False)
+        ).first()
+        if not own:
+            return "Your login isn't linked to a trainer profile yet - ask your admin."
+        instance.trainer_id = own[0]
+    elif not instance.trainer_id:
+        return "Choose the trainer responsible for this equipment."
+    return None
+
+
+def _validate_guest_lecture(instance, user, is_create=False):
+    from app.extensions import db
+
+    if not (instance.lecturer_name or "").strip():
+        return "Enter the guest lecturer's name."
+    if not (instance.topic or "").strip():
+        return "Enter the topic covered."
+    if not instance.lab_id:
+        return "Choose the lab."
+    if not instance.class_grade:
+        return "Choose the class."
+    if not instance.reporting_date:
+        return "Enter the date."
+    err = _future_date_error(instance.reporting_date)
+    if err:
+        return err
+    # the school always follows the lab, and the year always follows the date
+    # (it is what yearly targets are counted by - api/targets.py)
+    from app.services.academic_year import academic_year_for
+    lab = db.session.get(M.Lab, instance.lab_id)
+    instance.school_id = lab.school_id if lab else None
+    instance.academic_year = academic_year_for(instance.organisation_id, instance.reporting_date)
+    return _own_job_role_validator()(instance, user, is_create)
+
+
+def _validate_field_visit(instance, user, is_create=False):
+    from app.extensions import db
+
+    if not (instance.organisation_name or "").strip() and not (instance.address or "").strip():
+        return "Enter the organisation visited and its address."
+    if not instance.lab_id:
+        return "Choose the lab."
+    if not instance.job_role_id:
+        return "Choose the job role."
+    if not instance.class_grade:
+        return "Choose the class."
+    if not instance.reporting_date:
+        return "Enter the date."
+    err = _future_date_error(instance.reporting_date)
+    if err:
+        return err
+    # the school always follows the lab, and the year always follows the date
+    # (it is what yearly targets are counted by - api/targets.py)
+    from app.services.academic_year import academic_year_for
+    lab = db.session.get(M.Lab, instance.lab_id)
+    instance.school_id = lab.school_id if lab else None
+    instance.academic_year = academic_year_for(instance.organisation_id, instance.reporting_date)
+    err = _own_job_role_validator()(instance, user, is_create)
+    if err or user.role != VT:
+        return err
+    from app.rbac.curriculum import allowed_class_grades
+    if str(instance.class_grade) not in allowed_class_grades(user, instance.job_role_id):
+        return f"Class {instance.class_grade} is not taught under this job role in your lab."
+    return None
+
+
+def _own_trainer_id(user):
+    from app.extensions import db
+    row = db.session.query(M.Trainer.id).filter(
+        M.Trainer.user_id == user.id, M.Trainer.is_deleted.is_(False)
+    ).first()
+    return row[0] if row else None
+
+
+def _attendance_day_error(instance, user, is_create):
+    """A trainer marks attendance for today only - it is checked against where
+    they are right now. (One day either side: the server runs on UTC.)"""
+    from datetime import date, timedelta
+    if not instance.date:
+        return "Enter the date."
+    if user.role == VT and is_create and abs(instance.date - date.today()) > timedelta(days=1):
+        return "Attendance can only be marked for today."
+    return _future_date_error(instance.date)
+
+
+def _validate_vt_attendance(instance, user, is_create=False):
+    from app.extensions import db
+    from app.models.geo import school_distance_error
+    from app.services.academic_year import academic_year_for
+
+    if not instance.lab_id:
+        return "Choose the lab."
+    err = _attendance_day_error(instance, user, is_create)
+    if err:
+        return err
+    lab = db.session.get(M.Lab, instance.lab_id)
+    instance.school_id = lab.school_id if lab else None
+    instance.academic_year = academic_year_for(instance.organisation_id, instance.date)
+    if not instance.day_type:
+        instance.day_type = "Working day"
+
+    if user.role == VT and is_create:
+        own = _own_trainer_id(user)
+        if not own:
+            return "Your login isn't linked to a trainer profile yet - ask your admin."
+        instance.trainer_id = own
+        # once a day
+        already = db.session.query(M.DailyAttendance.id).filter(
+            M.DailyAttendance.trainer_id == own,
+            M.DailyAttendance.date == instance.date,
+            M.DailyAttendance.is_deleted.is_(False),
+            M.DailyAttendance.id != instance.id,
+        ).first()
+        if already:
+            return f"You've already marked your attendance for {instance.date:%d/%m/%Y}."
+        return school_distance_error(instance, instance.school_id)
+    return None
+
+
+def _trainer_name(obj):
+    from app.extensions import db
+    tr = db.session.get(M.Trainer, obj.trainer_id) if obj.trainer_id else None
+    return tr.full_name if tr else None
+
+
+def _attendance_display(obj):
+    return {**_school_name(obj), "trainer_name": _trainer_name(obj)}
+
+
+def _class_attendance_display(obj):
+    marks = [m for m in obj.student_marks if not m.is_deleted]
+    present = sum(1 for m in marks if m.present)
+    return {"trainer_name": _trainer_name(obj), "attended_count": present,
+            "attended": f"{present} of {len(marks)}" if marks else None}
+
+
+def _validate_class_attendance(instance, user, is_create=False):
+    from app.extensions import db
+    from app.models.geo import school_distance_error
+    from app.services.academic_year import academic_year_for
+
+    if not instance.lab_id:
+        return "Choose the lab."
+    if not instance.class_grade:
+        return "Choose the class."
+    if not (instance.activity or "").strip():
+        return "Describe the activity."
+    err = _attendance_day_error(instance, user, is_create)
+    if err:
+        return err
+    lab = db.session.get(M.Lab, instance.lab_id)
+    instance.school_id = lab.school_id if lab else None
+    instance.academic_year = academic_year_for(instance.organisation_id, instance.date)
+    if lab and not instance.job_role_id:
+        instance.job_role_id = lab.job_role_for(instance.class_grade)
+
+    if user.role != VT:
+        return None
     err = _own_job_role_validator()(instance, user, is_create)
     if err:
         return err
-    if user.role != VT:
-        return None
-    jr = instance.job_role_id
-    if jr and instance.class_taught:
-        from app.rbac.curriculum import allowed_class_grades
-        if str(instance.class_taught) not in allowed_class_grades(user, jr):
-            return f"Class {instance.class_taught} is not taught under this job role in your lab."
-    if jr and instance.module_id:
-        from app.extensions import db
-        mod = db.session.get(M.Module, instance.module_id)
-        if mod and str(mod.job_role_id) != str(jr):
-            return "Selected module does not belong to the chosen job role."
+    from app.rbac.curriculum import allowed_class_grades
+    if instance.job_role_id and str(instance.class_grade) not in allowed_class_grades(user, instance.job_role_id):
+        return f"Class {instance.class_grade} is not taught under this job role in your lab."
+    if is_create:
+        own = _own_trainer_id(user)
+        if not own:
+            return "Your login isn't linked to a trainer profile yet - ask your admin."
+        instance.trainer_id = own
+        return school_distance_error(instance, instance.school_id)
     return None
+
+
+def _maintenance_display(obj):
+    from app.extensions import db
+    eq = db.session.get(M.LabEquipment, obj.equipment_id) if obj.equipment_id else None
+    return {"equipment_name": eq.name if eq else None}
+
+
+def _validate_maintenance(instance, user, is_create=False):
+    from app.api import enums
+    if not instance.equipment_id:
+        return "Choose the equipment."
+    if not (instance.issue or "").strip():
+        return "Describe the issue."
+    if instance.maintenance_status and instance.maintenance_status not in enums.values("maintenance_status"):
+        return "Pick a valid status."
+    return _future_date_error(instance.date)
 
 
 def _validate_curriculum_module(instance, user, is_create=False):
@@ -145,22 +362,26 @@ def _validate_curriculum_module(instance, user, is_create=False):
 
 
 def _validate_issue(instance, user, is_create=False):
-    """Main issue and sub-issue must be a pair the spec actually defines, and
-    'some students affected' must say how many (spec 3.12)."""
-    from app.api import enums
+    """A trainer reports an issue in their own words, on a date and time, from
+    where they are. (The older categorised fields - main/sub issue, students
+    affected - are no longer asked for; their columns keep past answers.)"""
+    from app.extensions import db
 
-    err = _own_job_role_validator()(instance, user, is_create)
+    if not (instance.details or "").strip():
+        return "Describe the issue."
+    if not instance.lab_id:
+        return "Choose the lab."
+    err = _future_date_error(instance.reporting_date)
     if err:
         return err
-    main = instance.main_issue
-    if main and main not in enums.values("issue_main"):
-        return f"'{main}' is not a valid main issue."
-    if instance.sub_issue and main:
-        allowed = enums.sub_issue_values(main)
-        if allowed and instance.sub_issue not in allowed:
-            return f"'{instance.sub_issue}' is not a sub-issue of '{main}'."
-    if instance.students_affected == "some" and not instance.number_affected:
-        return "Tell us how many students are affected."
+    if user.role == VT and is_create:
+        # an issue is reported by the trainer themselves
+        own = db.session.query(M.Trainer.id).filter(
+            M.Trainer.user_id == user.id, M.Trainer.is_deleted.is_(False)
+        ).first()
+        if not own:
+            return "Your login isn't linked to a trainer profile yet - ask your admin."
+        instance.trainer_id = own[0]
     return None
 
 
@@ -257,6 +478,7 @@ register(ResourceConfig(
     filters=["district_id", "block"],
     sortable=["name", "udise_code", "created_at"], default_sort=("name", "asc"),
     computed=lambda o: {"district_name": o.district.name if o.district else None},
+    manual_location=True,
 ))
 
 register(ResourceConfig(
@@ -366,21 +588,29 @@ register(ResourceConfig(
 # =========================================================================
 register(ResourceConfig(
     name="students", model=M.Student, label="Student",
-    write_roles=[SA, OA, DM, VT],
+    # Only the trainer registers and maintains students; every other role just
+    # views them. Verification is a separate workflow (workflow.py), not a write.
+    # Students are records only - they never get a login.
+    write_roles=[VT],
     writable=["school_id", "lab_id", "job_role_id", "academic_year", "class_grade",
               "section", "roll_number", "first_name", "middle_name", "last_name",
               "gender", "dob", "email", "father_name", "mother_name", "guardian_name",
               "stream", "mobile_primary", "mobile_secondary", "whatsapp_number",
               "cwsn", "social_category_id", "date_of_enrolment", "photo_url",
               "had_vocational_9_10", "continuing_same_trade", "verification_status",
-              "verification_remarks", "user_id", "status"],
+              "verification_remarks", "status"],
     search=["first_name", "last_name", "roll_number", "email"],
     filters=["school_id", "lab_id", "job_role_id", "class_grade", "section",
-             "academic_year", "verification_status", "cwsn"],
+             "academic_year", "verification_status", "enrolment_status", "cwsn"],
     sortable=["first_name", "roll_number", "created_at"],
     default_sort=("created_at", "desc"),
     computed=lambda o: {"full_name": o.full_name, **_school_name(o)},
     validate=_validate_student,
+    # a trainer moves students up through Promote, not by editing them
+    locked_on_update={VT: {
+        "class_grade": "A student's class changes through Promote Students at the end of the year.",
+        "academic_year": "A student's year changes through Promote Students at the end of the year.",
+    }},
 ))
 register(ResourceConfig(
     name="assessments", model=M.Assessment, label="Assessment / Marks",
@@ -401,103 +631,95 @@ register(ResourceConfig(
 register(ResourceConfig(
     name="attendance", model=M.DailyAttendance, label="Daily Attendance",
     write_roles=[SA, OA, DM, VT],
-    writable=["trainer_id", "school_id", "lab_id", "job_role_id", "academic_year",
-              "date", "day_type", "leave_reason", "activity_type",
-              # a. Teaching Vocational Education
-              "class_taught", "section_taught", "theory_or_practical", "class_type",
-              "duration_mins", "module_id", "unit_id", "session_id",
-              "class_picture_url", "lesson_plan_picture_url",
-              # b. Visit to Industry
-              "industry_name", "industry_contact_person", "industry_contact_phone",
-              # c. Visit to Educational Institution
-              "institute_name", "institute_contact_person", "institute_contact_phone",
-              # d. On-Job Training Coordination
-              "ojt_activity_type",
-              # e. Parent Teachers Meeting / f. Community Home Visit
-              "parents_count",
-              # h. Teaching Non-Vocational Subject
-              "other_class_details", "other_class_duration_mins",
-              # j. Assignment from Vocational Department
-              "assignment_number", "assignment_photo_url",
-              # l. Assessor in Other School for Exam
-              "assessor_school_name", "assessor_udise", "assessor_class",
-              "boys_present", "girls_present",
-              # m. Training of Teacher/Trainer
-              "training_type",
-              # o. Guidance & Counselling
-              "students_count",
-              # shared
-              "details", "status"],
-    search=["activity_type", "class_taught", "industry_name", "institute_name", "details"],
-    filters=["trainer_id", "school_id", "lab_id", "job_role_id", "academic_year", "date",
-             "activity_type", "day_type", "class_taught", "endorsement_status"],
+    # the trainer's own daily attendance: date, time, photo, comment - and where
+    # they were (within 1 km of the school). Older activity-branch columns keep
+    # past answers but are no longer written.
+    writable=["trainer_id", "lab_id", "date", "attendance_time", "photo_url", "details", "status"],
+    search=["details"],
+    filters=["trainer_id", "lab_id", "academic_year", "date", "endorsement_status"],
     sortable=["date", "created_at"], default_sort=("date", "desc"),
-    computed=_school_name,
-    validate=_validate_attendance,
+    computed=_attendance_display,
+    validate=_validate_vt_attendance,
+    captures_location=True,
     children=[ChildCollection("student_marks", M.AttendanceStudentMark,
                               "attendance_id", ["student_id", "present"])],
 ))
 register(ResourceConfig(
+    name="class-attendance", model=M.ClassAttendance, label="Class Attendance",
+    write_roles=[SA, OA, DM, VT],
+    writable=["trainer_id", "lab_id", "job_role_id", "date", "time", "class_grade",
+              "sections", "activity", "photo_url", "comment", "status"],
+    search=["activity", "comment"],
+    filters=["trainer_id", "lab_id", "academic_year", "class_grade", "date"],
+    sortable=["date", "created_at"], default_sort=("date", "desc"),
+    computed=_class_attendance_display,
+    validate=_validate_class_attendance,
+    captures_location=True,
+    children=[ChildCollection("student_marks", M.ClassAttendanceStudentMark,
+                              "class_attendance_id", ["student_id", "present"])],
+))
+register(ResourceConfig(
     name="issues", model=M.VTIssue, label="VT Issue",
     write_roles=[SA, OA, DM, VT],
-    writable=["trainer_id", "lab_id", "job_role_id", "academic_year", "reporting_date",
-              "main_issue", "sub_issue", "students_affected", "number_affected",
+    writable=["trainer_id", "lab_id", "academic_year", "reporting_date", "reporting_time",
               "details", "workflow_status", "assigned_to", "resolution_note", "status"],
-    search=["main_issue", "sub_issue", "details"],
-    filters=["trainer_id", "lab_id", "main_issue", "workflow_status", "academic_year"],
+    search=["details"],
+    filters=["trainer_id", "lab_id", "workflow_status", "academic_year"],
     sortable=["reporting_date", "created_at"], default_sort=("reporting_date", "desc"),
     validate=_validate_issue,
+    captures_location=True,
 ))
 register(ResourceConfig(
     name="field-visits", model=M.FieldVisit, label="Field / Industry Visit",
     write_roles=[SA, OA, DM, VT],
-    writable=["school_id", "lab_id", "job_role_id", "class_grade", "sections",
-              "academic_year", "reporting_date", "purpose", "activities", "module_id",
-              "units_covered", "sessions_covered", "organisation_name", "address",
-              "distance_km", "picture_url", "contact_person", "contact_mobile",
-              "contact_email", "contact_designation", "more_visits_interest",
-              "ojt_internship_interest", "organisation_feedback", "student_feedback",
-              "status"],
-    search=["organisation_name", "purpose"],
-    filters=["school_id", "lab_id", "job_role_id", "academic_year", "class_grade"],
+    writable=["lab_id", "job_role_id", "class_grade", "sections", "academic_year",
+              "reporting_date", "purpose", "activities", "organisation_name", "address",
+              "picture_url", "contact_person", "contact_mobile", "contact_email",
+              "contact_designation", "status"],
+    search=["organisation_name", "address", "purpose"],
+    filters=["lab_id", "job_role_id", "academic_year", "class_grade"],
     sortable=["reporting_date", "created_at"], default_sort=("reporting_date", "desc"),
     computed=_school_name,
-    validate=_own_job_role_validator(),
+    validate=_validate_field_visit,
+    captures_location=True,
     children=[ChildCollection("student_marks", M.FieldVisitStudentMark,
                               "field_visit_id", ["student_id", "present"])],
 ))
 register(ResourceConfig(
     name="guest-lectures", model=M.GuestLecture, label="Guest Lecture",
     write_roles=[SA, OA, DM, VT],
-    writable=["school_id", "lab_id", "job_role_id", "class_grade", "sections",
-              "academic_year", "reporting_date", "lecture_type", "topic",
-              "duration_mins", "module_id", "units", "sessions", "methodology",
-              "photo_url", "lecturer_name", "lecturer_qualification", "lecturer_phone",
-              "lecturer_email", "lecturer_experience", "lecturer_address",
-              "lecturer_work_status", "lecturer_photo_url", "student_feedback", "status"],
+    writable=["lab_id", "job_role_id", "class_grade", "sections", "academic_year",
+              "reporting_date", "topic", "photo_url", "lecturer_name",
+              "lecturer_qualification", "lecturer_phone", "lecturer_email",
+              "lecturer_experience", "status"],
     search=["topic", "lecturer_name"],
-    filters=["school_id", "lab_id", "job_role_id", "academic_year", "class_grade", "lecture_type"],
+    filters=["lab_id", "academic_year", "class_grade"],
     sortable=["reporting_date", "created_at"], default_sort=("reporting_date", "desc"),
     computed=_school_name,
-    validate=_own_job_role_validator(),
+    validate=_validate_guest_lecture,
+    captures_location=True,
+    children=[ChildCollection("student_marks", M.GuestLectureStudentMark,
+                              "guest_lecture_id", ["student_id", "present"])],
 ))
 register(ResourceConfig(
     name="equipment", model=M.LabEquipment, label="Lab Equipment",
     write_roles=[SA, OA, DM, VT],
-    writable=["school_id", "lab_id", "academic_year", "receiving_status",
-              "receipt_date", "equipment_status", "raw_material_availability",
-              "raw_material_fund_status", "details", "status"],
-    search=["details"], filters=["school_id", "lab_id", "academic_year", "equipment_status"],
-    sortable=["created_at"], default_sort=("created_at", "desc"),
-    computed=_school_name,
+    writable=["trainer_id", "lab_id", "name", "receipt_date", "details",
+              "photo_url", "note", "status"],
+    search=["name", "details", "note"], filters=["lab_id", "trainer_id"],
+    sortable=["name", "receipt_date", "created_at"], default_sort=("created_at", "desc"),
+    computed=_equipment_display,
+    validate=_validate_equipment,
+    locked_on_update={VT: {"trainer_id": "Only the Principal can reassign equipment to another trainer."}},
 ))
 register(ResourceConfig(
     name="equipment-maintenance", model=M.EquipmentMaintenance, label="Maintenance Log",
     write_roles=[SA, OA, DM, VT],
-    writable=["equipment_id", "date", "issue", "action", "cost_incurred",
-              "downtime_hours", "resolved_by", "status"],
-    search=["issue", "action", "resolved_by"], filters=["equipment_id"],
+    writable=["equipment_id", "date", "issue", "maintenance_status", "note", "status"],
+    search=["issue", "note"], filters=["equipment_id", "maintenance_status"],
     sortable=["date", "created_at"], default_sort=("date", "desc"),
+    computed=_maintenance_display,
+    validate=_validate_maintenance,
 ))
 
 # =========================================================================
@@ -525,7 +747,7 @@ register(ResourceConfig(
 ))
 register(ResourceConfig(
     name="diaries", model=M.DailyDiary, label="Daily Diary",
-    write_roles=[SA, OA, DM, VT, ST],
+    write_roles=[SA, OA, DM, VT],
     writable=["date", "student_id", "school_id", "lab_id", "class_grade", "section",
               "employer_id", "learning", "hours_spent", "photo_url", "status"],
     search=["learning"], filters=["student_id", "school_id", "date"],
@@ -552,7 +774,7 @@ register(ResourceConfig(
 # =========================================================================
 register(ResourceConfig(
     name="feedback", model=M.Feedback, label="Feedback",
-    write_roles=[SA, OA, DM, PR, VT, ST],
+    write_roles=[SA, OA, DM, PR, VT],
     writable=["source", "subject", "rating", "comments", "date", "school_id",
               "lab_id", "status"],
     search=["subject", "comments"], filters=["source", "school_id", "rating"],
@@ -571,7 +793,7 @@ register(ResourceConfig(
 #  VIEW ROLES + DATE FIELDS - who may see each resource in nav + API, and
 #  which column drives date-range reporting. Applied in _finalise().
 # =========================================================================
-STAFF = [SA, OA, DM, PR, VT]           # every staff role (not students)
+STAFF = ALL_ROLES                      # every role that can log in
 VIEW_ROLES = {
     "organisations": [SA, OA],
     "states": [SA, OA, DM],
@@ -588,7 +810,7 @@ VIEW_ROLES = {
     "units": ALL_ROLES,
     "sessions": ALL_ROLES,
     "students": STAFF,
-    "assessments": ALL_ROLES,            # ST sees own via scope
+    "assessments": STAFF,
     "attendance": STAFF,
     "issues": STAFF,
     "field-visits": STAFF,
@@ -596,16 +818,16 @@ VIEW_ROLES = {
     "equipment": STAFF,
     "equipment-maintenance": STAFF,
     "employers": STAFF,
-    "employer-student-maps": STAFF + [ST],
-    "diaries": STAFF + [ST],
-    "ojt-placements": STAFF + [ST],
+    "employer-student-maps": STAFF,
+    "diaries": STAFF,
+    "ojt-placements": STAFF,
     "feedback": ALL_ROLES,
     "notifications": [SA, OA],
 }
 DATE_FIELDS = {
     "attendance": "date", "issues": "reporting_date", "field-visits": "reporting_date",
     "guest-lectures": "reporting_date", "diaries": "date", "assessments": "date",
-    "students": "date_of_enrolment", "feedback": "date",
+    "students": "date_of_enrolment", "feedback": "date", "class-attendance": "date",
 }
 
 

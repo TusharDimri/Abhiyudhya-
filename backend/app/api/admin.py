@@ -8,12 +8,14 @@ from app.extensions import db
 from app.models.misc import AuditLog
 from app.rbac import login_required, current_user
 from app.rbac.roles import Role
+from app.services.cache import cached_json
 
 bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 
 
 @bp.get("/audit-logs")
 @login_required
+@cached_json("audit_logs", ttl=60)
 def audit_logs():
     user = current_user()
     if user.role not in (Role.SUPER_ADMIN.value, Role.ORG_ADMIN.value):

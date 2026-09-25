@@ -12,9 +12,12 @@ from flask import current_app
 
 def _client():
     cfg = current_app.config
+    # Pre-signed URLs are opened by the browser, so they must be signed for the
+    # address the browser can reach. Locally that is localhost:9000, not the
+    # in-Docker hostname `minio` the API itself would use.
     return boto3.client(
         "s3",
-        endpoint_url=cfg.get("S3_ENDPOINT_URL"),
+        endpoint_url=cfg.get("S3_PUBLIC_ENDPOINT_URL") or cfg.get("S3_ENDPOINT_URL"),
         region_name=cfg.get("S3_REGION"),
         aws_access_key_id=cfg.get("S3_ACCESS_KEY"),
         aws_secret_access_key=cfg.get("S3_SECRET_KEY"),

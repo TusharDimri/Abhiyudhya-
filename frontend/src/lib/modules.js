@@ -11,10 +11,15 @@
      autoFor        roles whose own profile already answers it
      onlyFor/hideFor  roles the field exists / does not exist for
      group          which titled section of the form it belongs in
+     quiet          once filled in (autoFor/derive), saved but not shown
+     readOnlyFor    roles that see the value but never change it
+     remember       a new form starts with the last answer this user gave
+     lookup         { fill: [...] } - typing a name used before fills those fields
 */
 import {
   labById, jobRoleForClass, labJobRoleIds, labSections,
 } from "./fieldOptions";
+import { todayISO } from "./dates";
 
 // shared option-key shortcuts
 const SECTOR = { optionsKey: "sectors" };
@@ -30,7 +35,17 @@ const YESNO = [
   { value: "false", label: "No" },
 ];
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = todayISO;
+// the user's local time, "HH:MM"
+const nowTime = () => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+// for "when did this happen" dates: prefilled with today, never in the future
+const PAST_DATE = {
+  type: "date", defaultValue: today, max: today,
+  validate: (v) => (v > today() ? "Date can't be in the future." : null),
+};
 
 // --- conditional visibility -------------------------------------------
 const WORKING = (v) => !v.day_type || v.day_type === "Working day";
@@ -94,6 +109,32 @@ const JOBROLE_BY_LAB = (values, c) => {
   const ids = labJobRoleIds(lab).map(String);
   const narrowed = all.filter((o) => ids.includes(String(o.value)));
   return narrowed.length ? narrowed : all;
+};
+
+// Defaults for forms where a trainer names the lab's job role themselves:
+// their (first) lab, and that lab's job role when there is only one to pick.
+const FIRST_LAB = ({ options }) => options?.labs?.[0]?.value;
+const ONLY_JOB_ROLE = ({ options, profile }) => {
+  const labId = profile?.lab_id || options?.labs?.[0]?.value;
+  const roles = JOBROLE_BY_LAB({ lab_id: labId }, { boot: { options } });
+  return roles.length === 1 ? roles[0].value : undefined;
+};
+
+// Classes the chosen job role is taught in (9-10 or 11-12 slot of the lab).
+const CLASS_FOR_JOB_ROLE = (values, c) => {
+  const all = CLASS_BY_LAB(values, c);
+  const lab = labById(c.boot, values.lab_id);
+  if (!lab || !values.job_role_id) return all;
+  const own = all.filter((o) => String(jobRoleForClass(lab, o.value)) === String(values.job_role_id));
+  return own.length ? own : all;
+};
+
+const LEVEL_OF_CLASS = { 9: 1, 10: 2, 11: 3, 12: 4 };
+
+// a class with exactly one section configured: that section
+const ONLY_SECTION = (values, c) => {
+  const list = labSections(labById(c.boot, values.lab_id), values.class_grade);
+  return list.length === 1 ? list[0] : undefined;
 };
 
 // Sections come from the lab's own per-class configuration (spec 1.3), so a
@@ -223,6 +264,11 @@ export const MODULES = {
       { name: "address", label: "Full address", type: "textarea", group: "Contact" },
       { name: "email", label: "Email", type: "email", group: "Contact" },
       { name: "phone", label: "Phone", type: "tel", group: "Contact" },
+      {
+        name: "location_lat", label: "Location", type: "geopoint", lngField: "location_lng", group: "Location",
+        hint: "Trainers can only mark attendance within 1 km of this point. Stand at the school and use your current location, or copy the coordinates from Google Maps (right-click the school).",
+      },
+      { name: "location_lng", label: "Longitude", hidden: true },
     ],
   },
   principals: {
@@ -380,10 +426,13 @@ export const MODULES = {
       { key: "roll_number", label: "Roll" },
       { key: "class_grade", label: "Class" },
       { key: "section", label: "Sec" },
+      { key: "academic_year", label: "Year" },
       { key: "school_name", label: "School" },
       { key: "verification_status", label: "Verification", badge: true },
+      { key: "enrolment_status", label: "Status", badge: true },
     ],
-    formHint: "Students are registered in Class 9 and Class 11; Class 10 and 12 come from verification.",
+    formHint: "Students are registered in Class 9 and Class 11; they reach Class 10 and 12 through Promote Students at the end of the year.",
+    pageActions: [{ key: "promote", label: "⬆ Promote Students", roles: ["VT", "DM", "OA", "SA"] }],
     fields: [
       { name: "school_id", label: "School", type: "select", ...SCHOOL, autoFor: ["VT", "PR"], required: true, group: "Placement" },
       { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, autoFor: ["VT"], group: "Placement" },
@@ -391,10 +440,12 @@ export const MODULES = {
         name: "class_grade", label: "Class", type: "select", required: true,
         dynamicOptions: REGISTRATION_CLASS, group: "Placement",
         hint: "Registration happens in Class 9 and Class 11.",
+        readOnlyFor: ["VT"],   // changes only through Promote Students
       },
       {
         name: "section", label: "Section", type: "select", allowCustom: false,
         dynamicOptions: SECTIONS_FOR("class_grade"),
+        derive: ONLY_SECTION, deriveNote: "The only section this class has",
         dependsOn: { field: "class_grade" }, group: "Placement", hint: SECTION_HINT,
       },
       {
@@ -402,7 +453,7 @@ export const MODULES = {
         derive: DERIVE_JOB_ROLE("class_grade"), deriveNote: JOB_ROLE_NOTE,
         dynamicOptions: JOBROLE_BY_LAB, group: "Placement",
       },
-      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", autoFor: ["VT", "PR", "DM"], group: "Placement" },
+      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", autoFor: ["VT", "PR", "DM"], readOnlyFor: ["VT"], group: "Placement" },
       { name: "roll_number", label: "Roll number", group: "Placement" },
       { name: "stream", label: "Stream", group: "Placement", hint: "e.g. Science, Commerce, Arts (Class 11-12)." },
 
@@ -439,7 +490,10 @@ export const MODULES = {
       { name: "verification_status", label: "Verification status", type: "select", enumKey: "verification_status", defaultValue: "pending", group: "Verification" },
       { name: "verification_remarks", label: "Verification remarks", type: "textarea", group: "Verification" },
     ],
-    rowActions: [{ action: "verify", roles: ["VT", "DM", "OA", "SA"] }],
+    rowActions: [
+      { action: "verify", roles: ["VT", "DM", "OA", "SA"] },
+      { action: "status", roles: ["VT", "DM", "OA", "SA"] },
+    ],
   },
   assessments: {
     label: "Assessments", singular: "Assessment", icon: "🎯", group: "People & Students",
@@ -451,15 +505,16 @@ export const MODULES = {
       { key: "result", label: "Result", badge: true },
     ],
     fields: [
-      { name: "student_id", label: "Student", type: "select", optionsKey: "students", async: true, required: true, autoFor: ["ST"], group: "Who" },
-      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", derive: FROM_STUDENT("academic_year"), deriveNote: STUDENT_NOTE, autoFor: ["VT", "PR", "DM", "ST"], group: "Who" },
+      { name: "student_id", label: "Student", type: "select", optionsKey: "students", async: true, required: true, group: "Who" },
+      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", derive: FROM_STUDENT("academic_year"), deriveNote: STUDENT_NOTE, autoFor: ["VT", "PR", "DM"], group: "Who" },
       { name: "class_grade", label: "Class", type: "select", enumKey: "class_grades", derive: FROM_STUDENT("class_grade"), deriveNote: STUDENT_NOTE, group: "Who" },
-      { name: "job_role_id", label: "Job role", type: "select", ...JOBROLE, derive: FROM_STUDENT("job_role_id"), deriveNote: STUDENT_NOTE, autoFor: ["VT", "ST"], group: "Who" },
-      { name: "nsqf_level", label: "NSQF level", type: "number", min: 1, max: 4, group: "Who" },
-      { name: "assessment_type", label: "Type", type: "select", enumKey: "assessment_types", group: "Result" },
-      { name: "name", label: "Assessment name", group: "Result" },
+      { name: "job_role_id", label: "Job role", type: "select", ...JOBROLE, derive: FROM_STUDENT("job_role_id"), deriveNote: STUDENT_NOTE, autoFor: ["VT"], group: "Who" },
+      { name: "nsqf_level", label: "NSQF level", type: "number", min: 1, max: 4, group: "Who",
+        derive: (v) => LEVEL_OF_CLASS[String(v.class_grade)], deriveNote: "Level follows the class (Class 9 is Level 1)" },
+      { name: "assessment_type", label: "Type", type: "select", enumKey: "assessment_types", group: "Result", remember: true },
+      { name: "name", label: "Assessment name", group: "Result", remember: true },
       { name: "date", label: "Date", type: "date", defaultValue: today, group: "Result" },
-      { name: "max_marks", label: "Max marks", type: "number", min: 0, group: "Result" },
+      { name: "max_marks", label: "Max marks", type: "number", min: 0, group: "Result", remember: true },
       { name: "marks_obtained", label: "Marks obtained", type: "number", min: 0, group: "Result" },
       { name: "result", label: "Result", type: "select", options: ["pass", "fail"], group: "Result" },
       { name: "level_certification_status", label: "Level certification", type: "select", options: ["L1", "L2", "L3", "L4"], group: "Certification" },
@@ -472,269 +527,200 @@ export const MODULES = {
   // ---------------- DAILY OPERATIONS ----------------
   attendance: {
     label: "Daily Attendance", singular: "Attendance", icon: "🗓️", group: "Daily Operations",
+    // the trainer's own attendance for the day: marked at the school (within
+    // 1 km - checked by the server against the school's location)
+    captureLocation: true,
     columns: [
       { key: "date", label: "Date" },
-      { key: "day_type", label: "Day" },
-      { key: "activity_type", label: "Activity" },
-      { key: "class_taught", label: "Class" },
-      { key: "school_name", label: "School" },
+      { key: "attendance_time", label: "Time" },
+      { key: "trainer_name", label: "Trainer" },
+      { key: "details", label: "Comment" },
       { key: "endorsement_status", label: "Endorsement", badge: true },
     ],
-    formHint: "Pick the activity and only that activity's questions appear.",
     fields: [
-      // --- the day ---
-      { name: "date", label: "Date", type: "date", required: true, defaultValue: today, group: "The day" },
-      { name: "day_type", label: "Day type", type: "select", enumKey: "day_types", defaultValue: "Working day", required: true, group: "The day" },
-      { name: "leave_reason", label: "Reason for leave", required: true, showIf: (v) => v.day_type === "On leave", group: "The day", wide: true },
-
-      // --- who and where (a trainer's own posting answers all of this) ---
-      { name: "trainer_id", label: "Trainer", type: "select", optionsKey: "trainers", autoFor: ["VT"], group: "Who & where" },
-      // School and lab are asked for on every day type, leave included: they
-      // are what puts the record inside this trainer's scope.
-      { name: "school_id", label: "School", type: "select", ...SCHOOL, autoFor: ["VT", "PR"], group: "Who & where" },
-      { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, autoFor: ["VT"], group: "Who & where" },
-      {
-        name: "job_role_id", label: "Job role", type: "select",
-        autoFor: ["VT"], derive: DERIVE_JOB_ROLE("class_taught"), deriveNote: JOB_ROLE_NOTE,
-        dynamicOptions: JOBROLE_BY_LAB, group: "Who & where",
-      },
-      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", autoFor: ["VT", "PR", "DM"], group: "Who & where" },
-
-      { name: "activity_type", label: "Activity type", type: "select", enumKey: "activity_types", required: true, showIf: WORKING, group: "Activity" },
-
-      // --- a. Teaching Vocational Education ---
-      { name: "class_taught", label: "Class taught", type: "select", required: true, showIf: TEACHING, dynamicOptions: CLASS_BY_LAB, group: "Class taught" },
-      {
-        name: "section_taught", label: "Section(s) taught", type: "multiselect", showIf: TEACHING,
-        dynamicOptions: SECTIONS_FOR("class_taught"), dependsOn: { field: "class_taught" },
-        allowCustom: true, customPlaceholder: "Another section…", hint: SECTION_HINT, group: "Class taught",
-      },
-      { name: "theory_or_practical", label: "Theory / Practical", type: "select", enumKey: "theory_practical", showIf: TEACHING, group: "Class taught" },
-      { name: "class_type", label: "Class type", type: "select", enumKey: "class_types", showIf: TEACHING, group: "Class taught" },
-      { name: "duration_mins", label: "Class duration (minutes)", type: "number", min: 0, showIf: TEACHING, group: "Class taught" },
-      MODULE_TYPE_F(TEACHING, "Curriculum covered"),
-      MODULE_F(TEACHING, "Curriculum covered"),
-      UNIT_F(TEACHING, "Curriculum covered"),
-      SESSION_F(TEACHING, "Curriculum covered"),
-      { name: "class_picture_url", label: "Class picture", type: "file", accept: "image/*", showIf: TEACHING, group: "Evidence" },
-      { name: "lesson_plan_picture_url", label: "Lesson-plan picture", type: "file", accept: "image/*", showIf: TEACHING, group: "Evidence" },
-      { name: "student_marks", label: "Student attendance", type: "studentmarks", showIf: TEACHING, group: "Student attendance", classField: "class_taught", sectionField: "section_taught" },
-
-      // --- b. Visit to Industry ---
-      { name: "industry_name", label: "Industry name", showIf: ACT("Visit to Industry"), group: "Industry visit" },
-      { name: "industry_contact_person", label: "Contact person name", showIf: ACT("Visit to Industry"), group: "Industry visit" },
-      { name: "industry_contact_phone", label: "Contact person phone", type: "tel", showIf: ACT("Visit to Industry"), group: "Industry visit" },
-
-      // --- c. Visit to Educational Institution ---
-      { name: "institute_name", label: "Institute name", showIf: ACT("Visit to Educational Institution"), group: "Institution visit" },
-      { name: "institute_contact_person", label: "Contact person name", showIf: ACT("Visit to Educational Institution"), group: "Institution visit" },
-      { name: "institute_contact_phone", label: "Contact person phone", type: "tel", showIf: ACT("Visit to Educational Institution"), group: "Institution visit" },
-
-      // --- d. On-Job Training Coordination ---
-      { name: "ojt_activity_type", label: "Coordination activity", type: "select", enumKey: "ojt_coordination_activities", showIf: ACT("On-Job Training Coordination"), group: "OJT coordination" },
-
-      // --- e. Parent Teachers Meeting / f. Community Home Visit ---
-      { name: "parents_count", label: "Parents count", type: "number", min: 0, showIf: ACT("Parent Teachers Meeting", "Community Home Visit"), group: "Parents" },
-
-      // --- h. Teaching Non-Vocational Subject ---
-      { name: "other_class_details", label: "Other class details", type: "textarea", showIf: ACT("Teaching Non-Vocational Subject"), group: "Non-vocational class" },
-      { name: "other_class_duration_mins", label: "Other class duration (minutes)", type: "number", min: 0, showIf: ACT("Teaching Non-Vocational Subject"), group: "Non-vocational class" },
-
-      // --- j. Assignment from Vocational Department ---
-      { name: "assignment_number", label: "Assignment number", showIf: ACT("Assignment from Vocational Department"), group: "Assignment" },
-      { name: "assignment_photo_url", label: "Assignment photo", type: "file", accept: "image/*", showIf: ACT("Assignment from Vocational Department"), group: "Assignment" },
-
-      // --- l. Assessor in Other School for Exam ---
-      { name: "assessor_school_name", label: "School name", showIf: ACT("Assessor in Other School"), group: "Assessor duty" },
-      { name: "assessor_udise", label: "UDISE code", showIf: ACT("Assessor in Other School"), group: "Assessor duty" },
-      { name: "assessor_class", label: "Class", type: "select", enumKey: "class_grades", showIf: ACT("Assessor in Other School"), group: "Assessor duty" },
-      { name: "boys_present", label: "Boys present", type: "number", min: 0, showIf: ACT("Assessor in Other School"), group: "Assessor duty" },
-      { name: "girls_present", label: "Girls present", type: "number", min: 0, showIf: ACT("Assessor in Other School"), group: "Assessor duty" },
-
-      // --- m. Training of Teacher/Trainer ---
-      { name: "training_type", label: "Training programme", type: "select", enumKey: "training_types", showIf: ACT("Training of Teacher/Trainer"), group: "Training" },
-
-      // --- o. Guidance & Counselling ---
-      { name: "students_count", label: "Students count", type: "number", min: 0, showIf: ACT("Guidance & Counselling"), group: "Guidance & counselling" },
-
-      // --- g, i, k, n and the narrative every other branch asks for ---
-      {
-        name: "details", label: "Details", type: "textarea", rows: 4, group: "Details",
-        hint: "Describe the activity carried out.",
-        showIf: (v) => WORKING(v) && !!v.activity_type && v.activity_type !== "Teaching Vocational Education",
-      },
+      // today and now, as the trainer marks it - not changeable by them
+      { name: "date", label: "Date", required: true, ...PAST_DATE, readOnlyFor: ["VT"] },
+      { name: "attendance_time", label: "Time", type: "time", required: true, defaultValue: nowTime, readOnlyFor: ["VT"] },
+      { name: "photo_url", label: "Photo", type: "file", accept: "image/*" },
+      { name: "details", label: "Comment", type: "textarea", rows: 3, placeholder: "Anything to note about today (optional)" },
+      { name: "trainer_id", label: "Trainer", type: "select", optionsKey: "trainers", autoFor: ["VT"], quiet: true },
+      { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"], quiet: true,
+        defaultValue: FIRST_LAB },
     ],
     rowActions: [{ action: "endorse", roles: ["PR", "OA", "SA"] }],
   },
+  "class-attendance": {
+    label: "Class Attendance", singular: "Class Attendance", icon: "🧑‍🏫", group: "Daily Operations",
+    captureLocation: true,
+    columns: [
+      { key: "date", label: "Date" },
+      { key: "time", label: "Time" },
+      { key: "class_grade", label: "Class" },
+      { key: "sections", label: "Sections" },
+      { key: "activity", label: "Activity" },
+      { key: "attended", label: "Attended" },
+    ],
+    fields: [
+      { name: "date", label: "Date", required: true, ...PAST_DATE, readOnlyFor: ["VT"] },
+      { name: "time", label: "Time", type: "time", required: true, defaultValue: nowTime, readOnlyFor: ["VT"] },
+      // one lab: filled in silently; several: the first is preselected
+      { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"], quiet: true,
+        defaultValue: FIRST_LAB },
+      { name: "class_grade", label: "Class", type: "select", dynamicOptions: CLASS_BY_LAB, required: true, remember: true },
+      {
+        name: "sections", label: "Section(s)", type: "multiselect",
+        dynamicOptions: SECTIONS_FOR("class_grade"), dependsOn: { field: "class_grade" },
+        allowCustom: true, customPlaceholder: "Another section…", remember: true,
+      },
+      { name: "student_marks", label: "Students", type: "studentmarks", mode: "attend",
+        classField: "class_grade", sectionField: "sections" },
+      { name: "activity", label: "Activity", type: "textarea", rows: 3, required: true, group: "Activity",
+        placeholder: "What was done in class today?" },
+      { name: "photo_url", label: "Photo", type: "file", accept: "image/*", group: "Activity" },
+      { name: "comment", label: "Comment", type: "textarea", rows: 2, placeholder: "Anything else (optional)", group: "Activity" },
+      // recorded with the class, never asked of a trainer
+      { name: "job_role_id", label: "Job role", type: "select", derive: DERIVE_JOB_ROLE("class_grade"), dynamicOptions: JOBROLE_BY_LAB, quiet: true },
+      { name: "trainer_id", label: "Trainer", type: "select", optionsKey: "trainers", autoFor: ["VT"], quiet: true },
+    ],
+    defaultGroup: "Class",
+  },
   issues: {
     label: "VT Issues", singular: "Issue", icon: "⚠️", group: "Daily Operations",
+    captureLocation: true,
     columns: [
       { key: "reporting_date", label: "Date" },
-      { key: "main_issue", label: "Main issue" },
-      { key: "sub_issue", label: "Sub issue" },
-      { key: "students_affected", label: "Affected" },
+      { key: "reporting_time", label: "Time" },
+      { key: "details", label: "Issue" },
       { key: "workflow_status", label: "Status", badge: true },
     ],
     fields: [
-      { name: "trainer_id", label: "Trainer", type: "select", optionsKey: "trainers", autoFor: ["VT"], group: "Who & where" },
-      { name: "lab_id", label: "Lab", type: "select", ...LAB, autoFor: ["VT"], group: "Who & where" },
-      {
-        name: "job_role_id", label: "Job role", type: "select", autoFor: ["VT"],
-        derive: DERIVE_JOB_ROLE("__none"), deriveNote: "Taken from your lab",
-        dynamicOptions: JOBROLE_BY_LAB, group: "Who & where",
-      },
-      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", autoFor: ["VT", "PR", "DM"], group: "Who & where" },
-      { name: "reporting_date", label: "Reporting date", type: "date", required: true, defaultValue: today, group: "Who & where" },
-
-      { name: "main_issue", label: "Main issue", type: "select", enumKey: "issue_main", required: true, group: "The issue" },
-      {
-        name: "sub_issue", label: "Sub issue", type: "select", required: true,
-        dependsOn: { field: "main_issue" }, dependsLabel: "main issue",
-        disabledWhen: (v) => !v.main_issue,
-        dynamicOptions: (v, c) => c.enums?.issue_sub?.[v.main_issue] || [],
-        group: "The issue",
-      },
-      { name: "students_affected", label: "Students affected", type: "select", enumKey: "students_affected", group: "The issue" },
-      {
-        name: "number_affected", label: "Number of students affected", type: "number", min: 1,
-        required: true, showIf: (v) => v.students_affected === "some", group: "The issue",
-      },
-      { name: "details", label: "Issue details", type: "textarea", rows: 4, required: true, group: "The issue" },
+      { name: "reporting_date", label: "Date", required: true, ...PAST_DATE },
+      { name: "reporting_time", label: "Time", type: "time", required: true, defaultValue: nowTime,
+        validate: (v, values) => (values.reporting_date === today() && v > nowTime() ? "Time can't be in the future." : null) },
+      { name: "details", label: "Issue", type: "textarea", rows: 4, required: true, placeholder: "What is the issue?" },
+      // recorded with the issue, never asked of a trainer
+      { name: "trainer_id", label: "Trainer", type: "select", optionsKey: "trainers", autoFor: ["VT"], quiet: true },
+      { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"], quiet: true,
+        defaultValue: FIRST_LAB },
+      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", autoFor: ["VT", "PR", "DM"], quiet: true },
     ],
     rowActions: [{ action: "transition", roles: ["DM", "OA", "SA"] }],
   },
   "field-visits": {
     label: "Field / Industry Visits", singular: "Field Visit", icon: "🚌", group: "Daily Operations",
+    captureLocation: true,
+    yearlyTarget: true,   // 2 per level per academic year (api/targets.py)
     columns: [
       { key: "reporting_date", label: "Date" },
       { key: "organisation_name", label: "Organisation" },
-      { key: "school_name", label: "School" },
+      { key: "purpose", label: "Purpose" },
       { key: "class_grade", label: "Class" },
       { key: "sections", label: "Sections" },
     ],
     fields: [
-      { name: "reporting_date", label: "Reporting date", type: "date", required: true, defaultValue: today, group: "Who & where" },
-      { name: "school_id", label: "School", type: "select", ...SCHOOL, autoFor: ["VT", "PR"], group: "Who & where" },
-      { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, autoFor: ["VT"], group: "Who & where" },
-      { name: "class_grade", label: "Class", type: "select", dynamicOptions: CLASS_BY_LAB, required: true, group: "Who & where" },
+      { name: "organisation_name", label: "Field visit organisation", required: true, placeholder: "e.g. Tata Motors, Pimpri plant",
+        lookup: { fill: ["address", "contact_person", "contact_designation", "contact_email", "contact_mobile"] } },
+      { name: "address", label: "Organisation address", type: "textarea", rows: 2 },
+      { name: "activities", label: "Field visit activity", type: "textarea", rows: 2 },
+      { name: "purpose", label: "Purpose of visit", type: "textarea", rows: 2 },
+      { name: "contact_person", label: "Contact person name" },
+      { name: "contact_designation", label: "Contact person designation" },
+      { name: "contact_email", label: "Contact person email", type: "email" },
+      { name: "contact_mobile", label: "Contact person mobile", type: "tel" },
+      // one lab: filled in silently; several: the first is preselected
+      { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"], quiet: true,
+        defaultValue: FIRST_LAB },
+      { name: "job_role_id", label: "Job role", type: "select", dynamicOptions: JOBROLE_BY_LAB, required: true,
+        defaultValue: ONLY_JOB_ROLE, remember: true },
+      { name: "picture_url", label: "Photo", type: "file", accept: "image/*" },
+      { name: "class_grade", label: "Class", type: "select", dynamicOptions: CLASS_FOR_JOB_ROLE,
+        dependsOn: { field: "job_role_id" }, required: true, remember: true },
       {
         name: "sections", label: "Section(s)", type: "multiselect",
         dynamicOptions: SECTIONS_FOR("class_grade"), dependsOn: { field: "class_grade" },
-        allowCustom: true, customPlaceholder: "Another section…", hint: SECTION_HINT, group: "Who & where",
+        allowCustom: true, customPlaceholder: "Another section…", remember: true,
       },
-      {
-        name: "job_role_id", label: "Job role", type: "select",
-        derive: DERIVE_JOB_ROLE("class_grade"), deriveNote: JOB_ROLE_NOTE,
-        dynamicOptions: JOBROLE_BY_LAB, group: "Who & where",
-      },
-      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", autoFor: ["VT", "PR", "DM"], group: "Who & where" },
-
-      { name: "purpose", label: "Purpose of the visit", type: "textarea", group: "The visit" },
-      { name: "activities", label: "Field visit activities", type: "textarea", group: "The visit" },
-      MODULE_TYPE_F(undefined, "Curriculum covered"),
-      MODULE_F(undefined, "Curriculum covered"),
-      UNITS_MULTI("units_covered", "Curriculum covered"),
-      SESSIONS_MULTI("sessions_covered", "Curriculum covered"),
-
-      { name: "organisation_name", label: "Field visit organisation", group: "Organisation" },
-      { name: "address", label: "Organisation address", type: "textarea", group: "Organisation" },
-      { name: "distance_km", label: "Distance (km)", type: "number", min: 0, group: "Organisation" },
-      { name: "contact_person", label: "Contact person", group: "Organisation" },
-      { name: "contact_mobile", label: "Contact mobile", type: "tel", group: "Organisation" },
-      { name: "contact_email", label: "Contact email", type: "email", group: "Organisation" },
-      { name: "contact_designation", label: "Contact designation", group: "Organisation" },
-      { name: "more_visits_interest", label: "Interested in more field visits?", type: "checkbox", group: "Organisation" },
-      { name: "ojt_internship_interest", label: "Interested in OJT / internship?", type: "checkbox", group: "Organisation" },
-
-      { name: "picture_url", label: "Field visit picture", type: "file", accept: "image/*", group: "Feedback & evidence" },
-      { name: "organisation_feedback", label: "Feedback from the organisation", type: "textarea", group: "Feedback & evidence" },
-      { name: "student_feedback", label: "Remarks / student feedback", type: "textarea", group: "Feedback & evidence" },
-
-      { name: "student_marks", label: "Students present", type: "studentmarks", classField: "class_grade", sectionField: "sections", group: "Students present" },
+      // everyone starts "not attended"; the trainer taps Attend per student
+      { name: "student_marks", label: "Students", type: "studentmarks", mode: "attend",
+        classField: "class_grade", sectionField: "sections" },
+      { name: "reporting_date", label: "Date", required: true, ...PAST_DATE },
     ],
   },
   "guest-lectures": {
     label: "Guest Lectures", singular: "Guest Lecture", icon: "🎤", group: "Daily Operations",
+    captureLocation: true,
+    yearlyTarget: true,   // 15 per level per academic year (api/targets.py)
     columns: [
       { key: "reporting_date", label: "Date" },
-      { key: "topic", label: "Topic" },
       { key: "lecturer_name", label: "Lecturer" },
-      { key: "lecture_type", label: "Type", badge: true },
+      { key: "topic", label: "Topic" },
+      { key: "class_grade", label: "Class" },
     ],
     fields: [
-      { name: "reporting_date", label: "Reporting date", type: "date", required: true, defaultValue: today, group: "Who & where" },
-      { name: "school_id", label: "School", type: "select", ...SCHOOL, autoFor: ["VT", "PR"], group: "Who & where" },
-      { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, autoFor: ["VT"], group: "Who & where" },
-      { name: "class_grade", label: "Class", type: "select", dynamicOptions: CLASS_BY_LAB, required: true, group: "Who & where" },
+      { name: "lecturer_name", label: "Guest lecturer's name", required: true,
+        lookup: { fill: ["lecturer_qualification", "lecturer_email", "lecturer_phone", "lecturer_experience"] } },
+      { name: "lecturer_qualification", label: "Qualification" },
+      { name: "lecturer_email", label: "Email", type: "email" },
+      { name: "lecturer_phone", label: "Phone", type: "tel" },
+      { name: "lecturer_experience", label: "Work experience", placeholder: "e.g. 8 years as a network engineer" },
+      { name: "topic", label: "Topic covered", required: true },
+      // The class list depends on the lab: one lab is filled in silently, with
+      // several the first is preselected and can be changed.
+      { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"], quiet: true,
+        defaultValue: FIRST_LAB },
+      { name: "class_grade", label: "Class", type: "select", dynamicOptions: CLASS_BY_LAB, required: true, remember: true },
       {
         name: "sections", label: "Section(s)", type: "multiselect",
         dynamicOptions: SECTIONS_FOR("class_grade"), dependsOn: { field: "class_grade" },
-        allowCustom: true, customPlaceholder: "Another section…", hint: SECTION_HINT, group: "Who & where",
+        allowCustom: true, customPlaceholder: "Another section…", remember: true,
       },
-      {
-        name: "job_role_id", label: "Job role", type: "select",
-        derive: DERIVE_JOB_ROLE("class_grade"), deriveNote: JOB_ROLE_NOTE,
-        dynamicOptions: JOBROLE_BY_LAB, group: "Who & where",
-      },
-      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", autoFor: ["VT", "PR", "DM"], group: "Who & where" },
-
-      { name: "lecture_type", label: "Guest lecture type", type: "select", enumKey: "guest_lecture_types", group: "The lecture" },
-      { name: "topic", label: "Guest lecture topic", required: true, group: "The lecture" },
-      { name: "duration_mins", label: "Class duration (minutes)", type: "number", min: 0, group: "The lecture" },
-      { name: "methodology", label: "Methodology", type: "select", enumKey: "guest_lecture_methodology", group: "The lecture" },
-      MODULE_TYPE_F(undefined, "Curriculum covered"),
-      MODULE_F(undefined, "Curriculum covered"),
-      UNITS_MULTI("units", "Curriculum covered"),
-      SESSIONS_MULTI("sessions", "Curriculum covered"),
-
-      { name: "lecturer_name", label: "Lecturer name", group: "The lecturer" },
-      { name: "lecturer_qualification", label: "Qualification", group: "The lecturer" },
-      { name: "lecturer_phone", label: "Phone", type: "tel", group: "The lecturer" },
-      { name: "lecturer_email", label: "Email", type: "email", group: "The lecturer" },
-      { name: "lecturer_experience", label: "Work experience", group: "The lecturer" },
-      { name: "lecturer_work_status", label: "Work status", type: "select", enumKey: "lecturer_work_status", group: "The lecturer" },
-      { name: "lecturer_address", label: "Address", type: "textarea", group: "The lecturer" },
-      { name: "lecturer_photo_url", label: "Lecturer photo", type: "file", accept: "image/*", group: "The lecturer" },
-
-      { name: "photo_url", label: "Guest lecture photo", type: "file", accept: "image/*", group: "Feedback & evidence" },
-      { name: "student_feedback", label: "Remarks / student feedback", type: "textarea", group: "Feedback & evidence" },
+      // everyone starts "not attended"; the trainer taps Attend per student
+      { name: "student_marks", label: "Students", type: "studentmarks", mode: "attend",
+        classField: "class_grade", sectionField: "sections" },
+      { name: "photo_url", label: "Photo", type: "file", accept: "image/*" },
+      { name: "reporting_date", label: "Date", required: true, ...PAST_DATE },
+      // recorded with the lecture, never asked of a trainer (the academic year
+      // is worked out from the date by the server)
+      { name: "job_role_id", label: "Job role", type: "select", derive: DERIVE_JOB_ROLE("class_grade"), dynamicOptions: JOBROLE_BY_LAB, quiet: true },
     ],
   },
   equipment: {
     label: "Lab Equipment", singular: "Equipment", icon: "🖥️", group: "Daily Operations",
     columns: [
-      { key: "school_name", label: "School" },
-      { key: "equipment_status", label: "Status", badge: true },
-      { key: "academic_year", label: "AY" },
+      { key: "name", label: "Equipment" },
+      { key: "lab_name", label: "Lab" },
+      { key: "trainer_name", label: "Trainer" },
+      { key: "receipt_date", label: "Date" },
     ],
     fields: [
-      { name: "school_id", label: "School", type: "select", ...SCHOOL, autoFor: ["VT", "PR"], group: "Lab" },
-      { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, autoFor: ["VT"], group: "Lab" },
-      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", autoFor: ["VT", "PR", "DM"], group: "Lab" },
-      { name: "receiving_status", label: "Tool / equipment received?", type: "checkbox", group: "Equipment" },
-      { name: "receipt_date", label: "Receipt date", type: "date", showIf: (v) => !!v.receiving_status, group: "Equipment" },
-      { name: "equipment_status", label: "Tool / equipment status", type: "select", enumKey: "equipment_status", group: "Equipment" },
-      { name: "raw_material_availability", label: "Raw material availability", type: "select", enumKey: "raw_material_availability", group: "Raw material" },
-      { name: "raw_material_fund_status", label: "Raw material fund received?", type: "checkbox", group: "Raw material" },
-      { name: "details", label: "Details", type: "textarea", group: "Raw material" },
+      // Every item is owned by a trainer, so it can be handed over when one
+      // leaves. A trainer's own equipment is always theirs (the server
+      // enforces it); they see it filled in, not a choice.
+      { name: "trainer_id", label: "Vocational Trainer", type: "select", optionsKey: "trainers", required: true, autoFor: ["VT"], readOnlyFor: ["VT"] },
+      // one lab: filled in; several: the first is preselected, still changeable
+      { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"],
+        defaultValue: ({ options }) => options?.labs?.[0]?.value },
+      { name: "name", label: "Equipment name", required: true, placeholder: "e.g. Desktop computer" },
+      { name: "receipt_date", label: "Date", required: true, ...PAST_DATE },
+      { name: "details", label: "Description", type: "textarea" },
+      { name: "photo_url", label: "Photo of the equipment", type: "file", accept: "image/*" },
+      { name: "note", label: "Note", type: "textarea", rows: 2, placeholder: "Any short note" },
     ],
   },
   "equipment-maintenance": {
     label: "Maintenance Log", singular: "Maintenance", icon: "🔧", group: "Daily Operations",
     columns: [
       { key: "date", label: "Date" },
+      { key: "equipment_name", label: "Equipment" },
       { key: "issue", label: "Issue" },
-      { key: "cost_incurred", label: "Cost" },
-      { key: "resolved_by", label: "By" },
+      { key: "maintenance_status", label: "Status", badge: true },
     ],
     fields: [
-      { name: "equipment_id", label: "Equipment", type: "select", optionsKey: "equipment", async: true, required: true },
-      { name: "date", label: "Date", type: "date", defaultValue: today },
-      { name: "issue", label: "Issue", type: "textarea" },
-      { name: "action", label: "Action taken", type: "textarea" },
-      { name: "cost_incurred", label: "Cost incurred", type: "number", min: 0 },
-      { name: "downtime_hours", label: "Downtime (hours)", type: "number", min: 0 },
-      { name: "resolved_by", label: "Resolved by" },
+      { name: "equipment_id", label: "Lab equipment", type: "select", optionsKey: "equipment", async: true, required: true },
+      { name: "date", label: "Date", required: true, ...PAST_DATE },
+      { name: "issue", label: "Issue", type: "textarea", required: true },
+      { name: "maintenance_status", label: "Status", type: "select", enumKey: "maintenance_status", required: true, defaultValue: "Reported" },
+      { name: "note", label: "Note", type: "textarea", rows: 2, placeholder: "Any short note" },
     ],
   },
 
@@ -797,16 +783,16 @@ export const MODULES = {
       { key: "hours_spent", label: "Hours" },
     ],
     fields: [
-      // A student's diary is about themselves - identity, school, lab, class
-      // and the employer they are placed with all come from their record.
-      { name: "student_id", label: "Student", type: "select", optionsKey: "students", async: true, autoFor: ["ST"], required: true },
-      { name: "school_id", label: "School", type: "select", ...SCHOOL, derive: FROM_STUDENT("school_id"), deriveNote: STUDENT_NOTE, autoFor: ["ST", "VT"] },
-      { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, derive: FROM_STUDENT("lab_id"), deriveNote: STUDENT_NOTE, autoFor: ["ST", "VT"] },
-      { name: "class_grade", label: "Class", type: "select", enumKey: "class_grades", derive: FROM_STUDENT("class_grade"), deriveNote: STUDENT_NOTE, autoFor: ["ST"] },
-      { name: "section", label: "Section", derive: FROM_STUDENT("section"), deriveNote: STUDENT_NOTE, autoFor: ["ST"] },
+      // Staff record a student's diary - school, lab, class and section come
+      // from the chosen student's record.
+      { name: "student_id", label: "Student", type: "select", optionsKey: "students", async: true, required: true },
+      { name: "school_id", label: "School", type: "select", ...SCHOOL, derive: FROM_STUDENT("school_id"), deriveNote: STUDENT_NOTE, autoFor: ["VT"] },
+      { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, derive: FROM_STUDENT("lab_id"), deriveNote: STUDENT_NOTE, autoFor: ["VT"] },
+      { name: "class_grade", label: "Class", type: "select", enumKey: "class_grades", derive: FROM_STUDENT("class_grade"), deriveNote: STUDENT_NOTE },
+      { name: "section", label: "Section", derive: FROM_STUDENT("section"), deriveNote: STUDENT_NOTE },
       { name: "date", label: "Date", type: "date", required: true, defaultValue: today },
-      { name: "employer_id", label: "Employer", type: "select", optionsKey: "employers", async: true, autoFor: ["ST"], hint: "Your current internship placement." },
-      { name: "learning", label: "What did you learn today?", type: "textarea", rows: 5, required: true },
+      { name: "employer_id", label: "Employer", type: "select", optionsKey: "employers", async: true, hint: "The student's current internship placement." },
+      { name: "learning", label: "What did the student learn today?", type: "textarea", rows: 5, required: true },
       { name: "hours_spent", label: "Hours spent", type: "number", min: 0, max: 24 },
       { name: "photo_url", label: "Photo (optional)", type: "file", accept: "image/*" },
     ],
@@ -819,9 +805,9 @@ export const MODULES = {
       { key: "placement_placed", label: "Placed", badge: true },
     ],
     fields: [
-      { name: "student_id", label: "Student", type: "select", optionsKey: "students", async: true, required: true, autoFor: ["ST"], group: "Student" },
-      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", derive: FROM_STUDENT("academic_year"), deriveNote: STUDENT_NOTE, autoFor: ["VT", "PR", "DM", "ST"], group: "Student" },
-      { name: "job_role_id", label: "Job role", type: "select", ...JOBROLE, derive: FROM_STUDENT("job_role_id"), deriveNote: STUDENT_NOTE, autoFor: ["VT", "ST"], group: "Student" },
+      { name: "student_id", label: "Student", type: "select", optionsKey: "students", async: true, required: true, group: "Student" },
+      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", derive: FROM_STUDENT("academic_year"), deriveNote: STUDENT_NOTE, autoFor: ["VT", "PR", "DM"], group: "Student" },
+      { name: "job_role_id", label: "Job role", type: "select", ...JOBROLE, derive: FROM_STUDENT("job_role_id"), deriveNote: STUDENT_NOTE, autoFor: ["VT"], group: "Student" },
       { name: "ojt_establishment", label: "OJT establishment", group: "OJT" },
       { name: "ojt_hours_required", label: "OJT hours required", type: "number", min: 0, defaultValue: 50, group: "OJT" },
       { name: "ojt_hours_logged", label: "OJT hours logged", type: "number", min: 0, group: "OJT" },
@@ -852,13 +838,13 @@ export const MODULES = {
       {
         name: "source", label: "Source", type: "select",
         options: ["student", "teacher", "inspection team"],
-        defaults: { ST: "student", VT: "teacher", PR: "teacher" }, autoFor: ["ST"],
+        defaults: { VT: "teacher", PR: "teacher" },
       },
       { name: "subject", label: "Subject" },
       { name: "rating", label: "Rating (1-5)", type: "number", min: 1, max: 5 },
       { name: "comments", label: "Comments", type: "textarea" },
-      { name: "school_id", label: "School", type: "select", ...SCHOOL, autoFor: ["PR", "VT", "ST"] },
-      { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, autoFor: ["VT", "ST"] },
+      { name: "school_id", label: "School", type: "select", ...SCHOOL, autoFor: ["PR", "VT"] },
+      { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, autoFor: ["VT"] },
     ],
   },
   notifications: {
@@ -878,6 +864,16 @@ export const MODULES = {
   },
 };
 
+// Sections a role must not see as pages of their own. The role can still read
+// them through the API, because its forms' dropdowns load from them (e.g. a
+// trainer's attendance form lists curriculum modules/units/sessions) - this
+// only removes the page, from the sidebar and from direct URLs.
+export const HIDDEN_SECTIONS = {
+  VT: ["sectors", "modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "trainers"],
+};
+
+export const isSectionHidden = (role, key) => !!HIDDEN_SECTIONS[role]?.includes(key);
+
 export const NAV_GROUPS = [
   "Master Data",
   "People & Students",
@@ -895,7 +891,6 @@ export const NAV_GROUP_ORDER = {
   DM: ["People & Students", "Daily Operations", "Master Data", "Internship & Placement", "Cross-cutting", "Administration"],
   PR: ["Daily Operations", "People & Students", "Internship & Placement", "Master Data", "Cross-cutting", "Administration"],
   VT: ["Daily Operations", "People & Students", "Internship & Placement", "Master Data", "Cross-cutting", "Administration"],
-  ST: ["Internship & Placement", "Master Data", "Cross-cutting"],
 };
 
 export { YESNO };

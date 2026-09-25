@@ -131,6 +131,11 @@ LECTURER_WORK_STATUS = [
     {"value": "self-employed", "label": "Self employed"},
 ]
 EQUIPMENT_STATUS = _opts("working", "partially working", "not working")
+# the life of a repair: reported -> diagnosed -> being fixed -> an outcome
+MAINTENANCE_STATUS = _opts(
+    "Reported", "Under Inspection", "Awaiting Spare Parts", "Sent for Repair",
+    "Under Repair", "Repaired", "Not Repairable", "Replaced",
+)
 RAW_MATERIAL_AVAILABILITY = [
     {"value": "available", "label": "Available"},
     {"value": "not available", "label": "Not available"},
@@ -140,6 +145,7 @@ GENDERS = _opts("Male", "Female", "Other")
 CLASS_GRADES = [{"value": g, "label": f"Class {g}"} for g in ("9", "10", "11", "12")]
 REGISTRATION_CLASSES = [{"value": g, "label": f"Class {g}"} for g in ("9", "11")]
 VERIFICATION_STATUS = _opts("pending", "verified", "rejected")
+ENROLMENT_STATUS = _opts("Studying", "Completed", "Dropped Out", "Transferred Out")
 TRAINER_STATUS = _opts("active", "substitute", "exited")
 ASSESSMENT_TYPES = _opts("internal", "continuous", "year-end board")
 
@@ -159,12 +165,14 @@ ENUMS = {
     "guest_lecture_methodology": GUEST_LECTURE_METHODOLOGY,
     "lecturer_work_status": LECTURER_WORK_STATUS,
     "equipment_status": EQUIPMENT_STATUS,
+    "maintenance_status": MAINTENANCE_STATUS,
     "raw_material_availability": RAW_MATERIAL_AVAILABILITY,
     "employee_count": EMPLOYEE_COUNT,
     "genders": GENDERS,
     "class_grades": CLASS_GRADES,
     "registration_classes": REGISTRATION_CLASSES,
     "verification_status": VERIFICATION_STATUS,
+    "enrolment_status": ENROLMENT_STATUS,
     "trainer_status": TRAINER_STATUS,
     "assessment_types": ASSESSMENT_TYPES,
 }

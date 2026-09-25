@@ -1,9 +1,10 @@
 """Daily operations - spec Part 3 (attendance, issues, visits, lectures, equipment)."""
 from app.extensions import db
 from app.models.base import BaseModel, GUID
+from app.models.geo import CapturesLocation
 
 
-class DailyAttendance(BaseModel):
+class DailyAttendance(CapturesLocation, BaseModel):
     """Daily Attendance with all activity-type branches - spec Part 3.11.
 
     A single record captures one day for one trainer. `activity_type` selects
@@ -79,6 +80,13 @@ class DailyAttendance(BaseModel):
     # shared narrative box - every branch (g, i, k, n and the rest) uses it
     details = db.Column(db.Text)
 
+    # --- the trainer's own daily attendance --------------------------------
+    # (the form is now just date, time, photo, comment; the activity branches
+    # above keep what was recorded with the older form)
+    attendance_time = db.Column(db.Time)  # trainer's local time
+    photo_url = db.Column(db.String(500))
+    distance_from_school_m = db.Column(db.Float)  # checked against the 1 km rule
+
     # Endorsement (spec Part 5.21)
     endorsement_status = db.Column(db.String(20), default="submitted", index=True)
     endorsed_by = db.Column(GUID(), db.ForeignKey("app_user.id"))
@@ -97,8 +105,39 @@ class AttendanceStudentMark(BaseModel):
     present = db.Column(db.Boolean, default=True)
 
 
-class VTIssue(BaseModel):
-    """VT Issue Reporting with workflow - spec Part 3.12."""
+class ClassAttendance(CapturesLocation, BaseModel):
+    """A trainer taking a class: which class and sections, what they did,
+    which students attended, a photo - marked at the school (within 1 km)."""
+    __tablename__ = "class_attendance"
+    organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
+    trainer_id = db.Column(GUID(), db.ForeignKey("trainer.id"), index=True)
+    school_id = db.Column(GUID(), db.ForeignKey("school.id"), index=True)
+    lab_id = db.Column(GUID(), db.ForeignKey("lab.id"), index=True)
+    job_role_id = db.Column(GUID(), db.ForeignKey("job_role.id"))
+    academic_year = db.Column(db.String(20), index=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    time = db.Column(db.Time)  # trainer's local time
+    class_grade = db.Column(db.String(10))
+    sections = db.Column(db.String(80))  # one or more, comma-separated
+    activity = db.Column(db.Text)
+    photo_url = db.Column(db.String(500))
+    comment = db.Column(db.Text)
+    distance_from_school_m = db.Column(db.Float)
+
+    student_marks = db.relationship("ClassAttendanceStudentMark", backref="class_attendance", lazy="selectin")
+
+
+class ClassAttendanceStudentMark(BaseModel):
+    """Which students attended a class."""
+    __tablename__ = "class_attendance_student_mark"
+    organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
+    class_attendance_id = db.Column(GUID(), db.ForeignKey("class_attendance.id"), nullable=False, index=True)
+    student_id = db.Column(GUID(), db.ForeignKey("student.id"), nullable=False, index=True)
+    present = db.Column(db.Boolean, default=False)
+
+
+class VTIssue(CapturesLocation, BaseModel):
+    """VT Issue Reporting with workflow - spec Part 3.12. Records where it was logged."""
     __tablename__ = "vt_issue"
     organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
     trainer_id = db.Column(GUID(), db.ForeignKey("trainer.id"), index=True)
@@ -106,6 +145,7 @@ class VTIssue(BaseModel):
     job_role_id = db.Column(GUID(), db.ForeignKey("job_role.id"))
     academic_year = db.Column(db.String(20), index=True)
     reporting_date = db.Column(db.Date)
+    reporting_time = db.Column(db.Time)  # trainer's local time the issue arose
     main_issue = db.Column(db.String(80))
     sub_issue = db.Column(db.String(120))
     students_affected = db.Column(db.String(20))  # all/some/not applicable
@@ -118,8 +158,8 @@ class VTIssue(BaseModel):
     resolved_on = db.Column(db.DateTime)
 
 
-class FieldVisit(BaseModel):
-    """Field / Industry Visit Conducted - spec Part 3.13."""
+class FieldVisit(CapturesLocation, BaseModel):
+    """Field / Industry Visit Conducted - spec Part 3.13. Records where it was logged."""
     __tablename__ = "field_visit"
     organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
     school_id = db.Column(GUID(), db.ForeignKey("school.id"), index=True)
@@ -159,9 +199,10 @@ class FieldVisitStudentMark(BaseModel):
     present = db.Column(db.Boolean, default=True)
 
 
-class GuestLecture(BaseModel):
-    """Guest Lecture Conducted - spec Part 3.14."""
+class GuestLecture(CapturesLocation, BaseModel):
+    """Guest Lecture Conducted - spec Part 3.14. Records where it was logged."""
     __tablename__ = "guest_lecture"
+    student_marks = db.relationship("GuestLectureStudentMark", backref="guest_lecture", lazy="selectin")
     organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
     school_id = db.Column(GUID(), db.ForeignKey("school.id"), index=True)
     lab_id = db.Column(GUID(), db.ForeignKey("lab.id"))
@@ -189,19 +230,36 @@ class GuestLecture(BaseModel):
     student_feedback = db.Column(db.Text)
 
 
+class GuestLectureStudentMark(BaseModel):
+    """Which students of the class attended a guest lecture."""
+    __tablename__ = "guest_lecture_student_mark"
+    organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
+    guest_lecture_id = db.Column(GUID(), db.ForeignKey("guest_lecture.id"), nullable=False, index=True)
+    student_id = db.Column(GUID(), db.ForeignKey("student.id"), nullable=False, index=True)
+    present = db.Column(db.Boolean, default=False)
+
+
 class LabEquipment(BaseModel):
-    """Lab Equipment Details + maintenance log - spec Part 3.15."""
+    """Lab Equipment Details + maintenance log - spec Part 3.15.
+
+    Every item belongs to the trainer responsible for it, so it can be handed
+    over to another trainer when one leaves.
+    """
     __tablename__ = "lab_equipment"
     organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
-    school_id = db.Column(GUID(), db.ForeignKey("school.id"), index=True)
+    school_id = db.Column(GUID(), db.ForeignKey("school.id"), index=True)  # derived from the lab
     lab_id = db.Column(GUID(), db.ForeignKey("lab.id"), index=True)
+    trainer_id = db.Column(GUID(), db.ForeignKey("trainer.id"), index=True)
+    name = db.Column(db.String(200))
+    photo_url = db.Column(db.String(500))
+    note = db.Column(db.Text)
     academic_year = db.Column(db.String(20), index=True)
     receiving_status = db.Column(db.Boolean)
-    receipt_date = db.Column(db.Date)
+    receipt_date = db.Column(db.Date)  # shown as "Date" on the form
     equipment_status = db.Column(db.String(30))  # working/partially/not working
     raw_material_availability = db.Column(db.String(60))  # available / not available
     raw_material_fund_status = db.Column(db.Boolean)
-    details = db.Column(db.Text)
+    details = db.Column(db.Text)  # shown as "Description" on the form
 
 
 class EquipmentMaintenance(BaseModel):
@@ -215,3 +273,5 @@ class EquipmentMaintenance(BaseModel):
     cost_incurred = db.Column(db.Float)
     downtime_hours = db.Column(db.Float)
     resolved_by = db.Column(db.String(120))
+    maintenance_status = db.Column(db.String(30), index=True)  # enums.MAINTENANCE_STATUS
+    note = db.Column(db.Text)

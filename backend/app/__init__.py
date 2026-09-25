@@ -45,6 +45,8 @@ def _init_extensions(app):
     cors.init_app(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}},
                   supports_credentials=True)
     limiter.init_app(app)
+    from app.services import cache
+    cache.init_app(app)
 
     # import models so metadata is populated
     from app import models  # noqa: F401
@@ -58,6 +60,8 @@ def _register_blueprints(app):
     from app.api.dashboard import bp as dashboard_bp
     from app.api.meta import bp as meta_bp
     from app.api.admin import bp as admin_bp
+    from app.api.targets import bp as targets_bp
+    from app.api.promotion import bp as promotion_bp
 
     # meta + workflow + users + admin must register before the catch-all resource
     # bp, which owns /api/<resource>.
@@ -67,6 +71,8 @@ def _register_blueprints(app):
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(meta_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(targets_bp)
+    app.register_blueprint(promotion_bp)
     app.register_blueprint(resource_bp)
 
 

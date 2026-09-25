@@ -9,7 +9,7 @@ One blueprint serves every registered resource. Every request is:
 Query params (list):  ?page=&page_size=&search=&sort=&order=&<filter_col>=value
 """
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, time
 
 from flask import Blueprint, request, jsonify, abort, current_app
 from sqlalchemy import or_, asc, desc
@@ -20,6 +20,7 @@ from app.api.registry import REGISTRY
 from app.rbac import login_required, current_user, apply_scope, can_access_row
 from app.rbac.roles import Role
 from app.services import audit
+from app.services.cache import cached_json
 
 bp = Blueprint("resources", __name__, url_prefix="/api")
 
@@ -75,6 +76,8 @@ def _write_children(cfg, obj, payload, user):
         incoming = payload.get(child.payload_key) or []
         if not isinstance(incoming, list):
             abort(400, description=f"'{child.payload_key}' must be a list")
+        if "student_id" in child.fields:
+            _check_students_in_scope(incoming, user)
         existing = (
             db.session.query(child.model)
             .filter(getattr(child.model, child.parent_fk) == obj.id)
@@ -97,6 +100,24 @@ def _write_children(cfg, obj, payload, user):
                 row.created_by = user.id
             db.session.add(row)
         db.session.flush()
+
+
+def _check_students_in_scope(items, user):
+    """Every student a list of marks names must be one this user can see."""
+    from app.models.student import Student
+    wanted = set()
+    for item in items:
+        sid = _coerce(Student, "id", (item or {}).get("student_id")) if isinstance(item, dict) else None
+        if sid is not None:
+            wanted.add(sid)
+    if not wanted:
+        return
+    if not all(isinstance(s, uuid.UUID) for s in wanted):
+        abort(400, description="Unknown student in the list.")
+    q = db.session.query(Student.id).filter(Student.id.in_(wanted), Student.is_deleted.is_(False))
+    seen = {r[0] for r in apply_scope(q, Student, user).all()}
+    if wanted - seen:
+        abort(400, description="The list names a student outside your classes.")
 
 
 def _coerce(model, fieldname, value):
@@ -131,13 +152,59 @@ def _coerce(model, fieldname, value):
             return datetime.fromisoformat(value)
         if pytype is date and isinstance(value, str):
             return date.fromisoformat(value[:10])
+        if pytype is time and isinstance(value, str):
+            return time.fromisoformat(value)
     except (ValueError, TypeError):
         return value
     return value
 
 
+LOCATION_NEEDED = ("We need your location to save this. Click \u201cDetect My Location\u201d "
+                   "at the top of the page and allow location access.")
+
+
+def _set_manual_location(obj, payload):
+    """A point typed in (or picked) by an admin, sent as location_lat /
+    location_lng. Both blank clears it; absent leaves it as it is."""
+    from app.models.geo import point_wkt
+    if "location_lat" not in payload and "location_lng" not in payload:
+        return
+    lat, lng = payload.get("location_lat"), payload.get("location_lng")
+    if lat in (None, "") and lng in (None, ""):
+        obj.location = None
+        return
+    try:
+        lat, lng = float(lat), float(lng)
+    except (TypeError, ValueError):
+        abort(400, description="Enter both latitude and longitude as numbers.")
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        abort(400, description="Latitude must be -90 to 90 and longitude -180 to 180.")
+    obj.location = point_wkt(lat, lng)
+
+
+def _capture_location(obj, payload, user):
+    """Where the record was made. The browser sends the fix the server sealed
+    when it was detected (`location_fix`, see services/location_seal.py) -
+    never typed by anyone, and refused if it was altered. Trainers must send
+    one."""
+    from app.rbac.roles import Role
+    from app.services.location_seal import LocationError, verify
+
+    fix = payload.get("location_fix")
+    if not fix:
+        if user.role == Role.TRAINER.value:
+            abort(400, description=LOCATION_NEEDED)
+        return
+    try:
+        lat, lng, accuracy, captured_at = verify(user.id, fix)
+    except LocationError as exc:
+        abort(400, description=str(exc))
+    obj.set_location(lat, lng, accuracy, captured_at)
+
+
 @bp.get("/<resource>")
 @login_required
+@cached_json("list_resource", ttl=60)
 def list_resource(resource):
     cfg = _cfg(resource)
     user = current_user()
@@ -216,6 +283,7 @@ def list_resource(resource):
 
 @bp.get("/<resource>/trash")
 @login_required
+@cached_json("list_trash", ttl=60)
 def list_trash(resource):
     """Soft-deleted rows (Recycle Bin) - visible to writers, for restore."""
     cfg = _cfg(resource)
@@ -264,6 +332,7 @@ def restore_resource(resource, uid):
 
 @bp.get("/<resource>/<uid>")
 @login_required
+@cached_json("get_resource", ttl=60)
 def get_resource(resource, uid):
     cfg = _cfg(resource)
     user = current_user()
@@ -298,6 +367,10 @@ def create_resource(resource):
             data["organisation_id"] = user.organisation_id
 
     obj = cfg.model(**data)
+    if cfg.captures_location:
+        _capture_location(obj, payload, user)
+    if cfg.manual_location:
+        _set_manual_location(obj, payload)
     if hasattr(obj, "created_by"):
         obj.created_by = user.id
     db.session.add(obj)
@@ -339,9 +412,14 @@ def update_resource(resource, uid):
 
     before = obj.to_dict()
     payload = request.get_json(silent=True) or {}
+    for k, msg in cfg.locked_on_update.get(user.role, {}).items():
+        if k in payload and str(_coerce(cfg.model, k, payload[k])) != str(getattr(obj, k)):
+            abort(400, description=msg)
     for k in cfg.writable:
         if k in payload:
             setattr(obj, k, _coerce(cfg.model, k, payload[k]))
+    if cfg.manual_location:
+        _set_manual_location(obj, payload)
     if hasattr(obj, "updated_by"):
         obj.updated_by = user.id
     db.session.flush()

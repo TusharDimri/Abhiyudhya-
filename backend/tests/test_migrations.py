@@ -77,8 +77,10 @@ def test_no_model_change_is_missing_a_migration(migrated_db):
     then review the generated file before committing it."""
     with migrated_db.app_context():
         with db.engine.connect() as conn:
+            from app.models.geo import include_object
             ctx = MigrationContext.configure(
-                conn, opts={"compare_type": True, "target_metadata": db.metadata}
+                conn, opts={"compare_type": True, "target_metadata": db.metadata,
+                            "include_object": include_object}
             )
             diff = compare_metadata(ctx, db.metadata)
 
@@ -96,7 +98,7 @@ def test_no_model_change_is_missing_a_migration(migrated_db):
 def test_foreign_keys_match_the_models(migrated_db, tmp_path):
     """Constraints, not just columns.
 
-    Six foreign keys are declared `use_alter=True` to break a creation cycle
+    Several foreign keys are declared `use_alter=True` to break a creation cycle
     (app_user -> school -> principal -> app_user). `op.create_table` leaves
     those OUT of the CREATE TABLE it emits, so the baseline has to add them
     back by hand - and if someone regenerates it and forgets, the columns all

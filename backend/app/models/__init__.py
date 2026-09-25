@@ -9,10 +9,11 @@ from app.models.masters import (  # noqa: F401
 from app.models.lab import (  # noqa: F401
     Lab, Module, Unit, Session, Trainer,
 )
-from app.models.student import Student, Assessment  # noqa: F401
+from app.models.student import StudentPromotion, Student, Assessment  # noqa: F401
 from app.models.operations import (  # noqa: F401
     DailyAttendance, AttendanceStudentMark, VTIssue, FieldVisit,
-    FieldVisitStudentMark, GuestLecture, LabEquipment, EquipmentMaintenance,
+    FieldVisitStudentMark, GuestLecture, GuestLectureStudentMark,
+    ClassAttendance, ClassAttendanceStudentMark, LabEquipment, EquipmentMaintenance,
 )
 from app.models.internship import (  # noqa: F401
     Employer, EmployerStudentMap, DailyDiary, OJTPlacement,

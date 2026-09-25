@@ -18,6 +18,7 @@ from app.models.geography import State, District, School, Principal
 from app.models.masters import AcademicYear, Sector, JobRole, SocialCategory
 from app.models.lab import Lab, Module, Unit, Session, Trainer
 from app.models.student import Student
+from app.models.geo import point_wkt
 
 DEMO_PASSWORD = "Password@123"
 
@@ -87,6 +88,9 @@ def run_seed():
                     email="school1@rnaf.demo", phone="9820000001")
         s2 = School(organisation_id=org.id, district_id=d2.id, name="Govt High School Nagpur",
                     udise_code="27000000002", block="Nagpur Rural", email="school2@rnaf.demo")
+        # where the schools are: trainers mark attendance within 1 km of these
+        s1.location = point_wkt(18.5204, 73.8567)   # Pune
+        s2.location = point_wkt(21.1458, 79.0882)   # Nagpur
         db.session.add_all([s1, s2])
         db.session.flush()
         p1.linked_school_id = s1.id
@@ -156,14 +160,12 @@ def run_seed():
         dm = _mkuser(org, "District Manager", "dm@rnaf.demo", "DM")
         pr = _mkuser(org, "Principal One", "pr@rnaf.demo", "PR", school_id=s1.id)
         vt = _mkuser(org, "Vocational Trainer", "vt@rnaf.demo", "VT", school_id=s1.id)
-        stu = _mkuser(org, "Diya Patil", "student@rnaf.demo", "ST", school_id=s1.id, student_id=st2.id)
         db.session.flush()
 
         dm.districts.append(d1)
         dm.districts.append(d2)
         vt.labs.append(lab1)
         p1.user_id = pr.id
-        st2.user_id = stu.id
 
         # trainer profiles - one per job role in the lab (spec 1.5): the
         # 9-10 trainer is the one with the demo login.
@@ -178,7 +180,7 @@ def run_seed():
         db.session.commit()
         print("Seed complete. Logins (password: %s):" % DEMO_PASSWORD)
         for email in ["sa@rnaf.demo", "oa@rnaf.demo", "dm@rnaf.demo", "pr@rnaf.demo",
-                      "vt@rnaf.demo", "student@rnaf.demo"]:
+                      "vt@rnaf.demo"]:
             print("  -", email)
 
 

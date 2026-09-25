@@ -3,6 +3,7 @@
    config so we never duplicate option lists. */
 import { useQueries } from "@tanstack/react-query";
 import api from "../lib/api";
+import DateInput from "./DateInput";
 import { staticOptionsFor } from "../lib/fieldOptions";
 
 // status-ish columns that have no matching form field get sensible options here
@@ -130,11 +131,19 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
               <select key={col} className={`select filter-ctl ${val ? "on" : ""}`} value={val} onChange={(e) => onChange(col, e.target.value)}>
                 <option value="">{ctl.label}: All</option>
                 {ctl.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {/* a value set from elsewhere (e.g. a target tile) that the list doesn't offer */}
+                {val && !ctl.options.some((o) => String(o.value) === String(val)) && <option value={val}>{val}</option>}
               </select>
             );
           }
+          if (ctl.type === "date") {
+            return (
+              <DateInput key={col} className={`filter-ctl ${val ? "on" : ""}`} value={val}
+                placeholder={ctl.label} onChange={(v) => onChange(col, v)} />
+            );
+          }
           return (
-            <input key={col} className={`input filter-ctl ${val ? "on" : ""}`} type={ctl.type === "date" ? "date" : "text"}
+            <input key={col} className={`input filter-ctl ${val ? "on" : ""}`} type="text"
               placeholder={ctl.placeholder || ctl.label} value={val} onChange={(e) => onChange(col, e.target.value)} />
           );
         })}

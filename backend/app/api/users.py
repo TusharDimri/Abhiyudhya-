@@ -1,6 +1,6 @@
 """User provisioning - create logins + assign scope. spec Part 0.2.
 
-VT can create logins for their internship students (role ST). Admins create any.
+Admins and District Managers create staff logins. Students never get a login.
 """
 from flask import Blueprint, request, jsonify, abort
 from sqlalchemy import or_
@@ -13,19 +13,19 @@ from app.rbac import login_required, current_user
 from app.rbac.roles import Role, ROLE_LABELS
 from app.services import audit
 from app.utils.security import validate_password
+from app.services.cache import cached_json
 
 bp = Blueprint("users", __name__, url_prefix="/api/users")
 
 # who may create/manage which roles
 CREATE_MATRIX = {
-    Role.SUPER_ADMIN.value: {"SA", "OA", "DM", "PR", "VT", "ST"},
-    Role.ORG_ADMIN.value: {"DM", "PR", "VT", "ST"},
-    Role.DISTRICT_MANAGER.value: {"PR", "VT", "ST"},
-    Role.TRAINER.value: {"ST"},  # internship students only (spec 0.2)
+    Role.SUPER_ADMIN.value: {"SA", "OA", "DM", "PR", "VT"},
+    Role.ORG_ADMIN.value: {"DM", "PR", "VT"},
+    Role.DISTRICT_MANAGER.value: {"PR", "VT"},
 }
 
 MANAGER_ROLES = {Role.SUPER_ADMIN.value, Role.ORG_ADMIN.value,
-                 Role.DISTRICT_MANAGER.value, Role.TRAINER.value}
+                 Role.DISTRICT_MANAGER.value}
 
 
 def _require_manager(user):
@@ -43,6 +43,7 @@ def _scoped_target(actor, target):
 
 @bp.get("")
 @login_required
+@cached_json("list_users", ttl=60)
 def list_users():
     user = current_user()
     _require_manager(user)
@@ -92,7 +93,6 @@ def create_user():
         phone=data.get("phone"),
         role=role,
         school_id=data.get("school_id"),
-        student_id=data.get("student_id"),
         must_change_password=data.get("must_change_password", True),
         created_by=actor.id,
     )

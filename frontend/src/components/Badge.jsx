@@ -6,6 +6,12 @@ const MAP = {
   "partially working": "warning", substitute: "warning", online: "info",
   rejected: "danger", returned: "danger", fail: "danger", "not working": "danger",
   exited: "danger", deleted: "danger", open: "warning", false: "",
+  // student enrolment
+  studying: "info", "dropped out": "danger", "transferred out": "", "completed": "success",
+  // maintenance log
+  reported: "warning", "under inspection": "info", "awaiting spare parts": "warning",
+  "sent for repair": "info", "under repair": "info", repaired: "success",
+  "not repairable": "danger", replaced: "gold",
 };
 
 export default function Badge({ value }) {

@@ -96,6 +96,9 @@ def run_migrations_online():
     # Notice a column whose type changed (e.g. a widened String), not just
     # added/dropped ones.
     conf_args.setdefault("compare_type", True)
+    # PostGIS ships its own table (spatial_ref_sys) - not ours to migrate
+    from app.models.geo import include_object
+    conf_args.setdefault("include_object", include_object)
 
     connectable = get_engine()
 

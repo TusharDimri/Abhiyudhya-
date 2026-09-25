@@ -3,6 +3,9 @@
 Organisation -> State -> District -> Block(field) -> School(UDISE) -> Lab
 Block is a field on School (no login), used for filtering/rollups (spec 0.2).
 """
+from geoalchemy2 import Geography
+from sqlalchemy import Index
+
 from app.extensions import db
 from app.models.base import BaseModel, GUID
 
@@ -36,11 +39,16 @@ class School(BaseModel):
     )
     address = db.Column(db.Text)
     email = db.Column(db.String(120))
+    # where the school is - trainers' attendance must be marked within 1 km
+    location = db.Column(Geography(geometry_type="POINT", srid=4326, spatial_index=False))
     phone = db.Column(db.String(30))
     enrolment_count = db.Column(db.Integer, default=0)  # derived, refreshed by service
 
     district = db.relationship("District", lazy="joined")
 
+
+
+Index("ix_school_location", School.location, postgresql_using="gist")
 
 class Principal(BaseModel):
     """Principal / Headmaster - spec Part 1.2 (also a user role)."""

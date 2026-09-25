@@ -24,7 +24,7 @@ def _has(model, attr):
 # per resource. Lazily built (avoids import cycles at module load).
 def _indirect_anchors():
     from app.models.student import Student
-    from app.models.operations import LabEquipment, DailyAttendance, FieldVisit
+    from app.models.operations import LabEquipment, DailyAttendance, FieldVisit, GuestLecture, ClassAttendance
     from app.models.lab import Module, Unit
 
     return {
@@ -36,6 +36,8 @@ def _indirect_anchors():
         "curriculum_session": ("unit_id", Unit),
         "attendance_student_mark": ("attendance_id", DailyAttendance),
         "field_visit_student_mark": ("field_visit_id", FieldVisit),
+        "guest_lecture_student_mark": ("guest_lecture_id", GuestLecture),
+        "class_attendance_student_mark": ("class_attendance_id", ClassAttendance),
     }
 
 
@@ -55,14 +57,6 @@ def _apply_indirect(query, model, user):
     return query.filter(getattr(model, fk_name).in_(ids))
 
 
-# Pure reference/master-data tables that carry no owner entity to scope by
-# (curriculum content, spec Part 0.4/1.4) and whose view_roles already include
-# Student (registry.py). Once the organisation filter above has run there is
-# nothing further to restrict - unlike VT, who is intentionally narrowed to
-# their own job role's curriculum below.
-_STUDENT_VISIBLE_REFERENCE_TABLES = {"curriculum_module", "curriculum_unit", "curriculum_session"}
-
-
 def apply_scope(query, model, user):
     """Restrict a query to the rows `user` is allowed to see.
 
@@ -73,7 +67,6 @@ def apply_scope(query, model, user):
       PR -> their school
       VT -> their labs/school, and (for curriculum) only the job role(s) those
             labs actually teach (spec Part 1.3 lab job-role slots)
-      ST -> their own student records + shared curriculum reference data
     """
     role = user.role
 
@@ -135,18 +128,6 @@ def apply_scope(query, model, user):
             query = query.filter(model.school_id == user.school_id)
         else:
             query = _apply_indirect(query, model, user)
-        return query
-
-    if role == Role.STUDENT.value:
-        if _has(model, "student_id"):
-            query = query.filter(model.student_id == user.student_id)
-        elif model.__tablename__ == "student":
-            query = query.filter(model.id == user.student_id)
-        elif model.__tablename__ in _STUDENT_VISIBLE_REFERENCE_TABLES:
-            pass  # shared curriculum reference data - org-scope above is enough
-        else:
-            # nothing else visible to a student
-            query = query.filter(False)
         return query
 
     # Unknown role -> deny.

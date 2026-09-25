@@ -14,6 +14,7 @@ from app.models.geography import State, District, School, Principal
 from app.models.lab import Lab, Trainer
 from app.api.enums import ENUMS
 from app.services import storage
+from app.services.cache import cached_json
 
 bp = Blueprint("meta", __name__, url_prefix="/api")
 
@@ -80,7 +81,7 @@ def _user_profile(user):
         profile["school_id"] = str(user.school_id)
         school = db.session.get(School, user.school_id)
         if school and school.district_id:
-            # single-school roles (PR/VT/ST) sit in exactly one district too
+            # single-school roles (PR/VT) sit in exactly one district too
             profile["district_id"] = str(school.district_id)
 
     if user.role == Role.DISTRICT_MANAGER.value and len(user.districts) == 1:
@@ -101,44 +102,12 @@ def _user_profile(user):
         jr = allowed_job_role_ids(user)
         if len(jr) == 1:
             profile["job_role_id"] = str(next(iter(jr)))
-
-    if user.role == Role.STUDENT.value and user.student_id:
-        from app.models.student import Student
-        st = db.session.get(Student, user.student_id)
-        if st:
-            profile["student_id"] = str(st.id)
-            if st.school_id:
-                profile["school_id"] = str(st.school_id)
-            if st.lab_id:
-                profile["lab_id"] = str(st.lab_id)
-            if st.class_grade:
-                profile["class_grade"] = st.class_grade
-            if st.section:
-                profile["section"] = st.section
-            if st.job_role_id:
-                profile["job_role_id"] = str(st.job_role_id)
-            if st.academic_year:
-                profile["academic_year"] = st.academic_year
-            # the employer they are currently interning with - a diary entry
-            # should already know it rather than ask every single day
-            from app.models.internship import EmployerStudentMap
-            mapping = (
-                db.session.query(EmployerStudentMap)
-                .filter(
-                    EmployerStudentMap.student_id == st.id,
-                    EmployerStudentMap.is_deleted.is_(False),
-                    EmployerStudentMap.status == "ongoing",
-                )
-                .order_by(EmployerStudentMap.start_date.desc())
-                .first()
-            )
-            if mapping:
-                profile["employer_id"] = str(mapping.employer_id)
     return profile
 
 
 @bp.get("/meta/bootstrap")
 @login_required
+@cached_json("bootstrap", ttl=300)
 def bootstrap():
     user = current_user()
     is_platform_admin = user.role == Role.SUPER_ADMIN.value
@@ -204,6 +173,20 @@ def bootstrap():
             "organisations": org_options,  # populated for Super Admin only
         },
     })
+
+
+@bp.post("/location/seal")
+@login_required
+def seal_location():
+    """Sign a fix the browser just took, so it can be kept client-side
+    without being editable (services/location_seal.py)."""
+    from app.services.location_seal import LocationError, seal
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(seal(current_user().id, data.get("lat"), data.get("lng"),
+                            data.get("accuracy"), data.get("captured_at")))
+    except LocationError as exc:
+        return jsonify({"error": "bad_location", "message": str(exc)}), 400
 
 
 @bp.post("/uploads/presign")
