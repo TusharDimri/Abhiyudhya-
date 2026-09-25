@@ -111,23 +111,8 @@ const JOBROLE_BY_LAB = (values, c) => {
   return narrowed.length ? narrowed : all;
 };
 
-// Defaults for forms where a trainer names the lab's job role themselves:
-// their (first) lab, and that lab's job role when there is only one to pick.
+// a new form's lab: the trainer's first (with one lab it is filled in anyway)
 const FIRST_LAB = ({ options }) => options?.labs?.[0]?.value;
-const ONLY_JOB_ROLE = ({ options, profile }) => {
-  const labId = profile?.lab_id || options?.labs?.[0]?.value;
-  const roles = JOBROLE_BY_LAB({ lab_id: labId }, { boot: { options } });
-  return roles.length === 1 ? roles[0].value : undefined;
-};
-
-// Classes the chosen job role is taught in (9-10 or 11-12 slot of the lab).
-const CLASS_FOR_JOB_ROLE = (values, c) => {
-  const all = CLASS_BY_LAB(values, c);
-  const lab = labById(c.boot, values.lab_id);
-  if (!lab || !values.job_role_id) return all;
-  const own = all.filter((o) => String(jobRoleForClass(lab, o.value)) === String(values.job_role_id));
-  return own.length ? own : all;
-};
 
 const LEVEL_OF_CLASS = { 9: 1, 10: 2, 11: 3, 12: 4 };
 
@@ -256,6 +241,7 @@ export const MODULES = {
       { name: "udise_code", label: "UDISE code", required: true, group: "School" },
       { name: "district_id", label: "District", type: "select", ...DISTRICT, autoFor: ["DM"], group: "School" },
       { name: "block", label: "Block", group: "School" },
+      { name: "school_type", label: "School type", type: "select", enumKey: "school_types", group: "School" },
       {
         name: "principal_id", label: "Headmaster / Principal", type: "select",
         optionsKey: "principals", group: "School",
@@ -288,6 +274,9 @@ export const MODULES = {
       { name: "years_in_school", label: "Years in school", type: "number", min: 0, group: "Posting" },
       { name: "date_of_joining", label: "Date of joining", type: "date", group: "Posting" },
       { name: "date_of_resignation", label: "Date of resignation", type: "date", group: "Posting", hint: "Leave blank while they are still in post." },
+      { name: "designation", label: "Designation", type: "select", enumKey: "principal_designations", group: "Posting" },
+      { name: "employee_id", label: "Employee ID", group: "Posting" },
+      { name: "appointment_nature", label: "Nature of appointment", type: "select", enumKey: "appointment_nature", group: "Posting" },
     ],
   },
   labs: {
@@ -335,6 +324,8 @@ export const MODULES = {
       { name: "date_of_joining", label: "Date of joining", type: "date", group: "Posting" },
       { name: "date_of_exit", label: "Date of exit", type: "date", group: "Posting" },
       { name: "trainer_status", label: "Status", type: "select", enumKey: "trainer_status", defaultValue: "active", group: "Posting" },
+      { name: "vtp_name", label: "VTP (training provider)", group: "Posting", hint: "The company that employs this trainer." },
+      { name: "appointment_nature", label: "Nature of appointment", type: "select", enumKey: "appointment_nature", group: "Posting" },
     ],
   },
   "academic-years": {
@@ -452,6 +443,7 @@ export const MODULES = {
         name: "job_role_id", label: "Job role", type: "select",
         derive: DERIVE_JOB_ROLE("class_grade"), deriveNote: JOB_ROLE_NOTE,
         dynamicOptions: JOBROLE_BY_LAB, group: "Placement",
+        disabledWhen: (v) => !v.class_grade, dependsLabel: "class",
       },
       { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", autoFor: ["VT", "PR", "DM"], readOnlyFor: ["VT"], group: "Placement" },
       { name: "roll_number", label: "Roll number", group: "Placement" },
@@ -559,7 +551,9 @@ export const MODULES = {
       { key: "sections", label: "Sections" },
       { key: "activity", label: "Activity" },
       { key: "attended", label: "Attended" },
+      { key: "endorsement_status", label: "Endorsement", badge: true },
     ],
+    rowActions: [{ action: "endorse", roles: ["PR", "OA", "SA"] }],
     fields: [
       { name: "date", label: "Date", required: true, ...PAST_DATE, readOnlyFor: ["VT"] },
       { name: "time", label: "Time", type: "time", required: true, defaultValue: nowTime, readOnlyFor: ["VT"] },
@@ -567,10 +561,13 @@ export const MODULES = {
       { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"], quiet: true,
         defaultValue: FIRST_LAB },
       { name: "class_grade", label: "Class", type: "select", dynamicOptions: CLASS_BY_LAB, required: true, remember: true },
+      { name: "job_role_id", label: "Job role", type: "select", dynamicOptions: JOBROLE_BY_LAB,
+        derive: DERIVE_JOB_ROLE("class_grade"), deriveNote: JOB_ROLE_NOTE,
+        disabledWhen: (v) => !v.class_grade, dependsLabel: "class" },
       {
         name: "sections", label: "Section(s)", type: "multiselect",
         dynamicOptions: SECTIONS_FOR("class_grade"), dependsOn: { field: "class_grade" },
-        allowCustom: true, customPlaceholder: "Another section…", remember: true,
+        remember: true,
       },
       { name: "student_marks", label: "Students", type: "studentmarks", mode: "attend",
         classField: "class_grade", sectionField: "sections" },
@@ -578,8 +575,6 @@ export const MODULES = {
         placeholder: "What was done in class today?" },
       { name: "photo_url", label: "Photo", type: "file", accept: "image/*", group: "Activity" },
       { name: "comment", label: "Comment", type: "textarea", rows: 2, placeholder: "Anything else (optional)", group: "Activity" },
-      // recorded with the class, never asked of a trainer
-      { name: "job_role_id", label: "Job role", type: "select", derive: DERIVE_JOB_ROLE("class_grade"), dynamicOptions: JOBROLE_BY_LAB, quiet: true },
       { name: "trainer_id", label: "Trainer", type: "select", optionsKey: "trainers", autoFor: ["VT"], quiet: true },
     ],
     defaultGroup: "Class",
@@ -630,15 +625,15 @@ export const MODULES = {
       // one lab: filled in silently; several: the first is preselected
       { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"], quiet: true,
         defaultValue: FIRST_LAB },
-      { name: "job_role_id", label: "Job role", type: "select", dynamicOptions: JOBROLE_BY_LAB, required: true,
-        defaultValue: ONLY_JOB_ROLE, remember: true },
       { name: "picture_url", label: "Photo", type: "file", accept: "image/*" },
-      { name: "class_grade", label: "Class", type: "select", dynamicOptions: CLASS_FOR_JOB_ROLE,
-        dependsOn: { field: "job_role_id" }, required: true, remember: true },
+      { name: "class_grade", label: "Class", type: "select", dynamicOptions: CLASS_BY_LAB, required: true, remember: true },
+      { name: "job_role_id", label: "Job role", type: "select", dynamicOptions: JOBROLE_BY_LAB,
+        derive: DERIVE_JOB_ROLE("class_grade"), deriveNote: JOB_ROLE_NOTE,
+        disabledWhen: (v) => !v.class_grade, dependsLabel: "class", required: true },
       {
         name: "sections", label: "Section(s)", type: "multiselect",
         dynamicOptions: SECTIONS_FOR("class_grade"), dependsOn: { field: "class_grade" },
-        allowCustom: true, customPlaceholder: "Another section…", remember: true,
+        remember: true,
       },
       // everyone starts "not attended"; the trainer taps Attend per student
       { name: "student_marks", label: "Students", type: "studentmarks", mode: "attend",
@@ -669,19 +664,19 @@ export const MODULES = {
       { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"], quiet: true,
         defaultValue: FIRST_LAB },
       { name: "class_grade", label: "Class", type: "select", dynamicOptions: CLASS_BY_LAB, required: true, remember: true },
+      { name: "job_role_id", label: "Job role", type: "select", dynamicOptions: JOBROLE_BY_LAB,
+        derive: DERIVE_JOB_ROLE("class_grade"), deriveNote: JOB_ROLE_NOTE,
+        disabledWhen: (v) => !v.class_grade, dependsLabel: "class" },
       {
         name: "sections", label: "Section(s)", type: "multiselect",
         dynamicOptions: SECTIONS_FOR("class_grade"), dependsOn: { field: "class_grade" },
-        allowCustom: true, customPlaceholder: "Another section…", remember: true,
+        remember: true,
       },
       // everyone starts "not attended"; the trainer taps Attend per student
       { name: "student_marks", label: "Students", type: "studentmarks", mode: "attend",
         classField: "class_grade", sectionField: "sections" },
       { name: "photo_url", label: "Photo", type: "file", accept: "image/*" },
       { name: "reporting_date", label: "Date", required: true, ...PAST_DATE },
-      // recorded with the lecture, never asked of a trainer (the academic year
-      // is worked out from the date by the server)
-      { name: "job_role_id", label: "Job role", type: "select", derive: DERIVE_JOB_ROLE("class_grade"), dynamicOptions: JOBROLE_BY_LAB, quiet: true },
     ],
   },
   equipment: {
@@ -869,10 +864,20 @@ export const MODULES = {
 // trainer's attendance form lists curriculum modules/units/sessions) - this
 // only removes the page, from the sidebar and from direct URLs.
 export const HIDDEN_SECTIONS = {
-  VT: ["sectors", "modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "trainers"],
+  // feedback: switched off for trainers for now - remove it here to bring it back
+  VT: ["sectors", "modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "trainers", "feedback"],
+  // feedback: switched off for principals for now too
+  PR: ["sectors", "modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "equipment-maintenance", "feedback"],
 };
 
 export const isSectionHidden = (role, key) => !!HIDDEN_SECTIONS[role]?.includes(key);
+
+// the modules this user can open, in catalog order: [[key, module], ...]
+export const visibleModules = (boot, role) =>
+  Object.entries(MODULES).filter(([key]) => boot?.resources?.[key] && !isSectionHidden(role, key));
+
+// the sidebar shows this group as one entry opening a tabbed page
+export const MASTER_GROUP = "Master Data";
 
 export const NAV_GROUPS = [
   "Master Data",

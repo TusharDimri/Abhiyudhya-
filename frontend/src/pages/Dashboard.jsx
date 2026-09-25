@@ -12,12 +12,12 @@ import { cardHref, QUICK_ACTIONS, DASHBOARD_SUBTITLE } from "../lib/roleUi";
 const ICONS = {
   schools: "🏫", labs: "🧪", trainers: "👨‍🏫", students: "🧑‍🎓", attendance: "🗓️",
   guest_lectures: "🎤", field_visits: "🚌", open_issues: "⚠️", endorsed: "✅",
-  placements: "💼", pending_verification: "🕓", pending_endorsement: "🕓", diaries: "📔",
+  placements: "💼", pending_verification: "🕓", pending_endorsement: "🕓", class_pending_endorsement: "🕓", diaries: "📔",
   ojt_hours: "⏱️", my_employer: "💼", assessments: "🎯",
   pending_issues_action: "⚠️", issues_resolved: "✅",
 };
 const ACCENT = {
-  open_issues: "warn", pending_verification: "warn", pending_endorsement: "warn",
+  open_issues: "warn", pending_verification: "warn", pending_endorsement: "warn", class_pending_endorsement: "warn",
   pending_issues_action: "warn",
   endorsed: "good", placements: "good", issues_resolved: "good",
 };

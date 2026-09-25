@@ -18,7 +18,9 @@ export default function WorkflowDialog({ resource, action, row, onClose, onDone 
   const run = useMutation({
     mutationFn: async () => {
       if (action === "endorse") {
-        return api.post(`/workflow/attendance/${row.id}/endorse`, { decision, remarks });
+        // daily or class attendance - each has its own endorsement route
+        const kind = resource === "class-attendance" ? "class-attendance" : "attendance";
+        return api.post(`/workflow/${kind}/${row.id}/endorse`, { decision, remarks });
       }
       if (action === "verify") {
         return api.post(`/workflow/students/${row.id}/verify`, { verification_status: decision, remarks });
@@ -35,7 +37,8 @@ export default function WorkflowDialog({ resource, action, row, onClose, onDone 
   });
 
   const TITLES = {
-    endorse: "Endorse Attendance", verify: "Verify Student", transition: "Action Issue",
+    endorse: resource === "class-attendance" ? "Endorse Class Attendance" : "Endorse Attendance",
+    verify: "Verify Student", transition: "Action Issue",
     status: leaving ? `${row.full_name || "Student"} left the school` : `${row.full_name || "Student"} rejoined`,
   };
 

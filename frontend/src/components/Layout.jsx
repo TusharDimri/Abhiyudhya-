@@ -2,9 +2,12 @@ import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useBootstrap } from "../hooks/useBootstrap";
-import { MODULES, NAV_GROUPS, NAV_GROUP_ORDER, isSectionHidden } from "../lib/modules";
+import { MODULES, NAV_GROUPS, NAV_GROUP_ORDER, MASTER_GROUP, isSectionHidden } from "../lib/modules";
 import LocationButton from "./LocationButton";
 import ScopeBadges from "./ScopeBadges";
+
+// Roles whose login carries a profile page of their own.
+const PROFILE_ROLES = ["VT", "PR"];
 
 // Special admin pages (not resource modules) with the roles allowed to see them.
 const ADMIN_LINKS = [
@@ -17,6 +20,14 @@ export default function Layout() {
   const { user, roleLabel, logout, organisation } = useAuth();
   const { data: boot } = useBootstrap();
   const [open, setOpen] = useState(false);
+  // desktop: a narrow icon-only sidebar, remembered in this browser
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("rnaf.sidebar") === "collapsed"; } catch { return false; }
+  });
+  const toggleCollapsed = () => setCollapsed((c) => {
+    try { localStorage.setItem("rnaf.sidebar", c ? "open" : "collapsed"); } catch { /* not remembered */ }
+    return !c;
+  });
   const loc = useLocation();
 
   const visible = boot?.resources || {};
@@ -36,10 +47,14 @@ export default function Layout() {
   const seg = loc.pathname.split("/")[2];
   const title = seg === "admin"
     ? (ADMIN_LINKS.find((l) => loc.pathname.startsWith(l.to))?.label || "Administration")
+    : seg === "master" ? MASTER_GROUP
+    : seg === "profile" ? "My Profile"
     : (MODULES[seg]?.label || (loc.pathname.includes("dashboard") ? "Dashboard" : "Abhiyudhya"));
 
+  const item = ({ isActive }) => `nav-item ${isActive ? "active" : ""}`;
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${collapsed ? "collapsed" : ""} role-${(user?.role || "").toLowerCase()}`}>
       <aside className={`sidebar ${open ? "open" : ""}`}>
         {/* The organisation's own identity leads - this is their workspace,
             not a tenant of someone else's. The platform name stays underneath
@@ -60,32 +75,50 @@ export default function Layout() {
           </span>
         </div>
         <nav className="nav-scroll" onClick={() => setOpen(false)}>
-          <NavLink to="/app/dashboard" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-            <span className="ico">📊</span> Dashboard
+          <NavLink to="/app/dashboard" className={item} title="Dashboard">
+            <span className="ico">📊</span> <span className="nav-label">Dashboard</span>
           </NavLink>
           {navGroups.map((g) =>
             grouped[g]?.length ? (
               <div key={g}>
                 <div className="nav-group-label">{g}</div>
-                {grouped[g].map((m) => (
-                  <NavLink key={m.key} to={`/app/${m.key}`} className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-                    <span className="ico">{m.icon}</span> {m.label}
+                {g === MASTER_GROUP ? (
+                  // one entry: the lists are tabs on the Master Data page
+                  <NavLink to="/app/master" className={item} title={MASTER_GROUP}>
+                    <span className="ico">🗂️</span> <span className="nav-label">{MASTER_GROUP}</span>
+                  </NavLink>
+                ) : grouped[g].map((m) => (
+                  <NavLink key={m.key} to={`/app/${m.key}`} className={item} title={m.label}>
+                    <span className="ico">{m.icon}</span> <span className="nav-label">{m.label}</span>
                   </NavLink>
                 ))}
               </div>
             ) : null
           )}
+          {PROFILE_ROLES.includes(user?.role) && (
+            <div>
+              <div className="nav-group-label">Profile</div>
+              <NavLink to="/app/profile" className={item} title="My Profile">
+                <span className="ico">👤</span> <span className="nav-label">My Profile</span>
+              </NavLink>
+            </div>
+          )}
           {adminLinks.length > 0 && (
             <div>
               <div className="nav-group-label">Administration</div>
               {adminLinks.map((l) => (
-                <NavLink key={l.to} to={l.to} className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-                  <span className="ico">{l.icon}</span> {l.label}
+                <NavLink key={l.to} to={l.to} className={item} title={l.label}>
+                  <span className="ico">{l.icon}</span> <span className="nav-label">{l.label}</span>
                 </NavLink>
               ))}
             </div>
           )}
         </nav>
+        <button type="button" className="collapse-btn" onClick={toggleCollapsed}
+          title={collapsed ? "Expand the sidebar" : "Collapse the sidebar"} aria-expanded={!collapsed}>
+          <span aria-hidden="true">{collapsed ? "»" : "«"}</span>
+          <span className="nav-label">Collapse</span>
+        </button>
       </aside>
 
       <div className={`backdrop ${open ? "show" : ""}`} onClick={() => setOpen(false)} />
@@ -111,15 +144,18 @@ export default function Layout() {
 
           <div className="user-chip">
             {user?.role === "VT" && <LocationButton />}
-            <div style={{ textAlign: "right", lineHeight: 1.15 }} className="user-meta">
-              <div style={{ fontWeight: 700, fontSize: ".85rem" }}>{user?.full_name}</div>
+            <div className="user-meta">
+              <span className="user-name">{user?.full_name}</span>
               <span className="role-pill">{roleLabel || user?.role}</span>
             </div>
-            <div className="avatar">{initials}</div>
-            <button className="btn btn-ghost btn-sm" onClick={logout}>Logout</button>
+            <div className="avatar" aria-hidden="true">{initials}</div>
+            <span className="topbar-divider" aria-hidden="true" />
+            <button className="btn btn-ghost btn-sm logout-btn" onClick={logout} title="Log out">
+              <span aria-hidden="true">⎋</span> Logout
+            </button>
           </div>
         </header>
-        <ScopeBadges profile={boot?.my_scope?.profile} options={boot?.options} />
+        {!PROFILE_ROLES.includes(user?.role) && <ScopeBadges profile={boot?.my_scope?.profile} options={boot?.options} />}
         <main className="page">
           <Outlet />
         </main>

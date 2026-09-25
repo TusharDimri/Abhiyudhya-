@@ -800,3 +800,218 @@ def test_app_works_when_redis_is_down(client, world, cache_on, app):
         assert "X-Cache" not in r.headers
     finally:
         app.config.pop("CACHE_REDIS_URL")
+
+
+# -------------------------------------------------- filtering by one section
+def test_section_filter_on_multi_section_records(client, world):
+    for sections, topic in (("A,B", "Both"), ("B", "Only B"), ("A", "Only A")):
+        r = _save(client, "/api/guest-lectures", _lecture(world, sections=sections, topic=topic))
+        assert r.status_code == 201, r.get_json()
+    h = _login(client)
+    topics = lambda q: sorted(x["topic"] for x in client.get(f"/api/guest-lectures?{q}", headers=h).get_json()["data"])
+    assert topics("section=B") == ["Both", "Only B"]
+    assert topics("section=A") == ["Both", "Only A"]
+    assert topics("section=A,B") == ["Both", "Only A", "Only B"]
+    assert topics("section=C") == []
+
+
+# ---------------------------------------------------------------- my profile
+GENERAL = {"full_name": "VT", "father_name": "Ramesh Kumar", "dob": "1990-05-14", "gender": "Female",
+           "phone": "9876543210", "email": "vt@example.com", "aadhaar_number": "123412341234"}
+
+
+def test_profile_general_section_must_be_complete(client, world):
+    h = _login(client)
+    r = client.patch("/api/profile", headers=h, json={"father_name": "Ramesh Kumar"})
+    assert r.status_code == 400
+    assert "Please fill in" in r.get_json()["message"] and "Aadhaar" in r.get_json()["message"]
+    ok = client.patch("/api/profile", headers=h, json=GENERAL)
+    assert ok.status_code == 200, ok.get_json()
+    body = ok.get_json()
+    assert body["aadhaar_number"] == "XXXXXXXX1234"            # never sent back whole
+    assert {"father_name", "dob", "gender", "aadhaar_number"} <= set(body["locked"])
+
+
+def test_locked_details_cannot_be_changed_but_others_can(client, world):
+    h = _login(client)
+    assert client.patch("/api/profile", headers=h, json=GENERAL).status_code == 200
+    r = client.patch("/api/profile", headers=h, json={**GENERAL, "dob": "1991-01-01"})
+    assert r.status_code == 400 and "can't be changed" in r.get_json()["message"]
+    # re-saving the section as the page shows it (Aadhaar masked) is fine
+    same = {**GENERAL, "aadhaar_number": "XXXXXXXX1234", "phone": "9123456789", "blood_group": "O+"}
+    r = client.patch("/api/profile", headers=h, json=same)
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["phone"] == "9123456789"
+
+
+@pytest.mark.parametrize("field, value", [
+    ("aadhaar_number", "1234"), ("phone", "12345"), ("email", "not-an-email"), ("blood_group", "Z+"),
+])
+def test_profile_formats_are_checked(client, world, field, value):
+    r = client.patch("/api/profile", headers=_login(client), json={**GENERAL, field: value})
+    assert r.status_code == 400
+
+
+def test_bank_section(client, world):
+    h = _login(client)
+    bank = {"beneficiary_name": "VT", "bank_name": "Demo Bank", "account_number": "123456789012",
+            "ifsc_code": "demo0123456", "gross_salary": 25000, "deduction_epf": 1800, "pan_number": "abcde1234f"}
+    assert client.patch("/api/profile", headers=h, json={**bank, "ifsc_code": "BAD"}).status_code == 400
+    r = client.patch("/api/profile", headers=h, json=bank)
+    assert r.status_code == 200, r.get_json()
+    body = r.get_json()
+    assert (body["account_number"], body["pan_number"], body["ifsc_code"]) == ("XXXXXXXX9012", "XXXXXX234F", "DEMO0123456")
+    assert body["net_salary"] == 23200
+
+
+def test_profile_lists_and_total_experience(client, world):
+    h = _login(client)
+    bad = client.patch("/api/profile", headers=h, json={"experiences": [
+        {"organisation_name": "Old Co", "date_of_joining": "2015-01-01", "date_of_resignation": "2014-01-01"}]})
+    assert bad.status_code == 400
+    r = client.patch("/api/profile", headers=h, json={
+        "experiences": [{"organisation_name": "Old Co", "date_of_joining": "2015-01-01",
+                         "date_of_resignation": "2017-01-01", "job_type": "Full Time"}],
+        "qualifications": [{"qualification": "Graduation", "course": "B.Tech", "passing_year": 2012}, {}],
+    })
+    assert r.status_code == 200, r.get_json()
+    body = r.get_json()
+    assert [q["course"] for q in body["qualifications"]] == ["B.Tech"]   # the blank row is dropped
+    assert body["total_experience_years"] == 2.0                          # no joining date on record yet
+
+
+def test_a_photo_can_be_added_before_the_rest(client, world):
+    r = client.patch("/api/profile", headers=_login(client), json={"photo_url": "uploads/abc/me.png"})
+    assert r.status_code == 200, r.get_json()
+
+
+def test_personal_details_stay_off_the_trainer_list(client, world):
+    h = _login(client)
+    client.patch("/api/profile", headers=h, json=GENERAL)
+    rows = client.get("/api/trainers", headers=h).get_json()["data"]
+    assert rows and all("aadhaar_number" not in r and "dob" not in r and "account_number" not in r for r in rows)
+
+
+def test_only_trainers_have_a_profile(client, world):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa2@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    assert client.get("/api/profile", headers=_login(client, email="oa2@x.com")).status_code == 404
+
+
+# ------------------------------------------------------ principal endorsement
+def _as(client, email):
+    """Switch who is logged in. (The fixture's app context outlives each
+    request, so the user cached on `g` must be dropped between logins.)"""
+    from flask import g
+    g.pop("current_user", None)
+    return _login(client, email=email)
+
+
+@pytest.fixture
+def principal(world):
+    pr = User(organisation_id=world["org"].id, full_name="PR", email="pr@x.com", role="PR",
+              school_id=world["school"].id)
+    pr.set_password("Password@123")
+    db.session.add(pr)
+    db.session.commit()
+    return pr
+
+
+def _endorsable(client, world, kind):
+    _school_located(world)
+    url, body = ("/api/class-attendance", _class(world)) if kind == "class" else ("/api/attendance", _day(world))
+    r = _save(client, url, body)
+    assert r.status_code == 201, r.get_json()
+    return url, r.get_json()["id"]
+
+
+@pytest.mark.parametrize("kind", ["class", "daily"])
+def test_principal_endorses_and_it_becomes_final(client, world, principal, kind):
+    url, rid = _endorsable(client, world, kind)
+    route = "class-attendance" if kind == "class" else "attendance"
+    h_pr = _as(client, "pr@x.com")
+    r = client.post(f"/api/workflow/{route}/{rid}/endorse", headers=h_pr, json={"decision": "endorsed"})
+    assert r.status_code == 200, r.get_json()
+    h_vt = _as(client, "vt@x.com")
+    edit = client.patch(f"{url}/{rid}", headers=h_vt, json={"comment": "late change", "details": "late change"})
+    assert edit.status_code == 400
+    assert "endorsed" in edit.get_json()["message"]
+
+
+def test_returned_entry_goes_back_for_endorsement_once_corrected(client, world, principal):
+    url, rid = _endorsable(client, world, "class")
+    h_pr = _as(client, "pr@x.com")
+    need_reason = client.post(f"/api/workflow/class-attendance/{rid}/endorse", headers=h_pr, json={"decision": "returned"})
+    assert need_reason.status_code == 400
+    r = client.post(f"/api/workflow/class-attendance/{rid}/endorse", headers=h_pr,
+                    json={"decision": "returned", "remarks": "Wrong section"})
+    assert r.get_json()["endorsement_status"] == "returned"
+    h_vt = _as(client, "vt@x.com")
+    fixed = client.patch(f"{url}/{rid}", headers=h_vt, json={"sections": "A"})
+    assert fixed.status_code == 200, fixed.get_json()
+    assert fixed.get_json()["endorsement_status"] == "submitted"
+
+
+def test_trainer_cannot_endorse(client, world, principal):
+    url, rid = _endorsable(client, world, "class")
+    r = client.post(f"/api/workflow/class-attendance/{rid}/endorse", headers=_as(client, "vt@x.com"),
+                    json={"decision": "endorsed"})
+    assert r.status_code == 403
+
+
+def test_principal_is_read_only_otherwise(client, world, principal):
+    h = _as(client, "pr@x.com")
+    assert client.get("/api/students", headers=h).status_code == 200
+    assert client.get("/api/feedback", headers=h).status_code == 200
+    assert client.post("/api/feedback", headers=h, json={"subject": "x", "school_id": str(world["school"].id)}).status_code == 403
+    assert client.post("/api/guest-lectures", headers=h, json={}).status_code == 403
+    cards = [c["key"] for c in client.get("/api/dashboard/summary", headers=h).get_json()["cards"]]
+    assert cards[:2] == ["pending_endorsement", "class_pending_endorsement"]
+
+
+# ---------------------------------------------------------- principal profile
+@pytest.fixture
+def principal_record(world, principal):
+    from app.models.geography import Principal
+    rec = Principal(organisation_id=world["org"].id, full_name="PR", email="pr@x.com",
+                    linked_school_id=world["school"].id, user_id=principal.id,
+                    designation="Principal", employee_id="EMP-1", date_of_joining=date(2021, 6, 15))
+    db.session.add(rec)
+    db.session.commit()
+    return rec
+
+
+PR_GENERAL = {"full_name": "PR", "designation": "Principal", "dob": "1975-03-10", "gender": "Male",
+              "mobile": "9876501234", "email": "pr@example.com", "father_name": "S. Rao"}
+
+
+def test_principal_profile_shows_their_school(client, world, principal_record):
+    body = client.get("/api/profile", headers=_as(client, "pr@x.com")).get_json()
+    assert body["posting"]["school_name"] == world["school"].name
+    assert body["posting"]["trainers"] == ["VT"]
+    assert {"full_name", "employee_id"} <= set(body["locked"])
+    assert "aadhaar_number" not in body and "account_number" not in body   # not collected for principals
+
+
+def test_principal_profile_sections(client, world, principal_record):
+    h = _as(client, "pr@x.com")
+    assert client.patch("/api/profile", headers=h, json={"designation": "Principal"}).status_code == 400
+    r = client.patch("/api/profile", headers=h, json=PR_GENERAL)
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["superannuation_date"] == "2035-03-31"           # turns 60 in March 2035
+    assert client.patch("/api/profile", headers=h, json={"employee_id": "EMP-2"}).status_code == 400  # locked
+    svc = client.patch("/api/profile", headers=h, json={"service_joining_date": "2000-07-01",
+                                                        "highest_qualification": "Masters/Post-Graduation"})
+    assert svc.status_code == 200, svc.get_json()
+    assert svc.get_json()["total_service_years"] > 25
+    hist = client.patch("/api/profile", headers=h, json={"postings": [
+        {"school_name": "GSSS Old Town", "designation": "Lecturer", "from_date": "2000-07-01", "to_date": "2021-06-14"}]})
+    assert [p["school_name"] for p in hist.get_json()["postings"]] == ["GSSS Old Town"]
+
+
+def test_principal_personal_details_stay_off_the_principal_list(client, world, principal_record):
+    client.patch("/api/profile", headers=_as(client, "pr@x.com"), json=PR_GENERAL)
+    rows = client.get("/api/principals", headers=_as(client, "vt@x.com")).get_json()["data"]
+    assert rows and all("dob" not in r and "father_name" not in r for r in rows)

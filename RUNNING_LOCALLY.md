@@ -105,6 +105,10 @@ docker compose -f docker-compose.local.yml exec backend flask db upgrade
 
 # add the demo organisation + demo users
 docker compose -f docker-compose.local.yml exec backend flask seed
+
+# optional: fill it with a school's worth of fictional records (students,
+# attendance, lectures, visits, equipment, profiles ...) to click through
+docker compose -f docker-compose.local.yml exec backend flask demo-data
 ```
 
 **Already had the app running from before migrations existed?** Tell the

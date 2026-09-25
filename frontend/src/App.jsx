@@ -1,7 +1,7 @@
 import { Suspense, lazy } from "react";
-import { Routes, Route, Navigate, useParams } from "react-router-dom";
+import { Routes, Route, Navigate, useParams, useLocation } from "react-router-dom";
 import { useAuth } from "./lib/auth";
-import { isSectionHidden } from "./lib/modules";
+import { isSectionHidden, MODULES, MASTER_GROUP } from "./lib/modules";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 
@@ -12,6 +12,8 @@ const ResourcePage = lazy(() => import("./components/ResourcePage"));
 const AdminUsers = lazy(() => import("./pages/admin/Users"));
 const AdminAudit = lazy(() => import("./pages/admin/Audit"));
 const AdminTrash = lazy(() => import("./pages/admin/Trash"));
+const MasterData = lazy(() => import("./components/MasterData"));
+const Profile = lazy(() => import("./pages/Profile"));
 
 function FullSpinner() {
   return (
@@ -36,7 +38,10 @@ function Protected({ children }) {
 function SectionRoute() {
   const { resource } = useParams();
   const { user } = useAuth();
+  const { search } = useLocation();
   if (isSectionHidden(user?.role, resource)) return <Navigate to="/app/dashboard" replace />;
+  // master-data lists live on the tabbed Master Data page
+  if (MODULES[resource]?.group === MASTER_GROUP) return <Navigate to={`/app/master/${resource}${search}`} replace />;
   return <ResourcePage />;
 }
 
@@ -51,6 +56,9 @@ export default function App() {
         <Route path="admin/users" element={<Suspense fallback={<PageFallback />}><AdminUsers /></Suspense>} />
         <Route path="admin/audit" element={<Suspense fallback={<PageFallback />}><AdminAudit /></Suspense>} />
         <Route path="admin/trash" element={<Suspense fallback={<PageFallback />}><AdminTrash /></Suspense>} />
+        <Route path="profile" element={<Suspense fallback={<PageFallback />}><Profile /></Suspense>} />
+        <Route path="master" element={<Suspense fallback={<PageFallback />}><MasterData /></Suspense>} />
+        <Route path="master/:resource" element={<Suspense fallback={<PageFallback />}><MasterData /></Suspense>} />
         <Route path=":resource" element={<Suspense fallback={<PageFallback />}><SectionRoute /></Suspense>} />
       </Route>
       <Route path="*" element={<Navigate to="/app/dashboard" replace />} />

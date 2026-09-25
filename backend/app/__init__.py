@@ -62,6 +62,7 @@ def _register_blueprints(app):
     from app.api.admin import bp as admin_bp
     from app.api.targets import bp as targets_bp
     from app.api.promotion import bp as promotion_bp
+    from app.api.profile import bp as profile_bp
 
     # meta + workflow + users + admin must register before the catch-all resource
     # bp, which owns /api/<resource>.
@@ -73,6 +74,7 @@ def _register_blueprints(app):
     app.register_blueprint(admin_bp)
     app.register_blueprint(targets_bp)
     app.register_blueprint(promotion_bp)
+    app.register_blueprint(profile_bp)
     app.register_blueprint(resource_bp)
 
 
@@ -114,3 +116,10 @@ def _register_cli(app):
     def seed():
         from app.seed import run_seed
         run_seed()
+
+    @app.cli.command("demo-data")
+    def demo_data():
+        """Fill the demo organisation with a school's worth of fictional records
+        (run after `flask seed`)."""
+        from app.demo_data import run_demo_data
+        run_demo_data()

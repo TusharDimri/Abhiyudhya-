@@ -252,11 +252,26 @@ def _attendance_day_error(instance, user, is_create):
     return _future_date_error(instance.date)
 
 
+def _endorsement_on_edit(instance, user, is_create):
+    """A trainer's attendance, once the Principal endorsed it, is final. One
+    they returned goes back to them for endorsement when corrected."""
+    if is_create or user.role != VT:
+        return None
+    if instance.endorsement_status == "endorsed":
+        return "The Principal has endorsed this entry, so it can't be changed."
+    if instance.endorsement_status == "returned":
+        instance.endorsement_status = "submitted"
+    return None
+
+
 def _validate_vt_attendance(instance, user, is_create=False):
     from app.extensions import db
     from app.models.geo import school_distance_error
     from app.services.academic_year import academic_year_for
 
+    err = _endorsement_on_edit(instance, user, is_create)
+    if err:
+        return err
     if not instance.lab_id:
         return "Choose the lab."
     err = _attendance_day_error(instance, user, is_create)
@@ -308,6 +323,9 @@ def _validate_class_attendance(instance, user, is_create=False):
     from app.models.geo import school_distance_error
     from app.services.academic_year import academic_year_for
 
+    err = _endorsement_on_edit(instance, user, is_create)
+    if err:
+        return err
     if not instance.lab_id:
         return "Choose the lab."
     if not instance.class_grade:
@@ -473,7 +491,7 @@ register(ResourceConfig(
     name="schools", model=M.School, label="School",
     write_roles=[SA, OA, DM],
     writable=["name", "udise_code", "district_id", "block", "principal_id",
-              "address", "email", "phone", "status"],
+              "school_type", "address", "email", "phone", "status"],
     search=["name", "udise_code", "block"],
     filters=["district_id", "block"],
     sortable=["name", "udise_code", "created_at"], default_sort=("name", "asc"),
@@ -486,7 +504,7 @@ register(ResourceConfig(
     write_roles=[SA, OA, DM],
     writable=["full_name", "mobile", "email", "gender", "years_in_school",
               "date_of_joining", "date_of_resignation", "linked_school_id",
-              "user_id", "status"],
+              "designation", "employee_id", "appointment_nature", "user_id", "status"],
     search=["full_name", "email", "mobile"],
     filters=["linked_school_id"], sortable=["full_name", "created_at"],
     default_sort=("full_name", "asc"),
@@ -510,7 +528,7 @@ register(ResourceConfig(
     write_roles=[SA, OA, DM],
     writable=["full_name", "school_id", "lab_id", "job_role_id", "email", "phone",
               "gender", "date_of_joining", "date_of_exit", "trainer_status",
-              "qualification", "user_id", "status"],
+              "qualification", "vtp_name", "appointment_nature", "user_id", "status"],
     search=["full_name", "email", "phone"],
     filters=["school_id", "lab_id", "trainer_status"],
     sortable=["full_name", "created_at"], default_sort=("full_name", "asc"),
@@ -563,6 +581,15 @@ register(ResourceConfig(
     search=["name"], filters=["module_id"], sortable=["sort_order", "name"],
     default_sort=("sort_order", "asc"),
 ))
+def _any_section(query, model, value):
+    """?section=B on a record covering several sections ("A,B"): the ones
+    that include B. Several at once (?section=A,C) means any of them."""
+    from sqlalchemy import func, or_
+    wanted = [s.strip() for s in str(value).split(",") if s.strip()]
+    padded = func.concat(",", func.replace(model.sections, " ", ""), ",")
+    return query.filter(or_(*[padded.like(f"%,{s},%") for s in wanted])) if wanted else query
+
+
 def _sessions_by_module(query, model, value):
     """?module_id= on sessions - a visit or lecture covers several units at
     once, so its session picker is scoped by module, not by one unit."""
@@ -650,7 +677,8 @@ register(ResourceConfig(
     writable=["trainer_id", "lab_id", "job_role_id", "date", "time", "class_grade",
               "sections", "activity", "photo_url", "comment", "status"],
     search=["activity", "comment"],
-    filters=["trainer_id", "lab_id", "academic_year", "class_grade", "date"],
+    filters=["trainer_id", "lab_id", "academic_year", "class_grade", "section", "date", "endorsement_status"],
+    extra_filters={"section": _any_section},
     sortable=["date", "created_at"], default_sort=("date", "desc"),
     computed=_class_attendance_display,
     validate=_validate_class_attendance,
@@ -677,7 +705,8 @@ register(ResourceConfig(
               "picture_url", "contact_person", "contact_mobile", "contact_email",
               "contact_designation", "status"],
     search=["organisation_name", "address", "purpose"],
-    filters=["lab_id", "job_role_id", "academic_year", "class_grade"],
+    filters=["lab_id", "job_role_id", "academic_year", "class_grade", "section"],
+    extra_filters={"section": _any_section},
     sortable=["reporting_date", "created_at"], default_sort=("reporting_date", "desc"),
     computed=_school_name,
     validate=_validate_field_visit,
@@ -693,7 +722,8 @@ register(ResourceConfig(
               "lecturer_qualification", "lecturer_phone", "lecturer_email",
               "lecturer_experience", "status"],
     search=["topic", "lecturer_name"],
-    filters=["lab_id", "academic_year", "class_grade"],
+    filters=["lab_id", "academic_year", "class_grade", "section"],
+    extra_filters={"section": _any_section},
     sortable=["reporting_date", "created_at"], default_sort=("reporting_date", "desc"),
     computed=_school_name,
     validate=_validate_guest_lecture,
@@ -774,7 +804,7 @@ register(ResourceConfig(
 # =========================================================================
 register(ResourceConfig(
     name="feedback", model=M.Feedback, label="Feedback",
-    write_roles=[SA, OA, DM, PR, VT],
+    write_roles=[SA, OA, DM, VT],
     writable=["source", "subject", "rating", "comments", "date", "school_id",
               "lab_id", "status"],
     search=["subject", "comments"], filters=["source", "school_id", "rating"],

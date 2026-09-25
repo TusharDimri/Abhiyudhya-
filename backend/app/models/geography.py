@@ -39,6 +39,7 @@ class School(BaseModel):
     )
     address = db.Column(db.Text)
     email = db.Column(db.String(120))
+    school_type = db.Column(db.String(20))  # Boys / Girls / Co-education
     # where the school is - trainers' attendance must be marked within 1 km
     location = db.Column(Geography(geometry_type="POINT", srid=4326, spatial_index=False))
     phone = db.Column(db.String(30))
@@ -66,3 +67,35 @@ class Principal(BaseModel):
         GUID(),
         db.ForeignKey("app_user.id", use_alter=True, name="fk_principal_user_id_app_user"),
     )
+
+    # ---- set when they are taken on (admin) ---------------------------------
+    designation = db.Column(db.String(60))      # Principal / Headmaster / ... (In-charge)
+    employee_id = db.Column(db.String(40))
+    appointment_nature = db.Column(db.String(30))
+
+    # ---- profile: the principal fills these in on their profile page -------
+    photo_url = db.Column(db.String(500))
+    father_name = db.Column(db.String(160))
+    dob = db.Column(db.Date)
+    social_category_id = db.Column(
+        GUID(), db.ForeignKey("social_category.id", name="fk_principal_social_category_id_social_category"))
+    alternate_mobile = db.Column(db.String(30))
+    correspondence_address = db.Column(db.Text)
+    permanent_address = db.Column(db.Text)
+    service_joining_date = db.Column(db.Date)   # first day in government service
+    substantive_post = db.Column(db.String(120))  # e.g. Lecturer (PGT) Physics
+    highest_qualification = db.Column(db.String(60))
+    professional_qualification = db.Column(db.String(120))  # B.Ed / M.Ed / ...
+    subject_specialisation = db.Column(db.String(120))
+    signature_url = db.Column(db.String(500))
+    school_seal_url = db.Column(db.String(500))
+
+    # Personal details stay on the principal's own profile (api/profile.py);
+    # the ordinary principal list - readable by trainers - never carries them.
+    PRIVATE = {
+        "photo_url", "father_name", "dob", "social_category_id", "alternate_mobile",
+        "correspondence_address", "permanent_address", "signature_url", "school_seal_url",
+    }
+
+    def to_dict(self, exclude=None):
+        return super().to_dict(exclude=set(exclude or ()) | self.PRIVATE)

@@ -23,6 +23,7 @@ export const CARD_LINKS = {
   pending_issues_action: { to: "/app/issues", params: { workflow_status: "open" } },
   issues_resolved: { to: "/app/issues", params: { workflow_status: "resolved" } },
   pending_endorsement: { to: "/app/attendance", params: { endorsement_status: "submitted" } },
+  class_pending_endorsement: { to: "/app/class-attendance", params: { endorsement_status: "submitted" } },
   endorsed: { to: "/app/attendance", params: { endorsement_status: "endorsed" } },
   diaries: { to: "/app/diaries" },
   placements: { to: "/app/ojt-placements", params: { placement_placed: "true" } },
@@ -61,7 +62,8 @@ export const QUICK_ACTIONS = {
     { label: "Schools in my district", icon: "🏫", to: "/app/schools" },
   ],
   PR: [
-    { label: "Review attendance for endorsement", icon: "✅", to: "/app/attendance?endorsement_status=submitted" },
+    { label: "Endorse daily attendance", icon: "✅", to: "/app/attendance?endorsement_status=submitted" },
+    { label: "Endorse class attendance", icon: "🧑‍🏫", to: "/app/class-attendance?endorsement_status=submitted" },
     { label: "My school's students", icon: "🧑‍🎓", to: "/app/students" },
     { label: "Trainers at my school", icon: "👨‍🏫", to: "/app/trainers" },
   ],

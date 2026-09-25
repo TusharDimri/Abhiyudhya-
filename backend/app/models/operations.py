@@ -124,6 +124,12 @@ class ClassAttendance(CapturesLocation, BaseModel):
     comment = db.Column(db.Text)
     distance_from_school_m = db.Column(db.Float)
 
+    # the Principal endorses (or returns) it, as with daily attendance
+    endorsement_status = db.Column(db.String(20), default="submitted", server_default="submitted", index=True)
+    endorsed_by = db.Column(GUID(), db.ForeignKey("app_user.id", name="fk_class_attendance_endorsed_by_app_user"))
+    endorsed_on = db.Column(db.DateTime)
+    endorsement_remarks = db.Column(db.Text)
+
     student_marks = db.relationship("ClassAttendanceStudentMark", backref="class_attendance", lazy="selectin")
 
 

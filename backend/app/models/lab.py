@@ -83,6 +83,41 @@ class Trainer(BaseModel):
     date_of_exit = db.Column(db.Date)
     trainer_status = db.Column(db.String(20), default="active")  # active/substitute/exited
     qualification = db.Column(db.String(200))
+
+    # ---- profile: the trainer fills these in on their profile page --------
+    photo_url = db.Column(db.String(500))
+    father_name = db.Column(db.String(160))
+    mother_name = db.Column(db.String(160))
+    dob = db.Column(db.Date)
+    domicile_state = db.Column(db.String(80))
+    social_category_id = db.Column(GUID(), db.ForeignKey("social_category.id"))
+    marital_status = db.Column(db.String(20))
+    nationality = db.Column(db.String(60))
+    blood_group = db.Column(db.String(5))
+    # Sensitive: stored as given, never sent back whole - the API shows only
+    # the last four characters (api/profile.py).
+    aadhaar_number = db.Column(db.String(12))
+    vtp_name = db.Column(db.String(200))       # Vocational Training Provider employing them
+    correspondence_address = db.Column(db.Text)
+    permanent_address = db.Column(db.Text)
+    appointment_nature = db.Column(db.String(30))  # Contractual / Adhoc / Regular / Guest
+    # bank & salary (account, PAN are sensitive - masked by the API as well)
+    beneficiary_name = db.Column(db.String(160))
+    bank_name = db.Column(db.String(120))
+    branch_address = db.Column(db.String(300))
+    account_number = db.Column(db.String(30))
+    ifsc_code = db.Column(db.String(11))
+    gross_salary = db.Column(db.Float)
+    deduction_esi = db.Column(db.Float)
+    deduction_epf = db.Column(db.Float)
+    deduction_tds = db.Column(db.Float)
+    deduction_other = db.Column(db.Float)
+    pan_number = db.Column(db.String(10))
+    esi_number = db.Column(db.String(30))
+    uan_number = db.Column(db.String(30))
+    vt_signature_url = db.Column(db.String(500))
+    vtp_signature_url = db.Column(db.String(500))
+
     user_id = db.Column(
         GUID(),
         db.ForeignKey("app_user.id", use_alter=True, name="fk_trainer_user_id_app_user"),
@@ -90,3 +125,18 @@ class Trainer(BaseModel):
 
     school = db.relationship("School", lazy="joined")
     lab = db.relationship("Lab", lazy="joined")
+
+    # Personal, bank and salary details live on the trainer's own profile
+    # (api/profile.py). They never go out with the ordinary trainer list -
+    # colleagues can read that list for their dropdowns - nor into audit logs.
+    PRIVATE = {
+        "photo_url", "father_name", "mother_name", "dob", "domicile_state", "social_category_id",
+        "marital_status", "nationality", "blood_group", "aadhaar_number", "correspondence_address",
+        "permanent_address", "beneficiary_name", "bank_name", "branch_address", "account_number",
+        "ifsc_code", "gross_salary", "deduction_esi", "deduction_epf", "deduction_tds",
+        "deduction_other", "pan_number", "esi_number", "uan_number", "vt_signature_url",
+        "vtp_signature_url",
+    }
+
+    def to_dict(self, exclude=None):
+        return super().to_dict(exclude=set(exclude or ()) | self.PRIVATE)

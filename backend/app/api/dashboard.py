@@ -8,7 +8,7 @@ from app.extensions import db
 from app.models.geography import School
 from app.models.student import Student
 from app.models.lab import Lab, Trainer
-from app.models.operations import DailyAttendance, VTIssue, GuestLecture, FieldVisit
+from app.models.operations import ClassAttendance, DailyAttendance, VTIssue, GuestLecture, FieldVisit
 from app.models.internship import OJTPlacement, DailyDiary
 from app.rbac import login_required, current_user, apply_scope
 from app.services.cache import cached_json
@@ -96,7 +96,8 @@ def summary():
         "guest_lectures": lambda: {"key": "guest_lectures", "label": "Guest Lectures", "value": _count(GuestLecture, user, "reporting_date"), "icon": "mic"},
         "field_visits": lambda: {"key": "field_visits", "label": "Field Visits", "value": _count(FieldVisit, user, "reporting_date"), "icon": "map"},
         "open_issues": lambda: {"key": "open_issues", "label": "Open Issues", "value": _status_count(VTIssue, user, "workflow_status", "resolved", negate=True), "icon": "alert"},
-        "pending_endorsement": lambda: {"key": "pending_endorsement", "label": "Awaiting Endorsement", "value": _status_count(DailyAttendance, user, "endorsement_status", "submitted"), "icon": "clock"},
+        "pending_endorsement": lambda: {"key": "pending_endorsement", "label": "Daily Attendance to Endorse", "value": _status_count(DailyAttendance, user, "endorsement_status", "submitted"), "icon": "clock"},
+        "class_pending_endorsement": lambda: {"key": "class_pending_endorsement", "label": "Class Attendance to Endorse", "value": _status_count(ClassAttendance, user, "endorsement_status", "submitted"), "icon": "clock"},
         "endorsed": lambda: {"key": "endorsed", "label": "Endorsed Attendance", "value": _status_count(DailyAttendance, user, "endorsement_status", "endorsed"), "icon": "check"},
         "diaries": lambda: {"key": "diaries", "label": "Diary Entries", "value": _count(DailyDiary, user, "date"), "icon": "book"},
         "placements": lambda: {"key": "placements", "label": "Students Placed", "value": _status_count(OJTPlacement, user, "placement_placed", True), "icon": "briefcase"},
@@ -109,7 +110,7 @@ def summary():
         "SA": ["schools", "labs", "trainers", "students", "attendance", "guest_lectures", "field_visits", "open_issues", "endorsed", "placements"],
         "OA": ["schools", "labs", "trainers", "students", "pending_verification", "attendance", "guest_lectures", "field_visits", "open_issues", "placements"],
         "DM": ["schools", "labs", "trainers", "students", "pending_verification", "attendance", "pending_issues_action", "issues_resolved", "endorsed", "field_visits"],
-        "PR": ["students", "trainers", "attendance", "pending_endorsement", "endorsed", "guest_lectures", "field_visits", "open_issues"],
+        "PR": ["pending_endorsement", "class_pending_endorsement", "endorsed", "students", "trainers", "attendance", "guest_lectures", "field_visits", "open_issues"],
         "VT": ["students", "pending_verification", "attendance", "pending_endorsement", "guest_lectures", "field_visits", "open_issues"],
     }
     keys = ROLE_CARDS.get(role, ROLE_CARDS["OA"])

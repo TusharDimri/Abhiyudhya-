@@ -19,3 +19,7 @@ from app.models.internship import (  # noqa: F401
     Employer, EmployerStudentMap, DailyDiary, OJTPlacement,
 )
 from app.models.misc import Feedback, Notification, AuditLog  # noqa: F401
+from app.models.trainer_profile import (  # noqa: F401
+    TrainerQualification, TrainerExperience, TrainerTraining, TrainerPosting,
+    PrincipalQualification, PrincipalTraining, PrincipalPosting,
+)

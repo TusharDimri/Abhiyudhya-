@@ -231,6 +231,8 @@ def list_resource(resource):
     # A comma-separated value means "any of these" - needed because sections
     # are picked as a set ("9A and 9B"), and handy for every other filter too.
     for col in cfg.filters:
+        if col in (cfg.extra_filters or {}):
+            continue  # applied below, by its own function
         if col in request.args and request.args.get(col) != "":
             raw = request.args.get(col)
             column = getattr(model, col)

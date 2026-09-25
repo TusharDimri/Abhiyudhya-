@@ -360,9 +360,12 @@ export default function ResourceForm({
   };
 
   const shown = fields.filter((f) => visible(f) && !f.hidden);
-  // `quiet` fields are filled in and saved but not worth showing
-  const autoFields = shown.filter((f) => (isKnown(f) || isDerived(f)) && !f.quiet);
-  const bodyFields = shown.filter((f) => !isKnown(f) && !isDerived(f));
+  // Known from the start (their profile, a default they can't change): the
+  // panel at the top. Worked out from other answers (job role from class):
+  // stays in its place, read-only - it never jumps away when the answer
+  // arrives. `quiet` fields are filled in and saved but not shown at all.
+  const autoFields = shown.filter((f) => isKnown(f) && !f.quiet);
+  const bodyFields = shown.filter((f) => !isKnown(f) && !(isDerived(f) && f.quiet));
 
   // group the remaining questions into labelled sections, in the order the
   // groups first appear in the catalog
@@ -527,7 +530,6 @@ export default function ResourceForm({
                   <div className="known-item" key={f.name}>
                     <span className="known-k">{f.label}</span>
                     <span className="known-v">{knownLabel(f)}</span>
-                    {isDerived(f) && f.deriveNote && <span className="known-why">{f.deriveNote}</span>}
                   </div>
                 ))}
               </div>
@@ -541,8 +543,13 @@ export default function ResourceForm({
                 {g.fields.map((f) => (
                   <div className={`field ${WIDE.has(f.type) || f.wide ? "wide" : ""}`} key={f.name}>
                     <label>{f.label} {f.required && <span className="req">*</span>}</label>
-                    {renderControl(f)}
-                    {f.hint && <span className="hint">{f.hint}</span>}
+                    {isDerived(f) ? (
+                      <>
+                        <div className="input derived-value" aria-readonly="true">{knownLabel(f)}</div>
+                        {f.deriveNote && <span className="hint">✓ {f.deriveNote}</span>}
+                      </>
+                    ) : renderControl(f)}
+                    {f.hint && !isDerived(f) && <span className="hint">{f.hint}</span>}
                     {errors[f.name] && <span className="field-error">{errors[f.name]}</span>}
                   </div>
                 ))}

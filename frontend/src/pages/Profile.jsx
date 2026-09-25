@@ -1,0 +1,453 @@
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import api, { apiError } from "../lib/api";
+import { useToast } from "../lib/toast";
+import { useBootstrap } from "../hooks/useBootstrap";
+import { toDMY, todayISO } from "../lib/dates";
+import { uploadFile } from "../lib/upload";
+import DateInput from "../components/DateInput";
+import { useAuth } from "../lib/auth";
+
+/* The trainer's own service record, section by section. Each section is
+   read first and edited on its own ("Edit" -> change -> "Save"). Identity
+   details that are already on record are locked (the server enforces it);
+   Aadhaar, account number and PAN only ever come back masked. */
+
+const money = (n) => (n == null || n === "" ? null : `₹ ${Number(n).toLocaleString("en-IN")}`);
+const yesNo = (v) => (v == null ? null : v ? "Yes" : "No");
+
+// ------------------------------------------------------------ sections
+const GENERAL = [
+  { name: "full_name", label: "Name" },
+  { name: "father_name", label: "Father's name" },
+  { name: "mother_name", label: "Mother's name" },
+  { name: "dob", label: "Date of birth", type: "date" },
+  { name: "domicile_state", label: "Domicile state" },
+  { name: "gender", label: "Gender", type: "select", enumKey: "genders" },
+  { name: "social_category_id", label: "Category", type: "select", optionsKey: "social_categories", show: (d) => d.category_name },
+  { name: "phone", label: "Mobile no.", type: "tel", placeholder: "10 digits" },
+  { name: "email", label: "Email ID", type: "email" },
+  { name: "marital_status", label: "Marital status", type: "select", enumKey: "marital_status" },
+  { name: "nationality", label: "Nationality", placeholder: "e.g. Indian" },
+  { name: "aadhaar_number", label: "Aadhaar no.", placeholder: "12 digits", sensitive: true },
+  { name: "blood_group", label: "Blood group", type: "select", enumKey: "blood_groups" },
+  { name: "total_experience_years", label: "Total experience", computed: true, show: (d) => `${d.total_experience_years ?? 0} years` },
+  { name: "vtp_name", label: "VTP name" },
+  { name: "skill_name", label: "Skill name", computed: true, show: (d) => d.posting?.skill_name },
+];
+const ADDRESS = [
+  { name: "correspondence_address", label: "Correspondence address", type: "textarea", wide: true },
+  { name: "permanent_address", label: "Permanent address", type: "textarea", wide: true },
+];
+const BANK = [
+  { name: "beneficiary_name", label: "Beneficiary name" },
+  { name: "bank_name", label: "Bank name" },
+  { name: "branch_address", label: "Branch address" },
+  { name: "account_number", label: "Account no.", sensitive: true },
+  { name: "ifsc_code", label: "IFSC code", placeholder: "e.g. PUNB0797200" },
+  { name: "gross_salary", label: "Gross salary", type: "number", show: (d) => money(d.gross_salary) },
+  { name: "deduction_esi", label: "ESI deduction", type: "number", show: (d) => money(d.deduction_esi) },
+  { name: "deduction_epf", label: "EPF deduction", type: "number", show: (d) => money(d.deduction_epf) },
+  { name: "deduction_tds", label: "TDS deduction", type: "number", show: (d) => money(d.deduction_tds) },
+  { name: "deduction_other", label: "Other deduction", type: "number", show: (d) => money(d.deduction_other) },
+  { name: "net_salary", label: "Net salary", computed: true, show: (d) => money(d.net_salary) },
+  { name: "pan_number", label: "PAN", placeholder: "e.g. ABCDE1234F", sensitive: true },
+  { name: "esi_number", label: "ESI number" },
+  { name: "uan_number", label: "UAN number" },
+];
+
+const TABLES = {
+  qualifications: {
+    title: "Qualification Details",
+    columns: [
+      { name: "qualification", label: "Qualification", type: "select", enumKey: "qualification_levels" },
+      { name: "course", label: "Course" },
+      { name: "institution", label: "University / College" },
+      { name: "course_type", label: "Course type", type: "select", enumKey: "course_types" },
+      { name: "passing_year", label: "Passing year", type: "number" },
+      { name: "marksheet_date", label: "Final marksheet", type: "date" },
+    ],
+  },
+  experiences: {
+    title: "Experience Details",
+    columns: [
+      { name: "organisation_name", label: "Organisation" },
+      { name: "address", label: "Address" },
+      { name: "date_of_joining", label: "Date of joining", type: "date" },
+      { name: "date_of_resignation", label: "Date of resignation", type: "date" },
+      { name: "last_designation", label: "Last designation" },
+      { name: "last_salary", label: "Last salary", type: "number", show: (r) => money(r.last_salary) },
+      { name: "job_type", label: "Job type", type: "select", enumKey: "job_types" },
+      { name: "job_nature", label: "Job nature", type: "select", enumKey: "job_nature" },
+      { name: "reason_for_resignation", label: "Reason for resignation" },
+    ],
+  },
+  trainings: {
+    title: "Training Information",
+    columns: [
+      { name: "training_type", label: "Training type" },
+      { name: "training_level", label: "Training level" },
+      { name: "venue", label: "Venue" },
+      { name: "from_date", label: "From", type: "date" },
+      { name: "to_date", label: "To", type: "date" },
+    ],
+  },
+  postings: {
+    title: "NSQF History",
+    columns: [
+      { name: "vtp_name", label: "VTP name" },
+      { name: "district", label: "District" },
+      { name: "block", label: "Block" },
+      { name: "school_name", label: "School name" },
+      { name: "school_year", label: "School year", placeholder: "e.g. 2016-17" },
+      { name: "school_type", label: "School type", type: "select", enumKey: "school_types" },
+      { name: "date_of_joining", label: "DOJ", type: "date" },
+      { name: "date_of_relieving", label: "DOR", type: "date" },
+      { name: "appointment_nature", label: "Appointment", type: "select", enumKey: "appointment_nature" },
+      { name: "appointment_letter", label: "Appointment letter", type: "yesno", show: (r) => yesNo(r.appointment_letter) },
+      { name: "experience_certificate", label: "Experience certificate", type: "yesno", show: (r) => yesNo(r.experience_certificate) },
+    ],
+  },
+};
+
+// ---------------------------------------------------------- a principal's
+const PR_GENERAL = [
+  { name: "full_name", label: "Name" },
+  { name: "designation", label: "Designation", type: "select", enumKey: "principal_designations" },
+  { name: "employee_id", label: "Employee ID" },
+  { name: "father_name", label: "Father's name" },
+  { name: "dob", label: "Date of birth", type: "date" },
+  { name: "gender", label: "Gender", type: "select", enumKey: "genders" },
+  { name: "social_category_id", label: "Category", type: "select", optionsKey: "social_categories", show: (d) => d.category_name },
+  { name: "mobile", label: "Mobile no.", type: "tel", placeholder: "10 digits" },
+  { name: "alternate_mobile", label: "Alternate mobile", type: "tel", placeholder: "10 digits" },
+  { name: "email", label: "Email ID", type: "email" },
+];
+const PR_SERVICE = [
+  { name: "service_joining_date", label: "Joined government service", type: "date" },
+  { name: "total_service_years", label: "Total service", computed: true, show: (d) => d.total_service_years != null && `${d.total_service_years} years` },
+  { name: "substantive_post", label: "Substantive post", placeholder: "e.g. Lecturer (PGT) Physics" },
+  { name: "highest_qualification", label: "Highest qualification", type: "select", enumKey: "qualification_levels" },
+  { name: "professional_qualification", label: "Professional qualification", placeholder: "e.g. B.Ed, M.Ed" },
+  { name: "subject_specialisation", label: "Subject specialisation" },
+  { name: "superannuation_date", label: "Superannuation (at 60)", computed: true, type: "date", show: (d) => d.superannuation_date },
+];
+const PR_TABLES = {
+  qualifications: TABLES.qualifications,
+  postings: {
+    title: "Service History",
+    columns: [
+      { name: "school_name", label: "School" },
+      { name: "district", label: "District" },
+      { name: "block", label: "Block" },
+      { name: "designation", label: "Designation" },
+      { name: "from_date", label: "From", type: "date" },
+      { name: "to_date", label: "To", type: "date" },
+    ],
+  },
+  trainings: { ...TABLES.trainings, title: "Trainings Attended" },
+};
+
+// one input for a field or table cell
+function Control({ f, value, onChange, boot, disabled }) {
+  const opts = f.enumKey ? boot?.enums?.[f.enumKey] : f.optionsKey ? boot?.options?.[f.optionsKey] : null;
+  if (f.type === "date") return <DateInput value={value || ""} onChange={onChange} max={todayISO()} />;
+  if (f.type === "textarea")
+    return <textarea className="input" rows={2} value={value ?? ""} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
+  if (f.type === "yesno")
+    return (
+      <select className="select" value={value == null ? "" : value ? "true" : "false"} onChange={(e) => onChange(e.target.value === "" ? null : e.target.value === "true")}>
+        <option value="">—</option><option value="true">Yes</option><option value="false">No</option>
+      </select>
+    );
+  if (opts)
+    return (
+      <select className="select" value={value ?? ""} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+        <option value="">— Select —</option>
+        {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    );
+  return (
+    <input className="input" type={["number", "tel", "email"].includes(f.type) ? f.type : "text"} placeholder={f.placeholder || ""}
+      value={value ?? ""} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+  );
+}
+
+// a label/value section, edited in place
+function InfoSection({ title, fields, data, section, boot, save, saving, note }) {
+  const [draft, setDraft] = useState(null);
+  const required = new Set(data.required?.[section] || []);
+  const locked = new Set(data.locked || []);
+  const editing = draft !== null;
+  const display = (f) => {
+    const v = f.show ? f.show(data) : data[f.name];
+    if (v == null || v === "") return <span className="muted">—</span>;
+    return f.type === "date" ? toDMY(v) : String(v);
+  };
+
+  const start = () => setDraft(Object.fromEntries(fields.filter((f) => !f.computed).map((f) => [f.name, data[f.name] ?? ""])));
+  const submit = () => {
+    const body = {};
+    for (const [k, v] of Object.entries(draft)) if (!locked.has(k)) body[k] = v === "" ? null : v;
+    save(body, () => setDraft(null));
+  };
+
+  return (
+    <section className="card profile-card">
+      <div className="profile-card-head">
+        <h3>{title}</h3>
+        {section && !editing && <button className="btn btn-ghost btn-sm" onClick={start}>✎ Edit</button>}
+      </div>
+      {note && <p className="muted profile-note">{note}</p>}
+      <dl className="profile-grid">
+        {fields.map((f) => (
+          <div key={f.name} className={`profile-item ${f.wide ? "wide" : ""}`}>
+            <dt>{f.label}{editing && required.has(f.name) && <span className="req"> *</span>}</dt>
+            <dd>
+              {editing && !f.computed && !locked.has(f.name) ? (
+                <Control f={f} boot={boot} value={draft[f.name]} onChange={(v) => setDraft((d) => ({ ...d, [f.name]: v }))} />
+              ) : (
+                <>
+                  {display(f)}
+                  {editing && locked.has(f.name) && <span className="lock-note" title="On record - ask your admin to change it"> 🔒</span>}
+                </>
+              )}
+              {editing && f.sensitive && !locked.has(f.name) && data[f.name] && (
+                <span className="hint">Shown masked. Leave it as it is to keep it, or type the full number to change it.</span>
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {editing && (
+        <div className="profile-actions">
+          {locked.size > 0 && fields.some((f) => locked.has(f.name)) && (
+            <span className="muted">🔒 On record - ask your admin to change these.</span>
+          )}
+          <button className="btn btn-ghost" onClick={() => setDraft(null)} disabled={saving}>Cancel</button>
+          <button className="btn btn-primary" onClick={submit} disabled={saving}>{saving ? "Saving…" : "Save"}</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// a list section (qualifications, jobs, trainings, postings), edited as rows
+function TableSection({ listKey, tables = TABLES, data, boot, save, saving }) {
+  const cfg = tables[listKey];
+  const rows = data[listKey] || [];
+  const [draft, setDraft] = useState(null);
+  const editing = draft !== null;
+  const blank = () => Object.fromEntries(cfg.columns.map((c) => [c.name, c.type === "yesno" ? null : ""]));
+  const cell = (c, r) => {
+    const v = c.show ? c.show(r) : r[c.name];
+    if (v == null || v === "") return <span className="muted">—</span>;
+    return c.type === "date" ? toDMY(v) : String(v);
+  };
+  const put = (i, name, v) => setDraft((d) => d.map((r, j) => (j === i ? { ...r, [name]: v } : r)));
+
+  return (
+    <section className="card profile-card">
+      <div className="profile-card-head">
+        <h3>{cfg.title}</h3>
+        {!editing && <button className="btn btn-ghost btn-sm" onClick={() => setDraft(rows.length ? rows.map((r) => ({ ...r })) : [blank()])}>✎ Edit</button>}
+      </div>
+      <div className="table-wrap">
+        <table className="data profile-table">
+          <thead>
+            <tr><th>Sr</th>{cfg.columns.map((c) => <th key={c.name}>{c.label}</th>)}{editing && <th />}</tr>
+          </thead>
+          <tbody>
+            {(editing ? draft : rows).map((r, i) => (
+              <tr key={r.id || `new-${i}`}>
+                <td>{i + 1}</td>
+                {cfg.columns.map((c) => (
+                  <td key={c.name}>
+                    {editing ? <Control f={c} boot={boot} value={r[c.name]} onChange={(v) => put(i, c.name, v)} /> : cell(c, r)}
+                  </td>
+                ))}
+                {editing && (
+                  <td><button className="btn btn-ghost btn-sm" title="Remove this row" onClick={() => setDraft((d) => d.filter((_, j) => j !== i))}>✕</button></td>
+                )}
+              </tr>
+            ))}
+            {!editing && rows.length === 0 && (
+              <tr><td colSpan={cfg.columns.length + 1} className="muted" style={{ textAlign: "center" }}>Nothing added yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {editing && (
+        <div className="profile-actions">
+          <button className="btn btn-ghost btn-sm" onClick={() => setDraft((d) => [...d, blank()])}>＋ Add row</button>
+          <span className="grow" />
+          <button className="btn btn-ghost" onClick={() => setDraft(null)} disabled={saving}>Cancel</button>
+          <button className="btn btn-primary" disabled={saving}
+            onClick={() => save({ [listKey]: draft.map(({ id, ...r }) => r) }, () => setDraft(null))}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// a picture held on the profile (photo, signatures)
+function PictureSlot({ label, field, src, save, saving }) {
+  const [busy, setBusy] = useState(false);
+  const { push } = useToast();
+  const pick = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    try { save({ [field]: await uploadFile(file) }); } catch (e) { push(e.message || "Upload failed", "error"); } finally { setBusy(false); }
+  };
+  return (
+    <div className="picture-slot">
+      <div className="picture-box">{src ? <img src={src} alt={label} /> : <span className="muted">No {label.toLowerCase()} yet</span>}</div>
+      <label className="btn btn-ghost btn-sm">
+        {busy || saving ? "Uploading…" : src ? "Replace" : "Upload"} {label}
+        <input type="file" accept="image/*" hidden onChange={(e) => pick(e.target.files[0])} />
+      </label>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ page parts
+function Hero({ d, subtitle, chips, save }) {
+  const { push } = useToast();
+  const initials = (d.full_name || "?").split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
+  return (
+    <section className="card profile-hero">
+      <div className="profile-photo">
+        {d.photo_src ? <img src={d.photo_src} alt="" /> : <span>{initials}</span>}
+        <label className="profile-photo-edit" title="Change photo">
+          📷<input type="file" accept="image/*" hidden onChange={async (e) => {
+            const f = e.target.files[0]; if (!f) return;
+            try { save({ photo_url: await uploadFile(f) }); } catch (err) { push(err.message || "Upload failed", "error"); }
+          }} />
+        </label>
+      </div>
+      <div>
+        <h1 style={{ margin: 0 }}>{d.full_name}</h1>
+        <div className="muted">{subtitle}</div>
+        <div className="profile-chips">
+          {chips.filter((c) => c.text).map((c) => <span key={c.icon} className="scope-chip">{c.icon} {c.text}</span>)}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Pictures({ title, slots, d, save, saving }) {
+  return (
+    <section className="card profile-card">
+      <div className="profile-card-head"><h3>{title}</h3></div>
+      <div className="signatures">
+        {slots.map(([label, field]) => (
+          <PictureSlot key={field} label={label} field={field} src={d[field.replace("_url", "_src")]} save={save} saving={saving} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+const withSchool = (p) => p.school_name && `${p.school_name}${p.udise_code ? ` (${p.udise_code})` : ""}`;
+const withBlock = (p) => p.district && `${p.district}${p.block ? ` (${p.block})` : ""}`;
+
+function TrainerProfile({ d, common }) {
+  const p = d.posting || {};
+  return (
+    <>
+      <Hero d={d} save={common.save} subtitle={`Vocational Trainer${d.vtp_name ? ` · ${d.vtp_name}` : ""}`}
+        chips={[{ icon: "🏫", text: p.school_name }, { icon: "🧪", text: p.lab_name }, { icon: "🎯", text: p.job_role }]} />
+      <InfoSection title="General Information" section="general" fields={GENERAL} {...common} />
+      <InfoSection title="Address Details" section="address" fields={ADDRESS} {...common} />
+      <InfoSection
+        title="School Information" fields={[
+          { name: "s_school", label: "School name", computed: true, show: () => withSchool(p) },
+          { name: "s_district", label: "District (Block)", computed: true, show: () => withBlock(p) },
+          { name: "s_year", label: "School year", computed: true, show: () => p.school_year },
+          { name: "s_type", label: "School type", computed: true, show: () => p.school_type },
+          { name: "s_lab", label: "Lab", computed: true, show: () => p.lab_name },
+          { name: "s_role", label: "Job role", computed: true, show: () => p.job_role },
+          { name: "s_doj", label: "Date of joining", computed: true, type: "date", show: () => p.date_of_joining },
+          { name: "s_nature", label: "Nature of appointment", computed: true, show: () => p.appointment_nature },
+        ]}
+        note="Your current posting, as your admin has it on record."
+        {...common}
+      />
+      <TableSection listKey="qualifications" {...common} />
+      <TableSection listKey="experiences" {...common} />
+      <TableSection listKey="trainings" {...common} />
+      <TableSection listKey="postings" {...common} />
+      <InfoSection title="Bank & Salary Details" section="bank" fields={BANK} {...common} />
+      <Pictures title="Signatures" d={d} save={common.save} saving={common.saving}
+        slots={[["VT signature", "vt_signature_url"], ["VTP signature", "vtp_signature_url"]]} />
+    </>
+  );
+}
+
+function PrincipalProfile({ d, common }) {
+  const p = d.posting || {};
+  const list = (xs) => (xs?.length ? xs.join(", ") : null);
+  return (
+    <>
+      <Hero d={d} save={common.save} subtitle={[d.designation || "Principal", d.employee_id && `Employee ID ${d.employee_id}`].filter(Boolean).join(" · ")}
+        chips={[{ icon: "🏫", text: p.school_name }, { icon: "📍", text: withBlock(p) }]} />
+      <InfoSection title="General Information" section="general" fields={PR_GENERAL} {...common} />
+      <InfoSection title="Service Details" section="service" fields={PR_SERVICE} {...common} />
+      <InfoSection title="Address Details" section="address" fields={ADDRESS} {...common} />
+      <InfoSection
+        title="School Information" fields={[
+          { name: "s_school", label: "School name", computed: true, show: () => withSchool(p) },
+          { name: "s_district", label: "District (Block)", computed: true, show: () => withBlock(p) },
+          { name: "s_type", label: "School type", computed: true, show: () => p.school_type },
+          { name: "s_address", label: "School address", computed: true, show: () => p.school_address },
+          { name: "s_contact", label: "School contact", computed: true, show: () => [p.school_phone, p.school_email].filter(Boolean).join(" · ") },
+          { name: "s_doj", label: "In charge since", computed: true, type: "date", show: () => p.date_of_joining },
+          { name: "s_years", label: "Years at this school", computed: true, show: () => d.years_at_school != null && `${d.years_at_school} years` },
+          { name: "s_nature", label: "Nature of appointment", computed: true, show: () => p.appointment_nature },
+          { name: "s_labs", label: "Vocational labs", computed: true, show: () => list(p.labs) },
+          { name: "s_trainers", label: "Vocational trainers", computed: true, show: () => list(p.trainers) },
+        ]}
+        note="Your school and posting, as your admin has them on record."
+        {...common}
+      />
+      <TableSection listKey="qualifications" tables={PR_TABLES} {...common} />
+      <TableSection listKey="postings" tables={PR_TABLES} {...common} />
+      <TableSection listKey="trainings" tables={PR_TABLES} {...common} />
+      <Pictures title="Signature & School Seal" d={d} save={common.save} saving={common.saving}
+        slots={[["Signature", "signature_url"], ["School seal", "school_seal_url"]]} />
+    </>
+  );
+}
+
+export default function Profile() {
+  const qc = useQueryClient();
+  const { push } = useToast();
+  const { user } = useAuth();
+  const { data: boot } = useBootstrap();
+  const q = useQuery({ queryKey: ["profile"], queryFn: async () => (await api.get("/profile")).data });
+  const m = useMutation({
+    mutationFn: async ({ body }) => (await api.patch("/profile", body)).data,
+    onSuccess: (data, { done }) => {
+      qc.setQueryData(["profile"], data);
+      push("Profile saved", "success");
+      done?.();
+    },
+    onError: (e) => push(apiError(e), "error"),
+  });
+  const save = (body, done) => m.mutate({ body, done });
+
+  if (q.isLoading) return <div className="skeleton" style={{ height: 240, borderRadius: 12 }} />;
+  if (q.isError) return <div className="card" style={{ padding: "1.2rem" }}>{apiError(q.error)}</div>;
+  const common = { data: q.data, boot, save, saving: m.isPending };
+
+  return (
+    <div className="stack profile" style={{ gap: "1rem" }}>
+      {user?.role === "PR"
+        ? <PrincipalProfile d={q.data} common={common} />
+        : <TrainerProfile d={q.data} common={common} />}
+    </div>
+  );
+}

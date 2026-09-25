@@ -4,7 +4,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, abort
 
 from app.extensions import db
-from app.models.operations import DailyAttendance, VTIssue
+from app.models.operations import ClassAttendance, DailyAttendance, VTIssue
 from app.models.student import Student
 from app.rbac import login_required, current_user, can_access_row
 from app.rbac.roles import Role
@@ -41,14 +41,14 @@ def verify_student(uid):
     return jsonify({"id": str(rec.id), "verification_status": status})
 
 
-@bp.post("/attendance/<uid>/endorse")
-@login_required
-def endorse_attendance(uid):
-    """Principal endorses (or returns) a VT attendance record for their school."""
+def _endorse(model, uid):
+    """The Principal endorses (or returns) a trainer's attendance record for
+    their school. Endorsed: the trainer can no longer change it. Returned: the
+    trainer corrects it, which sends it back for endorsement."""
     user = current_user()
     if user.role not in (Role.PRINCIPAL.value, Role.ORG_ADMIN.value, Role.SUPER_ADMIN.value):
         abort(403, description="Only the Principal can endorse")
-    rec = db.session.get(DailyAttendance, uid)
+    rec = db.session.get(model, uid)
     if rec is None or rec.is_deleted:
         abort(404)
     if not can_access_row(rec, user):
@@ -57,15 +57,29 @@ def endorse_attendance(uid):
     decision = data.get("decision", "endorsed")
     if decision not in ("endorsed", "returned"):
         abort(400, description="decision must be 'endorsed' or 'returned'")
+    if decision == "returned" and not (data.get("remarks") or "").strip():
+        abort(400, description="Say what needs correcting when returning an entry.")
     before = {"endorsement_status": rec.endorsement_status}
     rec.endorsement_status = decision
     rec.endorsed_by = user.id
     rec.endorsed_on = datetime.utcnow()
     rec.endorsement_remarks = data.get("remarks")
-    audit.record(user, "update", "daily_attendance", rec.id, before=before,
+    audit.record(user, "update", model.__tablename__, rec.id, before=before,
                  after={"endorsement_status": decision})
     db.session.commit()
     return jsonify({"id": str(rec.id), "endorsement_status": decision})
+
+
+@bp.post("/attendance/<uid>/endorse")
+@login_required
+def endorse_attendance(uid):
+    return _endorse(DailyAttendance, uid)
+
+
+@bp.post("/class-attendance/<uid>/endorse")
+@login_required
+def endorse_class_attendance(uid):
+    return _endorse(ClassAttendance, uid)
 
 
 @bp.post("/issues/<uid>/transition")

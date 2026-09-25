@@ -142,6 +142,20 @@ RAW_MATERIAL_AVAILABILITY = [
 ]
 EMPLOYEE_COUNT = _opts("0-1", "2-5", "6-10", "11-20", "20+")
 GENDERS = _opts("Male", "Female", "Other")
+
+# --- trainer profile ---
+MARITAL_STATUS = _opts("Single", "Married", "Divorced", "Widowed")
+BLOOD_GROUPS = _opts("A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-")
+SCHOOL_TYPES = _opts("Boys", "Girls", "Co-education")
+APPOINTMENT_NATURE = _opts("Contractual", "Adhoc", "Regular", "Guest")
+QUALIFICATION_LEVELS = _opts("10th", "12th", "Diploma", "Graduation", "Masters/Post-Graduation", "Doctorate", "Other")
+COURSE_TYPES = _opts("Full Time", "Part Time", "Distance")
+JOB_TYPES = _opts("Full Time", "Part Time")
+JOB_NATURE = _opts("Contractual", "Adhoc", "Permanent", "Temporary")
+PRINCIPAL_DESIGNATIONS = _opts(
+    "Principal", "Headmaster", "Headmistress", "Principal (In-charge)",
+    "Headmaster (In-charge)", "Headmistress (In-charge)", "Vice-Principal",
+)
 CLASS_GRADES = [{"value": g, "label": f"Class {g}"} for g in ("9", "10", "11", "12")]
 REGISTRATION_CLASSES = [{"value": g, "label": f"Class {g}"} for g in ("9", "11")]
 VERIFICATION_STATUS = _opts("pending", "verified", "rejected")
@@ -169,6 +183,15 @@ ENUMS = {
     "raw_material_availability": RAW_MATERIAL_AVAILABILITY,
     "employee_count": EMPLOYEE_COUNT,
     "genders": GENDERS,
+    "marital_status": MARITAL_STATUS,
+    "blood_groups": BLOOD_GROUPS,
+    "school_types": SCHOOL_TYPES,
+    "appointment_nature": APPOINTMENT_NATURE,
+    "qualification_levels": QUALIFICATION_LEVELS,
+    "course_types": COURSE_TYPES,
+    "job_types": JOB_TYPES,
+    "job_nature": JOB_NATURE,
+    "principal_designations": PRINCIPAL_DESIGNATIONS,
     "class_grades": CLASS_GRADES,
     "registration_classes": REGISTRATION_CLASSES,
     "verification_status": VERIFICATION_STATUS,

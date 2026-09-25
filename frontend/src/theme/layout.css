@@ -50,8 +50,11 @@
   position: sticky; top: 0; z-index: 30;
 }
 .topbar .hamburger { display: none; background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--navy-800); }
-.topbar .page-title { font-weight: 700; color: var(--navy-800); font-size: 1.02rem; }
-.topbar .user-chip { margin-left: auto; display: flex; align-items: center; gap: .6rem; }
+.topbar .page-title {
+  flex: 1; min-width: 0; font-weight: 700; color: var(--navy-800); font-size: 1.05rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.topbar .user-chip { display: flex; align-items: center; gap: .85rem; flex-shrink: 0; }
 .topbar .avatar {
   width: 34px; height: 34px; border-radius: 50%; background: var(--navy-100);
   color: var(--navy-800); font-weight: 700; display: grid; place-items: center; font-size: .82rem;
@@ -69,16 +72,23 @@
 .scope-chip { display: inline-flex; align-items: center; gap: .35rem; background: #fff; border: 1px solid var(--navy-100); color: var(--navy-800); border-radius: 999px; padding: .22rem .7rem; font-size: .8rem; font-weight: 600; }
 
 /* organisation branding in the topbar */
-.org-brand { margin-left: auto; display: flex; align-items: center; gap: .5rem; padding: .2rem .6rem .2rem .3rem; border: 1px solid var(--line); border-radius: 999px; background: var(--bg-soft); }
+.org-brand { display: flex; flex-shrink: 0; align-items: center; gap: .5rem; padding: .2rem .6rem .2rem .3rem; border: 1px solid var(--line); border-radius: 999px; background: var(--bg-soft); }
 .org-brand .org-logo { width: 28px; height: 28px; border-radius: 6px; object-fit: contain; background: #fff; }
 .org-brand .org-logo-fallback { width: 28px; height: 28px; border-radius: 6px; background: var(--navy-800); color: var(--gold-500); font-weight: 800; font-size: .7rem; display: grid; place-items: center; }
 .org-brand .org-name { font-size: .8rem; font-weight: 700; color: var(--navy-800); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.user-chip { margin-left: 0 !important; }
-.topbar .org-brand + .user-chip { margin-left: 1rem !important; }
+/* name + role, avatar, a thin divider, then Logout - each with room to breathe */
+.user-meta { display: flex; flex-direction: column; align-items: flex-end; gap: .22rem; line-height: 1.1; }
+.user-meta .user-name { font-weight: 700; font-size: .88rem; color: var(--navy-800); white-space: nowrap; }
+.topbar .avatar { box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--navy-100); }
+.topbar-divider { width: 1px; height: 28px; background: var(--line); }
+.logout-btn { display: inline-flex; align-items: center; gap: .35rem; padding-inline: .75rem; }
+.logout-btn:hover { border-color: var(--danger, #b42318); color: var(--danger, #b42318); }
 
 @media (max-width: 760px) {
   .org-brand .org-name { display: none; }
   .user-chip .user-meta { display: none; }
+  .topbar .user-chip { gap: .5rem; }
+  .topbar-divider { display: none; }
 }
 
 /* smart-form prefill hint */
@@ -417,3 +427,83 @@
 .promote-seg { margin-left: auto; }
 .promote-seg button.on { background: var(--success); }
 .promote-seg button:last-child.on { background: #9a6412; }
+
+/* ---------- collapsible sidebar (desktop) ---------- */
+.collapse-btn {
+  display: flex; align-items: center; gap: .6rem; margin: .4rem .6rem .8rem; padding: .5rem .7rem;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: 8px;
+  color: #cdd7e6; font: inherit; font-size: .84rem; cursor: pointer;
+}
+.collapse-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
+.sidebar, .main { transition: width .2s ease, margin-left .2s ease, transform .22s ease; }
+@media (min-width: 961px) {
+  .app-shell.collapsed { --sidebar-w: 68px; }
+  .app-shell.collapsed .nav-label,
+  .app-shell.collapsed .brand-text { display: none; }
+  .app-shell.collapsed .nav-group-label { font-size: 0; padding: .4rem 0 0; margin: .4rem .6rem; border-top: 1px solid rgba(255,255,255,.1); }
+  .app-shell.collapsed .nav-item { justify-content: center; padding: .6rem 0; }
+  .app-shell.collapsed .nav-item .ico { width: auto; font-size: 1.05rem; }
+  .app-shell.collapsed .sidebar .brand { justify-content: center; padding: 0; }
+  .app-shell.collapsed .nav-scroll { padding: .6rem .45rem 2rem; }
+  .app-shell.collapsed .collapse-btn { justify-content: center; margin: .4rem .45rem .8rem; }
+}
+@media (max-width: 960px) { .collapse-btn { display: none; } }
+
+/* ---------- tabs (Master Data page) ---------- */
+.tabs { display: flex; gap: .3rem; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: .1rem; }
+.tab {
+  display: inline-flex; align-items: center; gap: .4rem; padding: .5rem .9rem; border-radius: 8px 8px 0 0;
+  color: var(--navy-800); font-size: .88rem; font-weight: 600; border-bottom: 3px solid transparent;
+}
+.tab:hover { background: var(--navy-050); }
+.tab.on { border-bottom-color: var(--gold-600); background: var(--navy-050); }
+
+/* a value worked out from other answers, shown where the question would be */
+.derived-value { background: var(--bg-soft, #f6f8fb); color: var(--navy-800); font-weight: 600; min-height: 2.35rem; display: flex; align-items: center; }
+
+/* sidebar scrollbar: a slim, rounded bar that says "there's more below"
+   without the heavy default - quiet until hovered */
+.nav-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
+.nav-scroll::-webkit-scrollbar { width: 6px; }
+.nav-scroll::-webkit-scrollbar-track { background: transparent; margin: 6px 0; }
+.nav-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 999px; }
+.nav-scroll:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,.34); }
+.nav-scroll::-webkit-scrollbar-thumb:active { background: var(--gold-600); }
+.nav-scroll::-webkit-scrollbar-button { display: none; height: 0; }
+
+/* ---------- My Profile ---------- */
+.profile-hero { display: flex; align-items: center; gap: 1.1rem; padding: 1.1rem 1.2rem; }
+.profile-photo {
+  position: relative; width: 84px; height: 84px; border-radius: 50%; flex-shrink: 0;
+  background: var(--navy-800); color: var(--gold-500); display: grid; place-items: center;
+  font-size: 1.6rem; font-weight: 800; overflow: visible;
+}
+.profile-photo img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+.profile-photo-edit {
+  position: absolute; right: -4px; bottom: -4px; width: 30px; height: 30px; border-radius: 50%;
+  background: #fff; border: 1px solid var(--line-strong); display: grid; place-items: center;
+  font-size: .85rem; cursor: pointer;
+}
+.profile-chips { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .45rem; }
+.profile-card { padding: 1rem 1.2rem; }
+.profile-card-head { display: flex; align-items: center; gap: .6rem; margin-bottom: .6rem; }
+.profile-card-head h3 { margin: 0; font-size: 1.05rem; color: #b5561b; }
+.profile-card-head .btn { margin-left: auto; }
+.profile-note { margin: -.3rem 0 .6rem; font-size: .82rem; }
+.profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0 1.5rem; margin: 0; }
+.profile-item { display: grid; grid-template-columns: 11rem 1fr; gap: .6rem; padding: .5rem 0; border-bottom: 1px solid var(--line); align-items: start; }
+.profile-item.wide { grid-column: 1 / -1; }
+.profile-item dt { font-weight: 700; color: var(--navy-800); font-size: .86rem; }
+.profile-item dd { margin: 0; font-size: .9rem; display: flex; flex-direction: column; gap: .25rem; }
+.profile-actions { display: flex; align-items: center; gap: .5rem; justify-content: flex-end; margin-top: .8rem; flex-wrap: wrap; }
+.profile-actions .grow { flex: 1; }
+.profile-table td { vertical-align: top; }
+.profile-table td .input, .profile-table td .select { min-width: 8rem; }
+.signatures { display: flex; gap: 2rem; flex-wrap: wrap; }
+.picture-slot { display: flex; flex-direction: column; gap: .5rem; align-items: flex-start; }
+.picture-box { width: 220px; height: 90px; border: 1px dashed var(--line-strong); border-radius: 8px; display: grid; place-items: center; background: #fff; overflow: hidden; }
+.picture-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
+@media (max-width: 640px) {
+  .profile-item { grid-template-columns: 1fr; gap: .2rem; }
+  .profile-grid { grid-template-columns: 1fr; }
+}

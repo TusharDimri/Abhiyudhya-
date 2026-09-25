@@ -79,7 +79,10 @@ def run_seed():
         db.session.flush()
 
         p1 = Principal(organisation_id=org.id, full_name="Principal One", email="pr@rnaf.demo",
-                       mobile="9800000001")
+                       mobile="9800000001",
+                       # what the admin records when the principal takes charge (fictional)
+                       designation="Principal", employee_id="EMP-DEMO-0001", gender="Male",
+                       appointment_nature="Regular", date_of_joining=date(2021, 6, 15))
         db.session.add(p1)
         db.session.flush()
 
@@ -90,6 +93,7 @@ def run_seed():
                     udise_code="27000000002", block="Nagpur Rural", email="school2@rnaf.demo")
         # where the schools are: trainers mark attendance within 1 km of these
         s1.location = point_wkt(18.5204, 73.8567)   # Pune
+        s1.school_type, s2.school_type = "Co-education", "Boys"
         s2.location = point_wkt(21.1458, 79.0882)   # Nagpur
         db.session.add_all([s1, s2])
         db.session.flush()
@@ -171,7 +175,10 @@ def run_seed():
         # 9-10 trainer is the one with the demo login.
         tr = Trainer(organisation_id=org.id, full_name="Vocational Trainer", school_id=s1.id,
                      lab_id=lab1.id, job_role_id=jr_ddeo.id, email="vt@rnaf.demo",
-                     trainer_status="active", user_id=vt.id)
+                     trainer_status="active", user_id=vt.id,
+                     # what the admin records when the trainer is taken on (fictional)
+                     phone="9800000011", gender="Female", date_of_joining=date(2024, 7, 1),
+                     vtp_name="Demo Skills Pvt. Ltd.", appointment_nature="Contractual")
         tr2 = Trainer(organisation_id=org.id, full_name="Senior Vocational Trainer", school_id=s1.id,
                       lab_id=lab1.id, job_role_id=jr_jsd.id, email="vt2@rnaf.demo",
                       trainer_status="active")

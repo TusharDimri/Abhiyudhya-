@@ -60,8 +60,25 @@ const humanize = (s) =>
 // are never two different values.
 const FILTER_NAME_LIST = { state: "states", district: "districts" };
 
-function controlFor(col, fields, boot, asyncOptions) {
+// Sections are configured per lab and class (Master Data -> Labs). The filter
+// offers every section the user's labs run - just the chosen class's, once a
+// class filter is set.
+function sectionOptions(boot, classGrade) {
+  const found = new Set();
+  for (const lab of boot?.options?.labs || []) {
+    for (const [grade, list] of Object.entries(lab.sections || {})) {
+      if (!classGrade || String(grade) === String(classGrade)) (list || []).forEach((s) => found.add(s));
+    }
+  }
+  const list = found.size ? [...found].sort() : ["A", "B", "C", "D"];
+  return list.map((s) => ({ value: s, label: s }));
+}
+
+function controlFor(col, fields, boot, asyncOptions, values) {
   const field = fields.find((f) => f.name === col);
+  if (col === "section" || col === "sections") {
+    return { type: "select", label: "Section", options: sectionOptions(boot, values?.class_grade) };
+  }
   if (asyncOptions?.[col]) {
     return { type: "select", label: field?.label || humanize(col), options: asyncOptions[col] };
   }
@@ -124,7 +141,7 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
       <div className="filterbar-row">
         <span className="filterbar-label">Filters</span>
         {filters.map((col) => {
-          const ctl = controlFor(col, fields, boot, asyncOptions);
+          const ctl = controlFor(col, fields, boot, asyncOptions, values);
           const val = values[col] ?? "";
           if (ctl.type === "select") {
             return (
@@ -154,7 +171,7 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
       {active.length > 0 && (
         <div className="chips">
           {active.map(([col, v]) => {
-            const ctl = controlFor(col, fields, boot, asyncOptions);
+            const ctl = controlFor(col, fields, boot, asyncOptions, values);
             const label = ctl.options?.find((o) => String(o.value) === String(v))?.label ?? v;
             return (
               <span className="chip" key={col}>
