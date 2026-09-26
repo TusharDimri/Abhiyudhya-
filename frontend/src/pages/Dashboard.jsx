@@ -7,7 +7,7 @@ import { useBootstrap } from "../hooks/useBootstrap";
 import { BarCard, StatusPie, TrendCard } from "../components/Charts";
 import DateRange from "../components/DateRange";
 import { isoDaysAgo } from "../lib/dates";
-import { cardHref, QUICK_ACTIONS, DASHBOARD_SUBTITLE } from "../lib/roleUi";
+import { cardHref, QUICK_ACTIONS, DASHBOARD_SUBTITLE, VERIFICATION_LABELS } from "../lib/roleUi";
 
 const ICONS = {
   schools: "🏫", labs: "🧪", trainers: "👨‍🏫", students: "🧑‍🎓", attendance: "🗓️",
@@ -144,7 +144,8 @@ export default function Dashboard() {
           <StatusPie title="Student verification" subtitle="Registration status split" data={byVerif.data?.data} />
         )}
         {show("endorsement") && (
-          <StatusPie title="Attendance endorsement" subtitle="Principal endorsement funnel" data={byEndorse.data?.data} />
+          <StatusPie title="Attendance verification" subtitle="Verified by the Principal, or still waiting"
+            data={byEndorse.data?.data?.map((d) => ({ ...d, status: VERIFICATION_LABELS[d.status] || d.status }))} />
         )}
         {show("school") && (
           <BarCard title="Students by school" subtitle="Top schools by enrolment" data={bySchool.data?.data} labelKey="school" valueKey="count" />

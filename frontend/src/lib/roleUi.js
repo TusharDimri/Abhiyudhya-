@@ -43,6 +43,14 @@ export function cardHref(key) {
 // someone straight into the form rather than onto the list in front of it.
 const create = (path) => `${path}?new=1`;
 
+// Attendance is "verified" by the Principal; the stored values keep their
+// original names (endorsed / submitted / returned).
+export const VERIFICATION_LABELS = {
+  endorsed: "Verified",
+  submitted: "Pending verification",
+  returned: "Returned",
+};
+
 // What each role most likely opened the app to do.
 export const QUICK_ACTIONS = {
   SA: [
@@ -62,15 +70,15 @@ export const QUICK_ACTIONS = {
     { label: "Schools in my district", icon: "🏫", to: "/app/schools" },
   ],
   PR: [
-    { label: "Endorse daily attendance", icon: "✅", to: "/app/attendance?endorsement_status=submitted" },
-    { label: "Endorse class attendance", icon: "🧑‍🏫", to: "/app/class-attendance?endorsement_status=submitted" },
+    { label: "Verify daily attendance", icon: "✅", to: "/app/attendance?endorsement_status=submitted" },
+    { label: "Verify class attendance", icon: "🧑‍🏫", to: "/app/class-attendance?endorsement_status=submitted" },
     { label: "My school's students", icon: "🧑‍🎓", to: "/app/students" },
     { label: "Trainers at my school", icon: "👨‍🏫", to: "/app/trainers" },
   ],
   VT: [
     { label: "Mark today's attendance", icon: "🗓️", to: create("/app/attendance") },
     { label: "Mark class attendance", icon: "🧑‍🏫", to: create("/app/class-attendance") },
-    { label: "Register a student", icon: "🧑‍🎓", to: create("/app/students") },
+    { label: "Add students", icon: "🧑‍🎓", to: "/app/students?tab=manage&manage=add" },
     { label: "Report an issue", icon: "⚠️", to: create("/app/issues") },
     { label: "Record a field visit", icon: "🚌", to: create("/app/field-visits") },
   ],
@@ -87,7 +95,7 @@ export const DASHBOARD_SUBTITLE = {
 
 // What an empty list should say - and offer - for the role looking at it.
 export const EMPTY_HINTS = {
-  attendance: { VT: "No attendance yet. Mark today's and it will appear here.", PR: "Nothing submitted for endorsement yet." },
+  attendance: { VT: "No attendance yet. Mark today's and it will appear here.", PR: "Nothing waiting for verification yet." },
   "class-attendance": { VT: "No classes marked yet." },
   students: { VT: "No students registered for your lab yet.", PR: "No students registered at your school yet." },
   issues: { VT: "You haven't reported any issues.", DM: "No issues reported in your district." },

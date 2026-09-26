@@ -20,6 +20,7 @@ Each ResourceConfig declares:
                 (e.g. the per-student present/absent marks on an attendance
                 entry) - see ChildCollection
 """
+import re
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
@@ -85,6 +86,8 @@ class ResourceConfig:
     # a `location` point typed in by an admin (location_lat / location_lng) -
     # e.g. where a school is
     manual_location: bool = False
+    # sensitive fields sent out masked; the masked value coming back means "unchanged"
+    masked_fields: List[str] = field(default_factory=list)
 
 
 REGISTRY = {}
@@ -258,7 +261,7 @@ def _endorsement_on_edit(instance, user, is_create):
     if is_create or user.role != VT:
         return None
     if instance.endorsement_status == "endorsed":
-        return "The Principal has endorsed this entry, so it can't be changed."
+        return "The Principal has verified this entry, so it can't be changed."
     if instance.endorsement_status == "returned":
         instance.endorsement_status = "submitted"
     return None
@@ -403,16 +406,50 @@ def _validate_issue(instance, user, is_create=False):
     return None
 
 
+def _student_display(obj):
+    """What the student list shows beside the stored fields."""
+    from app.extensions import db
+    lab = db.session.get(M.Lab, obj.lab_id) if obj.lab_id else None
+    sector = db.session.get(M.Sector, lab.sector_id) if lab and lab.sector_id else None
+    district = db.session.get(M.District, obj.school.district_id) if obj.school and obj.school.district_id else None
+    category = db.session.get(M.SocialCategory, obj.social_category_id) if obj.social_category_id else None
+    level = {"9": 1, "10": 2, "11": 3, "12": 4}.get(str(obj.class_grade))
+    return {"full_name": obj.full_name, **_school_name(obj),
+            "skill_name": sector.name if sector else None,
+            "level": f"Level {level}" if level else None,
+            "district_name": district.name if district else None,
+            "category_name": category.name if category else None}
+
+
+STUDENT_AADHAAR = re.compile(r"^\d{12}$")
+STUDENT_MOBILE = re.compile(r"^[6-9]\d{9}$")
+
+
 def _validate_student(instance, user, is_create=False):
-    """Registration happens in Class 9 and Class 11 only (spec 2.6); a student
-    reaches 10 or 12 by being promoted, not by being registered there."""
+    """A student can be added in any of Classes 9-12 (a school joining the
+    programme mid-course has 10th and 12th graders too); moving up a class at
+    year end goes through promotion (api/promotion.py)."""
+    from app.extensions import db
     if instance.class_grade and str(instance.class_grade) not in ("9", "10", "11", "12"):
         return "Class must be 9, 10, 11 or 12."
-    if is_create and str(instance.class_grade) in ("10", "12"):
-        return ("Students are registered in Class 9 or Class 11 only. A Class "
-                f"{instance.class_grade} student is created by verifying/promoting "
-                "their existing Class " + ("9" if instance.class_grade == "10" else "11")
-                + " record.")
+    if instance.aadhaar_number:
+        instance.aadhaar_number = str(instance.aadhaar_number).replace(" ", "")
+        if not STUDENT_AADHAAR.match(instance.aadhaar_number):
+            return "Aadhaar number must be 12 digits."
+        clash = db.session.query(M.Student.id).filter(
+            M.Student.organisation_id == instance.organisation_id, M.Student.id != instance.id,
+            M.Student.aadhaar_number == instance.aadhaar_number, M.Student.is_deleted.is_(False)).first()
+        if clash:
+            return "Another student already has this Aadhaar number."
+    if instance.mobile_primary and not STUDENT_MOBILE.match(str(instance.mobile_primary).replace(" ", "")):
+        return "Contact number must be 10 digits starting 6-9."
+    if instance.admission_number:
+        instance.admission_number = str(instance.admission_number).strip()
+        clash = db.session.query(M.Student.id).filter(
+            M.Student.school_id == instance.school_id, M.Student.id != instance.id,
+            M.Student.admission_number == instance.admission_number, M.Student.is_deleted.is_(False)).first()
+        if clash:
+            return f"Admission number {instance.admission_number} is already used in this school."
     return None
 
 
@@ -625,14 +662,15 @@ register(ResourceConfig(
               "stream", "mobile_primary", "mobile_secondary", "whatsapp_number",
               "cwsn", "social_category_id", "date_of_enrolment", "photo_url",
               "had_vocational_9_10", "continuing_same_trade", "verification_status",
-              "verification_remarks", "status"],
-    search=["first_name", "last_name", "roll_number", "email"],
+              "verification_remarks", "admission_number", "aadhaar_number", "status"],
+    search=["first_name", "last_name", "roll_number", "admission_number", "email"],
     filters=["school_id", "lab_id", "job_role_id", "class_grade", "section",
              "academic_year", "verification_status", "enrolment_status", "cwsn"],
     sortable=["first_name", "roll_number", "created_at"],
     default_sort=("created_at", "desc"),
-    computed=lambda o: {"full_name": o.full_name, **_school_name(o)},
+    computed=_student_display,
     validate=_validate_student,
+    masked_fields=["aadhaar_number"],
     # a trainer moves students up through Promote, not by editing them
     locked_on_update={VT: {
         "class_grade": "A student's class changes through Promote Students at the end of the year.",

@@ -24,6 +24,7 @@ from app.rbac.roles import Role
 from app.services import audit
 from app.services.academic_year import next_year_label, year_bounds, year_has_ended
 from app.services.cache import cached_json
+from app.services.cache import cached_json
 
 bp = Blueprint("promotion", __name__, url_prefix="/api/promotion")
 
@@ -167,6 +168,11 @@ def promote():
         s = candidates[sid]
         before = {"class_grade": s.class_grade, "academic_year": s.academic_year,
                   "enrolment_status": s.enrolment_status}
+        # the year that is ending, kept whole before anything below changes it
+        was = dict(from_roll_number=s.roll_number, from_job_role_id=s.job_role_id, from_lab_id=s.lab_id,
+                   from_school_id=s.school_id, from_verification_status=s.verification_status,
+                   from_enrolment_status=s.enrolment_status, snapshot=s.to_dict(),
+                   section=s.section)
         if sid in back:
             outcome, to_class = "Held Back", s.class_grade
             s.academic_year = to_year
@@ -192,7 +198,7 @@ def promote():
             organisation_id=s.organisation_id, student_id=s.id,
             from_academic_year=from_year, to_academic_year=None if outcome == "Completed" else to_year,
             from_class=class_grade, to_class=None if outcome == "Completed" else to_class,
-            section=s.section, outcome=outcome, created_by=user.id,
+            outcome=outcome, created_by=user.id, **was,
         ))
         counts[outcome] += 1
         audit.record(user, "update", "student", s.id, before=before, after={
@@ -205,8 +211,12 @@ def promote():
 
 @bp.get("/history/<uid>")
 @login_required
-@cached_json("history", ttl=120)
+@cached_json("promotion_history", ttl=120)
 def history(uid):
+    """A student's years: where they are now, then each year that ended, as
+    it was logged when they were promoted, held back or completed."""
+    from app.models.lab import Lab
+    from app.models.user import User
     user = current_user()
     s = db.session.get(Student, uid)
     if s is None or s.is_deleted or not can_access_row(s, user):
@@ -214,10 +224,28 @@ def history(uid):
     rows = (
         db.session.query(StudentPromotion)
         .filter(StudentPromotion.student_id == s.id, StudentPromotion.is_deleted.is_(False))
-        .order_by(StudentPromotion.created_at.asc())
+        .order_by(StudentPromotion.created_at.desc())
         .all()
     )
-    return jsonify({"data": [r.to_dict() for r in rows]})
+    name = lambda model, pk, attr="name": getattr(db.session.get(model, pk), attr, None) if pk else None  # noqa: E731
+    return jsonify({
+        "student": {"id": str(s.id), "full_name": s.full_name},
+        "current": {
+            "academic_year": s.academic_year, "class_grade": s.class_grade, "section": s.section,
+            "roll_number": s.roll_number, "job_role": name(JobRole, s.job_role_id),
+            "lab": name(Lab, s.lab_id), "enrolment_status": s.enrolment_status,
+            "verification_status": s.verification_status,
+        },
+        "years": [{
+            "academic_year": r.from_academic_year, "class_grade": r.from_class, "section": r.section,
+            "roll_number": r.from_roll_number, "job_role": name(JobRole, r.from_job_role_id),
+            "lab": name(Lab, r.from_lab_id), "verification_status": r.from_verification_status,
+            "outcome": r.outcome, "to_academic_year": r.to_academic_year, "to_class": r.to_class,
+            "recorded_on": r.created_at.isoformat() if r.created_at else None,
+            "recorded_by": name(User, r.created_by, "full_name"),
+            "snapshot": r.snapshot,
+        } for r in rows],
+    })
 
 
 @bp.post("/students/<uid>/status")

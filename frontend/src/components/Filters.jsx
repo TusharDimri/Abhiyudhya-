@@ -8,7 +8,10 @@ import { staticOptionsFor } from "../lib/fieldOptions";
 
 // status-ish columns that have no matching form field get sensible options here
 const FALLBACK = {
-  endorsement_status: ["submitted", "endorsed", "returned"],
+  endorsement_status: {
+    label: "Verification",
+    options: [["submitted", "Pending verification"], ["endorsed", "Verified"], ["returned", "Returned"]],
+  },
   workflow_status: ["open", "in-progress", "resolved"],
   status: ["active", "deleted"],
   is_read: "bool",
@@ -34,6 +37,7 @@ const FILTER_ENUM = {
   day_type: "day_types",
   main_issue: "issue_main",
   verification_status: "verification_status",
+  enrolment_status: "enrolment_status",
   equipment_status: "equipment_status",
   trainer_status: "trainer_status",
   assessment_type: "assessment_types",
@@ -109,6 +113,9 @@ function controlFor(col, fields, boot, asyncOptions, values) {
   }
   if (Array.isArray(FALLBACK[col])) {
     return { type: "select", label: humanize(col), options: FALLBACK[col].map((o) => ({ value: o, label: o })) };
+  }
+  if (FALLBACK[col]?.options) {
+    return { type: "select", label: FALLBACK[col].label, options: FALLBACK[col].options.map(([value, label]) => ({ value, label })) };
   }
   if (field?.type === "date") return { type: "date", label: field.label };
   return { type: "text", label: field?.label || humanize(col), placeholder: `Filter ${humanize(col)}…` };

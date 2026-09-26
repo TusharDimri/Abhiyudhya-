@@ -20,6 +20,7 @@ import {
   labById, jobRoleForClass, labJobRoleIds, labSections,
 } from "./fieldOptions";
 import { todayISO } from "./dates";
+import { VERIFICATION_LABELS } from "./roleUi";
 
 // shared option-key shortcuts
 const SECTOR = { optionsKey: "sectors" };
@@ -78,14 +79,6 @@ const CLASS_BY_LAB = (values, c) => {
     if (allowed.size) grades = grades.filter((g) => allowed.has(g));
   }
   return grades.map((g) => ({ value: g, label: `Class ${g}` }));
-};
-
-// Registration only ever happens in Class 9 or Class 11 (spec 2.6) - but a
-// student already in Class 10 or 12 got there by being promoted, so editing
-// one must still offer their real class.
-const REGISTRATION_CLASS = (values, c) => {
-  const all = CLASS_BY_LAB(values, c);
-  return c.isNew ? all.filter((o) => ["9", "11"].includes(o.value)) : all;
 };
 
 // The job role is not a free choice: a lab holds one role for 9-10 and one
@@ -413,24 +406,36 @@ export const MODULES = {
   students: {
     label: "Students", singular: "Student", icon: "🧑‍🎓", group: "People & Students",
     columns: [
-      { key: "full_name", label: "Name" },
-      { key: "roll_number", label: "Roll" },
+      { key: "admission_number", label: "Adm. No." },
+      { key: "full_name", label: "Student Name" },
       { key: "class_grade", label: "Class" },
       { key: "section", label: "Sec" },
+      { key: "level", label: "Level" },
+      { key: "skill_name", label: "Skill" },
       { key: "academic_year", label: "Year" },
+      { key: "aadhaar_number", label: "Aadhaar No." },
+      { key: "dob", label: "DOB" },
+      { key: "mobile_primary", label: "Contact No." },
+      { key: "father_name", label: "Father's Name" },
+      { key: "gender", label: "Gender" },
+      { key: "category_name", label: "Category" },
+      { key: "roll_number", label: "Roll" },
+      { key: "district_name", label: "District" },
       { key: "school_name", label: "School" },
       { key: "verification_status", label: "Verification", badge: true },
       { key: "enrolment_status", label: "Status", badge: true },
     ],
-    formHint: "Students are registered in Class 9 and Class 11; they reach Class 10 and 12 through Promote Students at the end of the year.",
-    pageActions: [{ key: "promote", label: "⬆ Promote Students", roles: ["VT", "DM", "OA", "SA"] }],
+    formHint: "Students can be added in any class the lab runs; at the end of the year they move up through Promote Students.",
+    // a trainer promotes from the Manage Students tab (StudentsHub) instead
+    pageActions: [{ key: "promote", label: "⬆ Promote Students", roles: ["DM", "OA", "SA"] }],
+    // the filters a trainer actually uses, all dropdowns
+    filtersFor: { VT: ["class_grade", "section", "academic_year", "verification_status", "enrolment_status"] },
     fields: [
       { name: "school_id", label: "School", type: "select", ...SCHOOL, autoFor: ["VT", "PR"], required: true, group: "Placement" },
       { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, autoFor: ["VT"], group: "Placement" },
       {
         name: "class_grade", label: "Class", type: "select", required: true,
-        dynamicOptions: REGISTRATION_CLASS, group: "Placement",
-        hint: "Registration happens in Class 9 and Class 11.",
+        dynamicOptions: CLASS_BY_LAB, group: "Placement",
         readOnlyFor: ["VT"],   // changes only through Promote Students
       },
       {
@@ -449,22 +454,25 @@ export const MODULES = {
       { name: "roll_number", label: "Roll number", group: "Placement" },
       { name: "stream", label: "Stream", group: "Placement", hint: "e.g. Science, Commerce, Arts (Class 11-12)." },
 
+      { name: "admission_number", label: "Admission number", required: true, group: "Student" },
       { name: "first_name", label: "First name", required: true, group: "Student" },
       { name: "middle_name", label: "Middle name", group: "Student" },
       { name: "last_name", label: "Last name", group: "Student" },
-      { name: "gender", label: "Gender", type: "select", enumKey: "genders", group: "Student" },
-      { name: "dob", label: "Date of birth", type: "date", group: "Student" },
+      { name: "gender", label: "Gender", type: "select", enumKey: "genders", required: true, group: "Student" },
+      { name: "dob", label: "Date of birth", type: "date", required: true, group: "Student" },
+      { name: "aadhaar_number", label: "Aadhaar number", required: true, group: "Student", inputMode: "numeric",
+        hint: "Shown masked. Leave it as it is to keep it, or type the full 12 digits to change it." },
       { name: "email", label: "Email ID", type: "email", group: "Student" },
       { name: "photo_url", label: "Student photo (optional)", type: "file", accept: "image/*", group: "Student" },
 
-      { name: "father_name", label: "Father's name", group: "Family & contact" },
+      { name: "father_name", label: "Father's name", required: true, group: "Family & contact" },
       { name: "mother_name", label: "Mother's name", group: "Family & contact" },
       { name: "guardian_name", label: "Guardian's name", group: "Family & contact" },
-      { name: "mobile_primary", label: "First mobile number", type: "tel", group: "Family & contact" },
+      { name: "mobile_primary", label: "Contact number", type: "tel", required: true, group: "Family & contact" },
       { name: "mobile_secondary", label: "Second mobile number", type: "tel", group: "Family & contact" },
       { name: "whatsapp_number", label: "WhatsApp number", type: "tel", group: "Family & contact" },
 
-      { name: "social_category_id", label: "Social category", type: "select", ...SOCIAL, group: "Category & enrolment" },
+      { name: "social_category_id", label: "Category", type: "select", ...SOCIAL, required: true, group: "Category & enrolment" },
       { name: "cwsn", label: "CWSN (Child With Special Needs)?", type: "checkbox", group: "Category & enrolment" },
       { name: "date_of_enrolment", label: "Date of enrolment", type: "date", defaultValue: today, group: "Category & enrolment" },
       {
@@ -484,7 +492,8 @@ export const MODULES = {
     ],
     rowActions: [
       { action: "verify", roles: ["VT", "DM", "OA", "SA"] },
-      { action: "status", roles: ["VT", "DM", "OA", "SA"] },
+      { action: "history", roles: ["VT", "PR", "DM", "OA", "SA"] },
+      { action: "status", roles: ["DM", "OA", "SA"] },
     ],
   },
   assessments: {
@@ -522,12 +531,16 @@ export const MODULES = {
     // the trainer's own attendance for the day: marked at the school (within
     // 1 km - checked by the server against the school's location)
     captureLocation: true,
+    filtersFor: { PR: ["trainer_id", "lab_id", "date", "endorsement_status"] },
     columns: [
       { key: "date", label: "Date" },
       { key: "attendance_time", label: "Time" },
       { key: "trainer_name", label: "Trainer" },
       { key: "details", label: "Comment" },
-      { key: "endorsement_status", label: "Endorsement", badge: true },
+      { key: "endorsement_status", label: "Verification", badge: true, valueLabels: VERIFICATION_LABELS,
+        forRole: { VT: { label: "Verified?", badge: false, dot: "endorsement" } } },
+      // where it was marked, for whoever reviews it - never shown to the trainer
+      { key: "distance_from_school_m", label: "At school?", dot: "distance", hideFor: ["VT"] },
     ],
     fields: [
       // today and now, as the trainer marks it - not changeable by them
@@ -544,6 +557,7 @@ export const MODULES = {
   "class-attendance": {
     label: "Class Attendance", singular: "Class Attendance", icon: "🧑‍🏫", group: "Daily Operations",
     captureLocation: true,
+    filtersFor: { PR: ["trainer_id", "lab_id", "class_grade", "section", "date", "endorsement_status"] },
     columns: [
       { key: "date", label: "Date" },
       { key: "time", label: "Time" },
@@ -551,7 +565,10 @@ export const MODULES = {
       { key: "sections", label: "Sections" },
       { key: "activity", label: "Activity" },
       { key: "attended", label: "Attended" },
-      { key: "endorsement_status", label: "Endorsement", badge: true },
+      { key: "endorsement_status", label: "Verification", badge: true, valueLabels: VERIFICATION_LABELS,
+        forRole: { VT: { label: "Verified?", badge: false, dot: "endorsement" } } },
+      // where it was marked, for whoever reviews it - never shown to the trainer
+      { key: "distance_from_school_m", label: "At school?", dot: "distance", hideFor: ["VT"] },
     ],
     rowActions: [{ action: "endorse", roles: ["PR", "OA", "SA"] }],
     fields: [

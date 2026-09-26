@@ -507,3 +507,40 @@
   .profile-item { grid-template-columns: 1fr; gap: .2rem; }
   .profile-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- Students (trainer): tabs + adding many at once ---------- */
+.tabs button.tab { background: none; border: 0; border-bottom: 3px solid transparent; font: inherit; cursor: pointer; }
+.tabs button.tab.on { border-bottom-color: var(--gold-600); background: var(--navy-050); }
+.manage-seg { align-self: flex-start; }
+.add-students { padding: 1rem 1.1rem; }
+.add-students-head { display: flex; flex-wrap: wrap; gap: .8rem 1rem; align-items: flex-end; }
+.field.compact { margin: 0; min-width: 150px; display: flex; flex-direction: column; gap: .3rem; font-size: .8rem; font-weight: 600; color: var(--navy-800); }
+.add-students-count { margin-left: auto; font-size: .85rem; }
+.add-students-hint { font-size: .82rem; margin: .7rem 0; }
+.add-grid td { padding: .3rem .35rem; vertical-align: middle; }
+.add-grid .input, .add-grid .select { min-width: 7.5rem; padding: .4rem .5rem; font-size: .85rem; }
+.add-grid td.center { text-align: center; }
+.add-grid tr.has-error td { background: #fff4f2; }
+.add-grid tr.row-error td { color: var(--danger, #b42318); font-size: .8rem; padding-top: 0; }
+.promote-inline > header { display: flex; justify-content: space-between; padding: 1rem 1.1rem .4rem; }
+.promote-inline > .body { padding: 0 1.1rem; }
+.promote-inline > footer { display: flex; justify-content: flex-end; gap: .5rem; padding: .8rem 1.1rem 1rem; }
+
+/* a student's year-by-year record */
+.history { list-style: none; margin: 0; padding: 0 0 0 .9rem; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: .9rem; }
+.history-item { position: relative; font-size: .88rem; display: flex; flex-direction: column; gap: .15rem; }
+.history-item::before { content: ""; position: absolute; left: -1.28rem; top: .3rem; width: 10px; height: 10px; border-radius: 50%; background: var(--line-strong); }
+.history-item.now::before { background: var(--gold-600); }
+.history-year { font-weight: 700; color: var(--navy-800); }
+.history-empty { font-size: .85rem; }
+
+/* attendance: how far from the school it was marked (reviewers only) */
+.dist-cell { display: inline-flex; align-items: center; gap: .4rem; white-space: nowrap; }
+.dist-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; flex-shrink: 0; }
+.dist-dot.green { background: #1f9d55; box-shadow: 0 0 0 3px rgba(31, 157, 85, .18); }
+.dist-dot.yellow { background: #e5a50a; box-shadow: 0 0 0 3px rgba(229, 165, 10, .2); }
+.dist-dot.none { background: #c8ced8; }
+.dist-text { font-size: .8rem; color: var(--muted); }
+.dist-legend { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; font-size: .8rem; color: var(--muted); }
+.dist-legend > span { display: inline-flex; align-items: center; gap: .4rem; }
+.dist-dot.orange { background: #ef7d1a; box-shadow: 0 0 0 3px rgba(239, 125, 26, .2); }

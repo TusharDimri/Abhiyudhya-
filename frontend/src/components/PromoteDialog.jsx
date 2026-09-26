@@ -7,7 +7,7 @@ import { toDMY } from "../lib/dates";
 /* End-of-year promotion for one class: every student is promoted unless the
    trainer switches them to "Hold back" (repeat the class next year). Class 12
    - or Class 10 in a lab without 11-12 - completes the course instead. */
-export default function PromoteDialog({ onClose, onDone }) {
+export default function PromoteDialog({ onClose, onDone, inline }) {
   const { push } = useToast();
   const opts = useQuery({
     queryKey: ["promotion", "options"],
@@ -69,14 +69,13 @@ export default function PromoteDialog({ onClose, onDone }) {
   });
 
   return (
-    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="drawer" style={{ width: "min(620px,100%)" }}>
+    <Frame inline={inline} onClose={onClose}>
         <header>
           <div>
             <h3 style={{ margin: 0 }}>Promote Students</h3>
             <span className="drawer-sub">At the end of the year, move a class up - or hold students back to repeat it.</span>
           </div>
-          <button className="close" onClick={onClose}>×</button>
+          {!inline && <button className="close" onClick={onClose}>×</button>}
         </header>
         <div className="body">
           {opts.isLoading ? <div className="skeleton" style={{ height: 80 }} /> : groups.length === 0 ? (
@@ -142,7 +141,7 @@ export default function PromoteDialog({ onClose, onDone }) {
           )}
         </div>
         <footer>
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          {!inline && <button className="btn btn-ghost" onClick={onClose}>Cancel</button>}
           <button
             className="btn btn-primary"
             disabled={!p?.ended || !eligible.length || run.isPending}
@@ -151,7 +150,18 @@ export default function PromoteDialog({ onClose, onDone }) {
             {run.isPending ? "Saving…" : `${completes ? "Complete" : "Promote"} ${upCount}${backCount ? ` · Hold back ${backCount}` : ""}`}
           </button>
         </footer>
-      </div>
+    </Frame>
+  );
+}
+
+// `inline`: sits in a page (the Manage Students tab) instead of a drawer.
+// Defined here, not inside the dialog, so React keeps the same element
+// between renders rather than rebuilding (and un-focusing) the form.
+function Frame({ inline, onClose, children }) {
+  if (inline) return <section className="card promote-inline">{children}</section>;
+  return (
+    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="drawer" style={{ width: "min(620px,100%)" }}>{children}</div>
     </div>
   );
 }

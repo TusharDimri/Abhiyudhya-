@@ -43,9 +43,9 @@ export function visibleColumns(columns, options, profile, role) {
     lab_name: !!profile?.lab_id,
     trainer_name: !!profile?.trainer_id,
   };
-  return columns.filter(
-    (c) => !hide[c.key] && (!c.hideFor || !(role && c.hideFor.includes(role)))
-  );
+  return columns
+    .filter((c) => !hide[c.key] && (!c.hideFor || !(role && c.hideFor.includes(role))))
+    .map((c) => (role && c.forRole?.[role] ? { ...c, ...c.forRole[role] } : c));
 }
 
 // Compact "you are already scoped to this" chips for the persistent header

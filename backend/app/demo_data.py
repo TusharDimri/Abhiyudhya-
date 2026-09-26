@@ -436,6 +436,14 @@ def run_demo_data():
     if not school.address:
         school.address = "Near Shaniwar Wada, Shaniwar Peth, Pune 411030"
 
+    # every student carries an admission number and an Aadhaar number
+    # (fictional: Aadhaar numbers here all start 9999)
+    missing = (db.session.query(Student).filter(Student.organisation_id == org_id, Student.admission_number.is_(None))
+               .order_by(Student.created_at, Student.roll_number).all())
+    for n, s in enumerate(missing, start=1):
+        s.admission_number = f"{(s.date_of_enrolment or today).year}{n:04d}"
+        s.aadhaar_number = s.aadhaar_number or f"9999{(n * 7919) % 100_000_000:08d}"
+
     db.session.commit()
     total = sum(len(v) for v in students.values())
     print(f"Demo data added for {school.name}:")

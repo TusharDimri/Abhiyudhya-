@@ -14,9 +14,9 @@ const MAP = {
   "not repairable": "danger", replaced: "gold",
 };
 
-export default function Badge({ value }) {
+export default function Badge({ value, label }) {
   if (value === null || value === undefined || value === "") return <span className="muted">—</span>;
-  let text = value;
+  let text = label ?? value;
   if (value === true) text = "Yes";
   if (value === false) text = "No";
   const cls = MAP[String(value).toLowerCase()] ?? "";

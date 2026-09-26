@@ -29,6 +29,7 @@ from app.rbac.roles import Role
 from app.services import audit
 from app.services.academic_year import academic_year_for
 from app.services.cache import cached_json
+from app.utils.masking import mask
 
 bp = Blueprint("profile", __name__, url_prefix="/api/profile")
 
@@ -73,14 +74,6 @@ MONEY = {"gross_salary", "deduction_esi", "deduction_epf", "deduction_tds", "ded
 
 QUALIFICATION_FIELDS = ["qualification", "course", "institution", "course_type", "passing_year", "marksheet_date"]
 TRAINING_FIELDS = ["training_type", "training_level", "venue", "from_date", "to_date"]
-
-
-def mask(value):
-    """Everything but the last four characters hidden: 'XXXXXXXX7764'."""
-    if not value:
-        return None
-    v = str(value)
-    return "X" * max(len(v) - 4, 0) + v[-4:]
 
 
 def _years(start, end):

@@ -414,6 +414,10 @@ def update_resource(resource, uid):
 
     before = obj.to_dict()
     payload = request.get_json(silent=True) or {}
+    from app.utils.masking import mask
+    for k in cfg.masked_fields:
+        if k in payload and payload[k] is not None and payload[k] == mask(getattr(obj, k)):
+            payload = {kk: vv for kk, vv in payload.items() if kk != k}   # shown masked, sent back as-is
     for k, msg in cfg.locked_on_update.get(user.role, {}).items():
         if k in payload and str(_coerce(cfg.model, k, payload[k])) != str(getattr(obj, k)):
             abort(400, description=msg)

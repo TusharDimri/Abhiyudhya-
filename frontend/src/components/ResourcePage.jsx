@@ -12,14 +12,24 @@ import WorkflowDialog from "./WorkflowDialog";
 import Filters from "./Filters";
 import TargetProgress from "./TargetProgress";
 import PromoteDialog from "./PromoteDialog";
+import StudentHistory from "./StudentHistory";
+import { DistanceLegend, EndorsementLegend } from "./DistanceDot";
 import { visibleFilters, visibleColumns } from "../lib/scope";
 import { EMPTY_HINTS } from "../lib/roleUi";
 
 const CONTROL_KEYS = ["page", "page_size", "q", "sort", "order", "new"];
 const PAGE_SIZES = [15, 25, 50, 100];
 
-export default function ResourcePage() {
-  const { resource } = useParams();
+/* One module's list: search, filters, table, paging, and the create/edit
+   drawer. Can also be embedded in another page (the Students tabs):
+     resourceKey  which module, instead of the URL's
+     embedded     no page heading - the host page has its own
+     readOnly     a list to look at: no create, edit, delete or row actions
+     onlyActions  row actions to keep (e.g. ["verify"])
+     hideCreate   no "New" button (the host adds records its own way)        */
+export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActions, hideCreate } = {}) {
+  const params = useParams();
+  const resource = resourceKey || params.resource;
   const mod = MODULES[resource];
   const qc = useQueryClient();
   const { push } = useToast();
@@ -39,8 +49,10 @@ export default function ResourcePage() {
   const [searchInput, setSearchInput] = useState(sp.get("q") || "");
 
   const perm = boot?.resources?.[resource];
-  const canWrite = perm?.can_write;
-  const filterCols = perm?.filters || [];
+  const canWrite = perm?.can_write && !readOnly;
+  // a role may be offered just the filters that matter to it
+  const roleFilters = mod?.filtersFor?.[user?.role];
+  const filterCols = (perm?.filters || []).filter((c) => !roleFilters || roleFilters.includes(c));
   const isSA = !!boot?.is_platform_admin;
   const orgOptions = boot?.options?.organisations || [];
   const orgScoped = resource !== "organisations";
@@ -64,10 +76,11 @@ export default function ResourcePage() {
   // Row actions are workflow transitions the server gates by role
   // (workflow.py). Only offer the ones this role can actually complete.
   const rowActions = useMemo(
-    () => (mod?.rowActions || [])
+    () => (readOnly && !onlyActions ? [] : (mod?.rowActions || []))
       .filter((a) => typeof a === "string" || a.roles.includes(user?.role))
-      .map((a) => (typeof a === "string" ? a : a.action)),
-    [mod, user?.role]
+      .map((a) => (typeof a === "string" ? a : a.action))
+      .filter((a) => !onlyActions || onlyActions.includes(a)),
+    [mod, user?.role, readOnly, onlyActions]
   );
 
   const profile = boot?.my_scope?.profile;
@@ -167,20 +180,22 @@ export default function ResourcePage() {
 
   return (
     <div className="stack" style={{ gap: "1rem" }}>
-      <div className="page-head">
-        <div>
-          <div className="crumb">{mod.group}</div>
-          <h1>{mod.icon} {mod.label}</h1>
+      {!embedded && (
+        <div className="page-head">
+          <div>
+            <div className="crumb">{mod.group}</div>
+            <h1>{mod.icon} {mod.label}</h1>
+          </div>
+          <div className="page-actions">
+            {!readOnly && (mod.pageActions || []).filter((a) => a.roles.includes(user?.role)).map((a) => (
+              <button key={a.key} className="btn btn-ghost" onClick={() => setPageAction(a.key)}>{a.label}</button>
+            ))}
+            {canWrite && !hideCreate && (
+              <button className="btn btn-accent" onClick={() => setEditing({})}>＋ New {mod.singular}</button>
+            )}
+          </div>
         </div>
-        <div className="page-actions">
-          {(mod.pageActions || []).filter((a) => a.roles.includes(user?.role)).map((a) => (
-            <button key={a.key} className="btn btn-ghost" onClick={() => setPageAction(a.key)}>{a.label}</button>
-          ))}
-          {canWrite && (
-            <button className="btn btn-accent" onClick={() => setEditing({})}>＋ New {mod.singular}</button>
-          )}
-        </div>
-      </div>
+      )}
 
       {mod.yearlyTarget && (
         <TargetProgress
@@ -225,6 +240,9 @@ export default function ResourcePage() {
         onClear={() => patch(Object.fromEntries(filterCols.map((c) => [c, ""])))}
       />
 
+      {shownColumns.some((c) => c.dot === "distance") && <DistanceLegend />}
+      {shownColumns.some((c) => c.dot === "endorsement") && <EndorsementLegend />}
+
       <DataTable
         columns={shownColumns}
         rows={rows}
@@ -238,7 +256,7 @@ export default function ResourcePage() {
         onDelete={(r) => window.confirm(`Delete this ${mod.singular}?`) && del.mutate(r)}
         onRowAction={(action, r) => setWorkflow({ action, row: r })}
         emptyHint={EMPTY_HINTS[resource]?.[user?.role]}
-        emptyAction={canWrite ? `New ${mod.singular}` : null}
+        emptyAction={canWrite && !hideCreate ? `New ${mod.singular}` : null}
         onEmptyAction={() => setEditing({})}
       />
 
@@ -282,7 +300,11 @@ export default function ResourcePage() {
         />
       )}
 
-      {workflow && (
+      {workflow?.action === "history" && (
+        <StudentHistory row={workflow.row} onClose={() => setWorkflow(null)} />
+      )}
+
+      {workflow && workflow.action !== "history" && (
         <WorkflowDialog
           resource={resource}
           action={workflow.action}

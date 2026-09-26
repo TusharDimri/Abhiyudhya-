@@ -63,6 +63,7 @@ def _register_blueprints(app):
     from app.api.targets import bp as targets_bp
     from app.api.promotion import bp as promotion_bp
     from app.api.profile import bp as profile_bp
+    from app.api.students import bp as students_admin_bp
 
     # meta + workflow + users + admin must register before the catch-all resource
     # bp, which owns /api/<resource>.
@@ -75,6 +76,7 @@ def _register_blueprints(app):
     app.register_blueprint(targets_bp)
     app.register_blueprint(promotion_bp)
     app.register_blueprint(profile_bp)
+    app.register_blueprint(students_admin_bp)
     app.register_blueprint(resource_bp)
 
 

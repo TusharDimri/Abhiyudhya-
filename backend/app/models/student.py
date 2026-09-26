@@ -15,6 +15,9 @@ class Student(BaseModel):
     class_grade = db.Column(db.String(5))   # 9/10/11/12
     section = db.Column(db.String(10))
     roll_number = db.Column(db.String(30))
+    admission_number = db.Column(db.String(30), index=True)   # the school's own register number
+    # Sensitive (a child's Aadhaar): never sent out whole - see to_dict
+    aadhaar_number = db.Column(db.String(12))
 
     first_name = db.Column(db.String(80), nullable=False)
     middle_name = db.Column(db.String(80))
@@ -64,6 +67,14 @@ class Student(BaseModel):
     def full_name(self):
         return " ".join(p for p in [self.first_name, self.middle_name, self.last_name] if p)
 
+    def to_dict(self, exclude=None):
+        # lists, edit forms and audit logs only ever see the last four digits
+        from app.utils.masking import mask
+        out = super().to_dict(exclude=exclude)
+        if "aadhaar_number" in out:
+            out["aadhaar_number"] = mask(self.aadhaar_number)
+        return out
+
 
 class Assessment(BaseModel):
     """Assessment / Marks / Certification - spec Part 2.10."""
@@ -88,8 +99,10 @@ class Assessment(BaseModel):
 
 class StudentPromotion(BaseModel):
     """One student's end-of-year outcome: moved up a class, held back to
-    repeat it, or completed the course. The history behind their current
-    class and year."""
+    repeat it, or completed the course - and, kept alongside, the year that
+    ended exactly as it was. The student stays one record (their attendance,
+    marks and OJT point at it, each with its own year); this is the log of
+    what their record said before each promotion changed it."""
     __tablename__ = "student_promotion"
     organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
     student_id = db.Column(GUID(), db.ForeignKey("student.id"), nullable=False, index=True)
@@ -99,3 +112,12 @@ class StudentPromotion(BaseModel):
     to_class = db.Column(db.String(5))  # none when the course is completed
     section = db.Column(db.String(10))
     outcome = db.Column(db.String(20), nullable=False)  # Promoted / Held Back / Completed
+
+    # the year that ended, as it stood - never overwritten
+    from_roll_number = db.Column(db.String(30))
+    from_job_role_id = db.Column(GUID(), db.ForeignKey("job_role.id", name="fk_student_promotion_from_job_role_id_job_role"))
+    from_lab_id = db.Column(GUID(), db.ForeignKey("lab.id", name="fk_student_promotion_from_lab_id_lab"))
+    from_school_id = db.Column(GUID(), db.ForeignKey("school.id", name="fk_student_promotion_from_school_id_school"))
+    from_verification_status = db.Column(db.String(20))
+    from_enrolment_status = db.Column(db.String(20))
+    snapshot = db.Column(db.JSON)   # the whole record before the change (Aadhaar masked)

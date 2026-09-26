@@ -14,7 +14,7 @@ const AXIS = "#667085";
 const STATUS_COLORS = {
   verified: "#167f4b", endorsed: "#167f4b", resolved: "#167f4b", completed: "#167f4b",
   pending: "#b7791f", submitted: "#274d7d", "in-progress": "#b7791f", ongoing: "#274d7d",
-  rejected: "#c0392b", returned: "#c0392b", open: "#b7791f",
+  rejected: "#c0392b", returned: "#c0392b", open: "#b7791f", "pending verification": "#b7791f",
 };
 const statusColor = (s) => STATUS_COLORS[String(s).toLowerCase()] || NAVY;
 

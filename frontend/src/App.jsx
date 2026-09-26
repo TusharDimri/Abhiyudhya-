@@ -14,6 +14,7 @@ const AdminAudit = lazy(() => import("./pages/admin/Audit"));
 const AdminTrash = lazy(() => import("./pages/admin/Trash"));
 const MasterData = lazy(() => import("./components/MasterData"));
 const Profile = lazy(() => import("./pages/Profile"));
+const StudentsHub = lazy(() => import("./components/StudentsHub"));
 
 function FullSpinner() {
   return (
@@ -42,6 +43,8 @@ function SectionRoute() {
   if (isSectionHidden(user?.role, resource)) return <Navigate to="/app/dashboard" replace />;
   // master-data lists live on the tabbed Master Data page
   if (MODULES[resource]?.group === MASTER_GROUP) return <Navigate to={`/app/master/${resource}${search}`} replace />;
+  // a trainer's Students page: View / Manage tabs, adding many at once
+  if (resource === "students" && user?.role === "VT") return <StudentsHub />;
   return <ResourcePage />;
 }
 

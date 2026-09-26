@@ -37,7 +37,7 @@ export default function WorkflowDialog({ resource, action, row, onClose, onDone 
   });
 
   const TITLES = {
-    endorse: resource === "class-attendance" ? "Endorse Class Attendance" : "Endorse Attendance",
+    endorse: resource === "class-attendance" ? "Verify Class Attendance" : "Verify Attendance",
     verify: "Verify Student", transition: "Action Issue",
     status: leaving ? `${row.full_name || "Student"} left the school` : `${row.full_name || "Student"} rejoined`,
   };
@@ -54,7 +54,7 @@ export default function WorkflowDialog({ resource, action, row, onClose, onDone 
             <label>{action === "transition" ? "New status" : "Decision"}</label>
             <select className="select" value={decision} onChange={(e) => setDecision(e.target.value)}>
               {action === "endorse" &&
-                [["endorsed", "Endorse"], ["returned", "Return for correction"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                [["endorsed", "Verify"], ["returned", "Return for correction"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               {action === "verify" &&
                 [["verified", "Verify"], ["rejected", "Reject"], ["pending", "Mark pending"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               {action === "transition" &&

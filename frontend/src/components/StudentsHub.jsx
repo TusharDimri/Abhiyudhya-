@@ -1,0 +1,63 @@
+import { useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import ResourcePage from "./ResourcePage";
+import AddStudents from "./AddStudents";
+import PromoteDialog from "./PromoteDialog";
+
+/* A trainer's Students page, in two tabs:
+     View Students    the list, with the filters that matter - nothing to change
+     Manage Students  Add students (many at once) · Promote · Edit & Verify   */
+const MANAGE = [
+  { key: "add", label: "➕ Add Students" },
+  { key: "promote", label: "⬆ Promote Students" },
+  { key: "edit", label: "✎ Edit & Verify" },
+];
+
+export default function StudentsHub() {
+  const qc = useQueryClient();
+  const [sp, setSp] = useSearchParams();
+  const tab = sp.get("tab") === "manage" ? "manage" : "view";
+  const part = MANAGE.some((m) => m.key === sp.get("manage")) ? sp.get("manage") : "add";
+  // switching tab starts that tab afresh (its own filters and paging)
+  const go = (next) => setSp(new URLSearchParams(next), { replace: false });
+
+  return (
+    <div className="stack" style={{ gap: "1rem" }}>
+      <div className="page-head">
+        <div>
+          <div className="crumb">People &amp; Students</div>
+          <h1>🧑‍🎓 Students</h1>
+        </div>
+      </div>
+
+      <nav className="tabs" aria-label="Students">
+        <button type="button" className={`tab ${tab === "view" ? "on" : ""}`} onClick={() => go({ tab: "view" })}>👀 View Students</button>
+        <button type="button" className={`tab ${tab === "manage" ? "on" : ""}`} onClick={() => go({ tab: "manage", manage: part })}>🛠 Manage Students</button>
+      </nav>
+
+      {tab === "view" && <ResourcePage key="view" resourceKey="students" embedded readOnly onlyActions={["history"]} />}
+
+      {tab === "manage" && (
+        <>
+          <div className="seg manage-seg" role="group" aria-label="Manage">
+            {MANAGE.map((m) => (
+              <button key={m.key} type="button" className={part === m.key ? "on" : ""} onClick={() => go({ tab: "manage", manage: m.key })}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {part === "add" && <AddStudents />}
+          {part === "promote" && (
+            <PromoteDialog
+              inline
+              onDone={() => {
+                for (const key of [["list", "students"], ["promotion"], ["roster"]]) qc.invalidateQueries({ queryKey: key });
+              }}
+            />
+          )}
+          {part === "edit" && <ResourcePage key="edit" resourceKey="students" embedded hideCreate onlyActions={["verify", "history"]} />}
+        </>
+      )}
+    </div>
+  );
+}

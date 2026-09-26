@@ -1,4 +1,5 @@
 import Badge from "./Badge";
+import DistanceDot, { EndorsementDot } from "./DistanceDot";
 import { isISODate, toDMY } from "../lib/dates";
 
 // Presentational, server-driven table with sortable headers + skeleton loader.
@@ -40,17 +41,22 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                   <tr key={r.id}>
                     {columns.map((c) => (
                       <td key={c.key}>
-                        {c.badge ? <Badge value={r[c.key]} /> : format(r[c.key])}
+                        {c.dot === "distance" ? <DistanceDot metres={r[c.key]} />
+                          : c.dot === "endorsement" ? <EndorsementDot value={r[c.key]} />
+                          : c.badge ? <Badge value={r[c.key]} label={c.valueLabels?.[r[c.key]]} /> : format(r[c.key])}
                       </td>
                     ))}
                     {showActions ? (
                       <td>
                         <div className="cell-actions">
                           {rowActions?.includes("endorse") && (
-                            <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("endorse", r)}>Endorse</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("endorse", r)}>Verify</button>
                           )}
                           {rowActions?.includes("transition") && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("transition", r)}>Action</button>
+                          )}
+                          {rowActions?.includes("history") && (
+                            <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("history", r)}>History</button>
                           )}
                           {rowActions?.includes("verify") && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("verify", r)}>Verify</button>

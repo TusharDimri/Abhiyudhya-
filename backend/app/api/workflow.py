@@ -47,7 +47,7 @@ def _endorse(model, uid):
     trainer corrects it, which sends it back for endorsement."""
     user = current_user()
     if user.role not in (Role.PRINCIPAL.value, Role.ORG_ADMIN.value, Role.SUPER_ADMIN.value):
-        abort(403, description="Only the Principal can endorse")
+        abort(403, description="Only the Principal can verify attendance")
     rec = db.session.get(model, uid)
     if rec is None or rec.is_deleted:
         abort(404)

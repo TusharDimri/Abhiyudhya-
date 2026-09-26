@@ -249,14 +249,13 @@ def test_admin_sets_a_schools_location(client, world):
 
 
 # ------------------------------------------------------------- students etc.
-def test_registration_is_class_9_or_11_only(client, world):
+def test_students_can_be_added_in_classes_9_to_12(client, world):
     h = _login(client)
-    r = client.post("/api/students", headers=h, json={
-        "school_id": str(world["school"].id), "lab_id": str(world["lab"].id),
-        "class_grade": "10", "first_name": "Late",
-    })
+    base = {"school_id": str(world["school"].id), "lab_id": str(world["lab"].id), "first_name": "Joiner"}
+    assert client.post("/api/students", headers=h, json={**base, "class_grade": "10"}).status_code == 201
+    r = client.post("/api/students", headers=h, json={**base, "class_grade": "8"})
     assert r.status_code == 400
-    assert "Class 9 or Class 11" in r.get_json()["message"]
+    assert "Class must be 9, 10, 11 or 12" in r.get_json()["message"]
 
 
 def _new_student(world):
@@ -937,7 +936,7 @@ def test_principal_endorses_and_it_becomes_final(client, world, principal, kind)
     h_vt = _as(client, "vt@x.com")
     edit = client.patch(f"{url}/{rid}", headers=h_vt, json={"comment": "late change", "details": "late change"})
     assert edit.status_code == 400
-    assert "endorsed" in edit.get_json()["message"]
+    assert "verified" in edit.get_json()["message"]
 
 
 def test_returned_entry_goes_back_for_endorsement_once_corrected(client, world, principal):
@@ -1015,3 +1014,103 @@ def test_principal_personal_details_stay_off_the_principal_list(client, world, p
     client.patch("/api/profile", headers=_as(client, "pr@x.com"), json=PR_GENERAL)
     rows = client.get("/api/principals", headers=_as(client, "vt@x.com")).get_json()["data"]
     assert rows and all("dob" not in r and "father_name" not in r for r in rows)
+
+
+# ------------------------------------------------ adding students in bulk
+@pytest.fixture
+def category(world):
+    from app.models.masters import SocialCategory
+    c = SocialCategory(organisation_id=world["org"].id, name="General")
+    db.session.add(c)
+    db.session.commit()
+    return str(c.id)
+
+
+def _kid(category, n, **extra):
+    return {"admission_number": f"ADM-{n}", "first_name": f"Kid{n}", "last_name": "Test", "gender": "Female",
+            "dob": "2012-05-01", "father_name": "Father", "mobile_primary": "9876500000",
+            "social_category_id": category, "aadhaar_number": f"12341234{n:04d}", **extra}
+
+
+def _bulk(client, world, students, **extra):
+    return client.post("/api/students/bulk", headers=_login(client), json={
+        "lab_id": str(world["lab"].id), "class_grade": "9", "section": "A", "students": students, **extra})
+
+
+def test_trainer_adds_several_students_at_once(client, world, category):
+    r = _bulk(client, world, [_kid(category, 1), _kid(category, 2, roll_number="9A-50")])
+    assert r.status_code == 201, r.get_json()
+    body = r.get_json()
+    assert body["added"] == 2 and body["academic_year"]
+    rolls = sorted(s["roll_number"] for s in body["students"])
+    assert "9A-50" in rolls and len(set(rolls)) == 2            # blank roll got the next free one
+    listed = client.get("/api/students?class_grade=9&section=A&search=Kid1", headers=_login(client)).get_json()["data"][0]
+    assert listed["aadhaar_number"] == "XXXXXXXX0001"            # never sent out whole
+    assert listed["verification_status"] == "pending"
+    assert listed["level"] == "Level 1"
+
+
+def test_every_row_is_checked_and_nothing_saved_on_error(client, world, category):
+    before = client.get("/api/students", headers=_login(client)).get_json()["pagination"]["total"]
+    r = _bulk(client, world, [_kid(category, 3),
+                              _kid(category, 4, father_name="", aadhaar_number="123"),
+                              _kid(category, 5, admission_number="ADM-3")])   # same as row 1
+    assert r.status_code == 400
+    errors = {e["row"]: e["message"] for e in r.get_json()["errors"]}
+    assert set(errors) == {2, 3}
+    assert "Father's name" in errors[2] and "Aadhaar" in errors[2]
+    assert "already used" in errors[3]
+    after = client.get("/api/students", headers=_login(client)).get_json()["pagination"]["total"]
+    assert after == before
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"class_grade": "8"}, "Class 9, 10, 11 or 12"),
+    ({"section": "C"}, "section"),
+])
+def test_bulk_add_class_and_section_rules(client, world, category, change, message):
+    r = _bulk(client, world, [_kid(category, 6)], **change)
+    assert r.status_code == 400
+    assert message in r.get_json()["message"]
+
+
+def test_aadhaar_is_unique_and_stays_masked_when_editing(client, world, category):
+    first = _bulk(client, world, [_kid(category, 7)]).get_json()["students"][0]["id"]
+    dup = _bulk(client, world, [_kid(category, 8, aadhaar_number="123412340007")])
+    assert dup.status_code == 400 and "already registered" in dup.get_json()["errors"][0]["message"]
+    h = _login(client)
+    # the edit form sends back what it was shown - the stored number stays
+    r = client.patch(f"/api/students/{first}", headers=h, json={"aadhaar_number": "XXXXXXXX0007", "father_name": "New Father"})
+    assert r.status_code == 200, r.get_json()
+    from app.models.student import Student as S
+    assert db.session.get(S, first).aadhaar_number == "123412340007"
+    assert client.patch(f"/api/students/{first}", headers=h, json={"aadhaar_number": "12"}).status_code == 400
+
+
+def test_bulk_add_into_class_10(client, world, category):
+    r = _bulk(client, world, [_kid(category, 11)], class_grade="10")
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["students"][0]["roll_number"].startswith("10A-")
+
+
+def test_only_trainers_bulk_add(client, world, principal, category):
+    r = client.post("/api/students/bulk", headers=_as(client, "pr@x.com"), json={
+        "lab_id": str(world["lab"].id), "class_grade": "9", "section": "A", "students": [_kid(category, 9)]})
+    assert r.status_code == 403
+
+
+def test_promotion_keeps_the_year_that_ended(client, world):
+    a, b, c = _class_of(world)
+    s_a = db.session.get(Student, a)
+    s_a.roll_number, s_a.section = "9A-07", "A"
+    db.session.commit()
+    client.post("/api/promotion", headers=_login(client), json={
+        "from_year": "2024-25", "class_grade": "9", "promote": [a]})
+    h = _login(client)
+    hist = client.get(f"/api/promotion/history/{a}", headers=h).get_json()
+    assert hist["current"]["class_grade"] == "10" and hist["current"]["academic_year"] == "2025-26"
+    year = hist["years"][0]
+    assert (year["academic_year"], year["class_grade"], year["roll_number"]) == ("2024-25", "9", "9A-07")
+    assert year["outcome"] == "Promoted" and year["job_role"] == world["jr_low"].name
+    assert year["snapshot"]["class_grade"] == "9"                 # the whole record as it was
+    assert year["snapshot"]["academic_year"] == "2024-25"
