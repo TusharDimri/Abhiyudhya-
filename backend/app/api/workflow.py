@@ -42,9 +42,8 @@ def verify_student(uid):
 
 
 def _endorse(model, uid):
-    """The Principal endorses (or returns) a trainer's attendance record for
-    their school. Endorsed: the trainer can no longer change it. Returned: the
-    trainer corrects it, which sends it back for endorsement."""
+    """The Principal verifies a trainer's attendance record for their school
+    (stored as 'endorsed'). Once verified the trainer can no longer change it."""
     user = current_user()
     if user.role not in (Role.PRINCIPAL.value, Role.ORG_ADMIN.value, Role.SUPER_ADMIN.value):
         abort(403, description="Only the Principal can verify attendance")
@@ -55,10 +54,10 @@ def _endorse(model, uid):
         abort(403, description="Outside your scope")
     data = request.get_json(silent=True) or {}
     decision = data.get("decision", "endorsed")
-    if decision not in ("endorsed", "returned"):
-        abort(400, description="decision must be 'endorsed' or 'returned'")
-    if decision == "returned" and not (data.get("remarks") or "").strip():
-        abort(400, description="Say what needs correcting when returning an entry.")
+    if decision != "endorsed":
+        abort(400, description="Attendance can only be verified.")
+    if rec.endorsement_status == "endorsed":
+        abort(409, description="This attendance is already verified.")
     before = {"endorsement_status": rec.endorsement_status}
     rec.endorsement_status = decision
     rec.endorsed_by = user.id

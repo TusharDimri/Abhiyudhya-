@@ -12,7 +12,7 @@ import { cardHref, QUICK_ACTIONS, DASHBOARD_SUBTITLE, VERIFICATION_LABELS } from
 const ICONS = {
   schools: "🏫", labs: "🧪", trainers: "👨‍🏫", students: "🧑‍🎓", attendance: "🗓️",
   guest_lectures: "🎤", field_visits: "🚌", open_issues: "⚠️", endorsed: "✅",
-  placements: "💼", pending_verification: "🕓", pending_endorsement: "🕓", class_pending_endorsement: "🕓", diaries: "📔",
+  placements: "💼", pending_verification: "🕓", pending_endorsement: "🕓", class_pending_endorsement: "🕓", my_open_issues: "📣", diaries: "📔",
   ojt_hours: "⏱️", my_employer: "💼", assessments: "🎯",
   pending_issues_action: "⚠️", issues_resolved: "✅",
 };

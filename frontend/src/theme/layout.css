@@ -544,3 +544,14 @@
 .dist-legend { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; font-size: .8rem; color: var(--muted); }
 .dist-legend > span { display: inline-flex; align-items: center; gap: .4rem; }
 .dist-dot.orange { background: #ef7d1a; box-shadow: 0 0 0 3px rgba(239, 125, 26, .2); }
+
+/* add / remove a section while adding students */
+.section-add { display: flex; gap: .35rem; align-items: center; margin-top: .35rem; }
+.section-add .input { width: 4.5rem; min-width: 0; }
+.link-btn { background: none; border: 0; padding: .2rem 0 0; font: inherit; font-size: .75rem; color: var(--danger, #b42318); cursor: pointer; text-align: left; }
+.link-btn:hover { text-decoration: underline; }
+.link-btn:disabled { opacity: .5; cursor: progress; }
+.dist-dot.red { background: #d92d20; box-shadow: 0 0 0 3px rgba(217, 45, 32, .2); }
+
+/* the page-size box at the right end of the filters row (pages without search) */
+.filterbar-aside { margin-left: auto; }

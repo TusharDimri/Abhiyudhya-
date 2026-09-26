@@ -119,9 +119,22 @@ def _register_cli(app):
         from app.seed import run_seed
         run_seed()
 
+    @app.cli.command("seed-demo")
+    def seed_demo():
+        """A complete demo site - every role, seven schools, a year and a bit
+        of work. Run on a migrated database (`flask db upgrade`); safe to rerun."""
+        from app.full_seed import run_full_seed
+        run_full_seed()
+
     @app.cli.command("demo-data")
     def demo_data():
-        """Fill the demo organisation with a school's worth of fictional records
-        (run after `flask seed`)."""
-        from app.demo_data import run_demo_data
-        run_demo_data()
+        """Older name for `flask seed-demo`."""
+        from app.full_seed import run_full_seed
+        run_full_seed()
+
+    @app.cli.command("test-schools")
+    def test_schools():
+        """Three schools on known landmarks, each with a trainer and principal
+        login - for trying out location tracking (run after `flask seed`)."""
+        from app.test_schools import run_test_schools
+        run_test_schools()

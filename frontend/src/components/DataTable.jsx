@@ -49,7 +49,7 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                     {showActions ? (
                       <td>
                         <div className="cell-actions">
-                          {rowActions?.includes("endorse") && (
+                          {rowActions?.includes("endorse") && r.endorsement_status !== "endorsed" && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("endorse", r)}>Verify</button>
                           )}
                           {rowActions?.includes("transition") && (

@@ -6,7 +6,7 @@ import StudentRoster from "./StudentRoster";
 import DateInput from "./DateInput";
 import { toDMY } from "../lib/dates";
 import { useLocationFix, locationPayload, locationErrorMessage } from "../lib/location";
-import { staticOptionsFor, enumList, splitList, joinList } from "../lib/fieldOptions";
+import { staticOptionsFor, enumList, splitList, joinList, optionText } from "../lib/fieldOptions";
 
 // display label for an async-loaded option row
 const displayFor = (row) =>
@@ -406,7 +406,7 @@ export default function ResourceForm({
                 className={`pick ${selected.includes(String(o.value)) ? "on" : ""}`}
                 onClick={() => toggle(String(o.value))}
               >
-                {o.label}
+                {optionText(o.label)}
               </button>
             ))}
             {selected.filter((s) => !opts.some((o) => String(o.value) === s)).map((s) => (
@@ -451,7 +451,7 @@ export default function ResourceForm({
               ? `Select ${(f.dependsLabel || depsOf(f)[0]?.field || "").replace(/_id$/, "").replace(/_/g, " ")} first`
               : "— Select —"}
           </option>
-          {[...keep, ...opts].map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {[...keep, ...opts].map((o) => <option key={o.value} value={o.value}>{optionText(o.label)}</option>)}
         </select>
       );
     }

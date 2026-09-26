@@ -88,6 +88,15 @@ class ResourceConfig:
     manual_location: bool = False
     # sensitive fields sent out masked; the masked value coming back means "unchanged"
     masked_fields: List[str] = field(default_factory=list)
+    # fills in what a new record needs before it is first saved (e.g. whose
+    # school it belongs to): (instance, user) -> error message or None
+    prepare: Optional[Callable] = None
+    # roles that may edit / delete / restore existing records; None = write_roles.
+    # (A role in write_roles but not here can add records and nothing more.)
+    edit_roles: Optional[List[str]] = None
+
+    def can_edit(self, role):
+        return role in (self.write_roles if self.edit_roles is None else self.edit_roles)
 
 
 REGISTRY = {}
@@ -256,14 +265,11 @@ def _attendance_day_error(instance, user, is_create):
 
 
 def _endorsement_on_edit(instance, user, is_create):
-    """A trainer's attendance, once the Principal endorsed it, is final. One
-    they returned goes back to them for endorsement when corrected."""
+    """A trainer's attendance, once the Principal verified it, is final."""
     if is_create or user.role != VT:
         return None
     if instance.endorsement_status == "endorsed":
         return "The Principal has verified this entry, so it can't be changed."
-    if instance.endorsement_status == "returned":
-        instance.endorsement_status = "submitted"
     return None
 
 
@@ -358,6 +364,32 @@ def _validate_class_attendance(instance, user, is_create=False):
             return "Your login isn't linked to a trainer profile yet - ask your admin."
         instance.trainer_id = own
         return school_distance_error(instance, instance.school_id)
+    return None
+
+
+def _prepare_principal_issue(instance, user):
+    """Raised by the principal themselves, about their own school - known
+    before the record is first saved (the school is a required column)."""
+    from app.extensions import db
+    rec = db.session.query(M.Principal).filter(
+        M.Principal.user_id == user.id, M.Principal.is_deleted.is_(False)).first()
+    if rec is None or not rec.linked_school_id:
+        return "Your login isn't linked to a school yet - ask your admin."
+    instance.principal_id, instance.school_id = rec.id, rec.linked_school_id
+    return None
+
+
+def _validate_principal_issue(instance, user, is_create=False):
+    from app.services.academic_year import academic_year_for
+
+    if not (instance.details or "").strip():
+        return "Describe the issue."
+    if not instance.reporting_date:
+        return "Enter the date."
+    err = _future_date_error(instance.reporting_date)
+    if err:
+        return err
+    instance.academic_year = academic_year_for(instance.organisation_id, instance.reporting_date)
     return None
 
 
@@ -725,6 +757,16 @@ register(ResourceConfig(
                               "class_attendance_id", ["student_id", "present"])],
 ))
 register(ResourceConfig(
+    name="principal-issues", model=M.PrincipalIssue, label="Principal Issue",
+    # a principal raises their own issues; nothing else is theirs to change
+    write_roles=[PR], edit_roles=[],
+    writable=["reporting_date", "reporting_time", "details"],
+    prepare=_prepare_principal_issue,
+    search=["details"], filters=["workflow_status", "academic_year"],
+    sortable=["reporting_date", "created_at"], default_sort=("reporting_date", "desc"),
+    validate=_validate_principal_issue,
+))
+register(ResourceConfig(
     name="issues", model=M.VTIssue, label="VT Issue",
     write_roles=[SA, OA, DM, VT],
     writable=["trainer_id", "lab_id", "academic_year", "reporting_date", "reporting_time",
@@ -890,6 +932,8 @@ VIEW_ROLES = {
     "diaries": STAFF,
     "ojt-placements": STAFF,
     "feedback": ALL_ROLES,
+    "issues": [SA, OA, DM, VT],
+    "principal-issues": [SA, OA, DM, PR],
     "notifications": [SA, OA],
 }
 DATE_FIELDS = {

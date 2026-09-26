@@ -54,7 +54,7 @@ export default function WorkflowDialog({ resource, action, row, onClose, onDone 
             <label>{action === "transition" ? "New status" : "Decision"}</label>
             <select className="select" value={decision} onChange={(e) => setDecision(e.target.value)}>
               {action === "endorse" &&
-                [["endorsed", "Verify"], ["returned", "Return for correction"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                [["endorsed", "Verify"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               {action === "verify" &&
                 [["verified", "Verify"], ["rejected", "Reject"], ["pending", "Mark pending"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               {action === "transition" &&

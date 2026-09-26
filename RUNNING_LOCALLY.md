@@ -103,13 +103,12 @@ for every role**:
 # build the schema (runs every migration in order)
 docker compose -f docker-compose.local.yml exec backend flask db upgrade
 
-# add the demo organisation + demo users
-docker compose -f docker-compose.local.yml exec backend flask seed
-
-# optional: fill it with a school's worth of fictional records (students,
-# attendance, lectures, visits, equipment, profiles ...) to click through
-docker compose -f docker-compose.local.yml exec backend flask demo-data
+# fill it with a complete demo site: 2 organisations, 8 schools, users of
+# every role, and a year's worth of fictional work (safe to run again)
+docker compose -f docker-compose.local.yml exec backend flask seed-demo
 ```
+
+(`flask seed` alone adds just the demo organisation with one login per role.)
 
 **Already had the app running from before migrations existed?** Tell the
 database which migration its current schema matches, then upgrade:
@@ -126,7 +125,8 @@ If your database is scratch data you don't mind losing, it is simpler to delete
 the volume (`docker compose -f docker-compose.local.yml down -v`) and start from
 `db upgrade` + `seed`.
 
-The seed command prints the demo logins. They are:
+`seed-demo` prints the logins at the end (every password is `Password@123`).
+The main ones:
 
 | Role | Email | Password |
 |------|-------|----------|
@@ -225,6 +225,15 @@ Someone added a database change. Apply it:
 `docker compose -f docker-compose.local.yml exec backend flask db upgrade`.
 If `docker compose ... up -d --build` was not run since `requirements.txt`
 changed (e.g. PostGIS support), rebuild first.
+
+**Trying out location tracking**
+`docker compose -f docker-compose.local.yml exec backend flask test-schools` adds
+three test schools on known landmarks (Delhi, Mumbai, Bengaluru), each with a
+trainer (`vt.a@test.demo` ... `vt.c@test.demo`) and a principal (`pr.a@test.demo`
+...). In Chrome, press F12 → ⋮ → More tools → **Sensors** and set a custom
+location to pretend to be at (or near, or far from) a school, then click
+**Detect My Location** before saving. The override only works while DevTools
+is open.
 
 **A trainer can't mark attendance: "school's location hasn't been set up"**
 Attendance is only accepted within 1 km of the school. Log in as an admin,

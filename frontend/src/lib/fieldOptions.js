@@ -7,6 +7,15 @@
    (`dynamicOptions`). Forms and the filter bar both read this, so a filter
    chip always spells a value the same way the form that wrote it did. */
 
+// How a dropdown shows a choice: first letter in capitals, underscores as
+// spaces ("not_applicable" -> "Not applicable"). Only the text changes - the
+// value saved stays as it is. Email addresses are left alone.
+export function optionText(label) {
+  if (typeof label !== "string" || !label || label.includes("@")) return label;
+  const t = label.replace(/_/g, " ");
+  return t[0].toUpperCase() + t.slice(1);
+}
+
 const normalise = (o) => (typeof o === "string" ? { value: o, label: o } : o);
 
 export function enumList(boot, key) {

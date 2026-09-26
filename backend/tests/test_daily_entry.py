@@ -939,18 +939,17 @@ def test_principal_endorses_and_it_becomes_final(client, world, principal, kind)
     assert "verified" in edit.get_json()["message"]
 
 
-def test_returned_entry_goes_back_for_endorsement_once_corrected(client, world, principal):
+def test_attendance_can_only_be_verified(client, world, principal):
     url, rid = _endorsable(client, world, "class")
     h_pr = _as(client, "pr@x.com")
-    need_reason = client.post(f"/api/workflow/class-attendance/{rid}/endorse", headers=h_pr, json={"decision": "returned"})
-    assert need_reason.status_code == 400
     r = client.post(f"/api/workflow/class-attendance/{rid}/endorse", headers=h_pr,
                     json={"decision": "returned", "remarks": "Wrong section"})
-    assert r.get_json()["endorsement_status"] == "returned"
-    h_vt = _as(client, "vt@x.com")
-    fixed = client.patch(f"{url}/{rid}", headers=h_vt, json={"sections": "A"})
-    assert fixed.status_code == 200, fixed.get_json()
-    assert fixed.get_json()["endorsement_status"] == "submitted"
+    assert r.status_code == 400
+    ok = client.post(f"/api/workflow/class-attendance/{rid}/endorse", headers=h_pr, json={"decision": "endorsed"})
+    assert ok.get_json()["endorsement_status"] == "endorsed"
+    # verifying twice is refused, so the first verifier and time are kept
+    again = client.post(f"/api/workflow/class-attendance/{rid}/endorse", headers=h_pr, json={"decision": "endorsed"})
+    assert again.status_code == 409
 
 
 def test_trainer_cannot_endorse(client, world, principal):
@@ -1114,3 +1113,64 @@ def test_promotion_keeps_the_year_that_ended(client, world):
     assert year["outcome"] == "Promoted" and year["job_role"] == world["jr_low"].name
     assert year["snapshot"]["class_grade"] == "9"                 # the whole record as it was
     assert year["snapshot"]["academic_year"] == "2024-25"
+
+
+# ------------------------------------------------------------ principal issues
+def test_principal_raises_an_issue_but_cannot_change_it(client, world, principal_record):
+    h = _as(client, "pr@x.com")
+    boot = client.get("/api/meta/bootstrap", headers=h).get_json()
+    assert boot["resources"]["principal-issues"]["can_write"] is True
+    assert boot["resources"]["principal-issues"]["can_edit"] is False
+    assert "issues" not in boot["resources"]                     # trainers' issues go to the admins
+    r = client.post("/api/principal-issues", headers=h, json={
+        "reporting_date": date.today().isoformat(), "reporting_time": "11:15", "details": "Roof leaks in Room 4"})
+    assert r.status_code == 201, r.get_json()
+    body = r.get_json()
+    assert body["school_id"] == str(world["school"].id) and body["workflow_status"] == "open"
+    assert client.patch(f"/api/principal-issues/{body['id']}", headers=h, json={"details": "x"}).status_code == 403
+    assert client.delete(f"/api/principal-issues/{body['id']}", headers=h).status_code == 403
+    assert client.get("/api/issues", headers=h).status_code == 403
+    assert client.post("/api/principal-issues", headers=h, json={"reporting_date": date.today().isoformat(),
+                                                                  "details": " "}).status_code == 400
+
+
+def test_trainers_do_not_see_principal_issues(client, world):
+    assert client.get("/api/principal-issues", headers=_login(client)).status_code == 403
+
+
+
+# ------------------------------------------------ sections (trainer, add students)
+def _section(client, world, path, **body):
+    return client.post(f"/api/students/sections{path}", headers=_login(client),
+                       json={"lab_id": str(world["lab"].id), "class_grade": "9", **body})
+
+
+def test_trainer_adds_and_removes_a_section(client, world):
+    r = _section(client, world, "", section="c")
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["sections"] == ["A", "B", "C"]
+    assert _section(client, world, "", section="C").status_code == 400          # already there
+    assert _section(client, world, "", section="TOO-LONG").status_code == 400
+    # section A has students - it can't go; the new, empty C can
+    busy = _section(client, world, "/remove", section="A")
+    assert busy.status_code == 400 and "still has" in busy.get_json()["message"]
+    gone = _section(client, world, "/remove", section="C")
+    assert gone.status_code == 200 and gone.get_json()["sections"] == ["A", "B"]
+    boot = client.get("/api/meta/bootstrap", headers=_login(client)).get_json()
+    lab = next(l for l in boot["options"]["labs"] if l["value"] == str(world["lab"].id))
+    assert lab["sections"]["9"] == ["A", "B"]
+
+
+def test_a_class_keeps_its_last_section(client, world):
+    lab = world["lab"]
+    lab.sections_10 = "A"
+    db.session.commit()
+    r = client.post("/api/students/sections/remove", headers=_login(client),
+                    json={"lab_id": str(lab.id), "class_grade": "10", "section": "A"})
+    assert r.status_code == 400 and "at least one section" in r.get_json()["message"]
+
+
+def test_year_filter_offers_recent_years(client, world):
+    years = client.get("/api/meta/bootstrap", headers=_login(client)).get_json()["options"]["year_labels"]
+    assert "2025-26" in years and len(years) >= 5
+    assert years == sorted(years, reverse=True)

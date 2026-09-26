@@ -8,7 +8,7 @@ from app.extensions import db
 from app.models.geography import School
 from app.models.student import Student
 from app.models.lab import Lab, Trainer
-from app.models.operations import ClassAttendance, DailyAttendance, VTIssue, GuestLecture, FieldVisit
+from app.models.operations import ClassAttendance, DailyAttendance, PrincipalIssue, VTIssue, GuestLecture, FieldVisit
 from app.models.internship import OJTPlacement, DailyDiary
 from app.rbac import login_required, current_user, apply_scope
 from app.services.cache import cached_json
@@ -97,6 +97,7 @@ def summary():
         "field_visits": lambda: {"key": "field_visits", "label": "Field Visits", "value": _count(FieldVisit, user, "reporting_date"), "icon": "map"},
         "open_issues": lambda: {"key": "open_issues", "label": "Open Issues", "value": _status_count(VTIssue, user, "workflow_status", "resolved", negate=True), "icon": "alert"},
         "pending_endorsement": lambda: {"key": "pending_endorsement", "label": "Daily Attendance to Verify", "value": _status_count(DailyAttendance, user, "endorsement_status", "submitted"), "icon": "clock"},
+        "my_open_issues": lambda: {"key": "my_open_issues", "label": "My Open Issues", "value": _status_count(PrincipalIssue, user, "workflow_status", "resolved", negate=True), "icon": "alert"},
         "class_pending_endorsement": lambda: {"key": "class_pending_endorsement", "label": "Class Attendance to Verify", "value": _status_count(ClassAttendance, user, "endorsement_status", "submitted"), "icon": "clock"},
         "endorsed": lambda: {"key": "endorsed", "label": "Verified Attendance", "value": _status_count(DailyAttendance, user, "endorsement_status", "endorsed"), "icon": "check"},
         "diaries": lambda: {"key": "diaries", "label": "Diary Entries", "value": _count(DailyDiary, user, "date"), "icon": "book"},
@@ -110,7 +111,7 @@ def summary():
         "SA": ["schools", "labs", "trainers", "students", "attendance", "guest_lectures", "field_visits", "open_issues", "endorsed", "placements"],
         "OA": ["schools", "labs", "trainers", "students", "pending_verification", "attendance", "guest_lectures", "field_visits", "open_issues", "placements"],
         "DM": ["schools", "labs", "trainers", "students", "pending_verification", "attendance", "pending_issues_action", "issues_resolved", "endorsed", "field_visits"],
-        "PR": ["pending_endorsement", "class_pending_endorsement", "endorsed", "students", "trainers", "attendance", "guest_lectures", "field_visits", "open_issues"],
+        "PR": ["pending_endorsement", "class_pending_endorsement", "endorsed", "students", "trainers", "attendance", "guest_lectures", "field_visits", "my_open_issues"],
         "VT": ["students", "pending_verification", "attendance", "pending_endorsement", "guest_lectures", "field_visits", "open_issues"],
     }
     keys = ROLE_CARDS.get(role, ROLE_CARDS["OA"])

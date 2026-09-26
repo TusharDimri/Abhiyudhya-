@@ -4,15 +4,18 @@
 import { useQueries } from "@tanstack/react-query";
 import api from "../lib/api";
 import DateInput from "./DateInput";
-import { staticOptionsFor } from "../lib/fieldOptions";
+import { staticOptionsFor, optionText } from "../lib/fieldOptions";
 
 // status-ish columns that have no matching form field get sensible options here
 const FALLBACK = {
   endorsement_status: {
     label: "Verification",
-    options: [["submitted", "Pending verification"], ["endorsed", "Verified"], ["returned", "Returned"]],
+    options: [["submitted", "Pending verification"], ["endorsed", "Verified"]],
   },
-  workflow_status: ["open", "in-progress", "resolved"],
+  workflow_status: {
+    label: "Status",
+    options: [["open", "Open"], ["in-progress", "In progress"], ["resolved", "Resolved"]],
+  },
   status: ["active", "deleted"],
   is_read: "bool",
   is_current: "bool",
@@ -83,6 +86,11 @@ function controlFor(col, fields, boot, asyncOptions, values) {
   if (col === "section" || col === "sections") {
     return { type: "select", label: "Section", options: sectionOptions(boot, values?.class_grade) };
   }
+  // the years set up plus this school year and the last few (a record's year
+  // follows its date, so it may not be one an admin has set up)
+  if (col === "academic_year" && boot?.options?.year_labels?.length) {
+    return { type: "select", label: "Academic year", options: boot.options.year_labels.map((y) => ({ value: y, label: y })) };
+  }
   if (asyncOptions?.[col]) {
     return { type: "select", label: field?.label || humanize(col), options: asyncOptions[col] };
   }
@@ -121,7 +129,7 @@ function controlFor(col, fields, boot, asyncOptions, values) {
   return { type: "text", label: field?.label || humanize(col), placeholder: `Filter ${humanize(col)}…` };
 }
 
-export default function Filters({ filters, fields, boot, values, onChange, onClear }) {
+export default function Filters({ filters, fields, boot, values, onChange, onClear, aside }) {
   const resourceCols = (filters || []).filter((c) => RESOURCE_FILTERS[c]);
 
   const results = useQueries({
@@ -140,7 +148,7 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
     asyncOptions[col] = (results[i]?.data || []).map((r) => ({ value: r.id, label: cfg.label(r) }));
   });
 
-  if (!filters?.length) return null;
+  if (!filters?.length) return aside ? <div className="filterbar-row"><div className="filterbar-aside">{aside}</div></div> : null;
   const active = Object.entries(values).filter(([, v]) => v !== "" && v != null);
 
   return (
@@ -154,7 +162,7 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
             return (
               <select key={col} className={`select filter-ctl ${val ? "on" : ""}`} value={val} onChange={(e) => onChange(col, e.target.value)}>
                 <option value="">{ctl.label}: All</option>
-                {ctl.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {ctl.options.map((o) => <option key={o.value} value={o.value}>{optionText(o.label)}</option>)}
                 {/* a value set from elsewhere (e.g. a target tile) that the list doesn't offer */}
                 {val && !ctl.options.some((o) => String(o.value) === String(val)) && <option value={val}>{val}</option>}
               </select>
@@ -174,6 +182,7 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
         {active.length > 0 && (
           <button className="btn btn-ghost btn-sm" onClick={onClear}>Clear all</button>
         )}
+        {aside && <div className="filterbar-aside">{aside}</div>}
       </div>
       {active.length > 0 && (
         <div className="chips">
@@ -182,7 +191,7 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
             const label = ctl.options?.find((o) => String(o.value) === String(v))?.label ?? v;
             return (
               <span className="chip" key={col}>
-                <b>{ctl.label}:</b> {String(label)}
+                <b>{ctl.label}:</b> {optionText(String(label))}
                 <button onClick={() => onChange(col, "")} aria-label="remove">×</button>
               </span>
             );

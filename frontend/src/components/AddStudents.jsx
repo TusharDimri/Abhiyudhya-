@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
 import { useToast } from "../lib/toast";
 import { useBootstrap } from "../hooks/useBootstrap";
-import { labById } from "../lib/fieldOptions";
+import { labById, optionText } from "../lib/fieldOptions";
 import { todayISO } from "../lib/dates";
 import DateInput from "./DateInput";
 
@@ -40,6 +40,25 @@ export default function AddStudents() {
   const sections = (lab?.sections?.[classGrade]?.length ? lab.sections[classGrade] : ["A", "B", "C", "D"]);
   const [sec, setSec] = useState("");
   const section = sections.includes(sec) ? sec : sections[0] || "";
+
+  // a trainer can add a section to the chosen class - or remove an empty one
+  const [newSection, setNewSection] = useState(null);   // null: closed; string: typing
+  const changeSections = useMutation({
+    mutationFn: async ({ path, name }) => (await api.post(`/students/sections${path}`, {
+      lab_id: lab.value, class_grade: classGrade, section: name,
+    })).data,
+    onSuccess: (r, { path, name }) => {
+      qc.invalidateQueries({ queryKey: ["bootstrap"] });   // the lab's section lists live there
+      if (path === "") { setSec(name.toUpperCase()); setNewSection(null); push(`Section ${name.toUpperCase()} added to Class ${classGrade}`, "success"); }
+      else { setSec(""); push(`Section ${name} removed from Class ${classGrade}`, "success"); }
+    },
+    onError: (e) => push(apiError(e), "error"),
+  });
+  const pickSection = (v) => {
+    if (v !== "__add") { setSec(v); return; }
+    if (!classGrade) { push("Select a class first, then add its section.", "error"); return; }
+    setNewSection("");
+  };
   const roleId = lab && classGrade ? (["9", "10"].includes(classGrade) ? lab.job_role_9_10_id : lab.job_role_11_12_id) : null;
   const jobRole = (boot?.options?.job_roles || []).find((j) => String(j.value) === String(roleId))?.label;
 
@@ -121,12 +140,29 @@ export default function AddStudents() {
             {classes.map((c) => <option key={c} value={c}>Class {c}</option>)}
           </select>
         </label>
-        <label className="field compact">
+        <div className="field compact">
           <span>Section <b className="req">*</b></span>
-          <select className="select" value={section} onChange={(e) => setSec(e.target.value)}>
+          <select className="select" value={section} onChange={(e) => pickSection(e.target.value)}>
             {sections.map((s) => <option key={s} value={s}>Section {s}</option>)}
+            <option value="__add">＋ Add a section…</option>
           </select>
-        </label>
+          {newSection !== null ? (
+            <div className="section-add">
+              <input className="input" autoFocus maxLength={3} placeholder="e.g. C" value={newSection}
+                onChange={(e) => setNewSection(e.target.value.toUpperCase())}
+                onKeyDown={(e) => { if (e.key === "Enter" && newSection.trim()) changeSections.mutate({ path: "", name: newSection.trim() }); if (e.key === "Escape") setNewSection(null); }} />
+              <button type="button" className="btn btn-primary btn-sm" disabled={!newSection.trim() || changeSections.isPending}
+                onClick={() => changeSections.mutate({ path: "", name: newSection.trim() })}>Add to Class {classGrade}</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNewSection(null)}>Cancel</button>
+            </div>
+          ) : section && sections.length > 1 && (
+            <button type="button" className="link-btn" disabled={changeSections.isPending}
+              onClick={() => window.confirm(`Remove Section ${section} from Class ${classGrade}? (Only an empty section can be removed.)`)
+                && changeSections.mutate({ path: "/remove", name: section })}>
+              Remove section {section}
+            </button>
+          )}
+        </div>
         <div className="field compact">
           <span>Job role</span>
           <div className="input derived-value">{jobRole || "—"}</div>
@@ -160,7 +196,7 @@ export default function AddStudents() {
                 <td>
                   <select className="select" value={r.gender} onChange={(e) => put(i, "gender", e.target.value)}>
                     <option value="">—</option>
-                    {(boot?.enums?.genders || []).map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+                    {(boot?.enums?.genders || []).map((g) => <option key={g.value} value={g.value}>{optionText(g.label)}</option>)}
                   </select>
                 </td>
                 <td><DateInput value={r.dob} max={todayISO()} onChange={(v) => put(i, "dob", v)} /></td>
@@ -169,7 +205,7 @@ export default function AddStudents() {
                 <td>
                   <select className="select" value={r.social_category_id} onChange={(e) => put(i, "social_category_id", e.target.value)}>
                     <option value="">—</option>
-                    {(boot?.options?.social_categories || []).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    {(boot?.options?.social_categories || []).map((c) => <option key={c.value} value={c.value}>{optionText(c.label)}</option>)}
                   </select>
                 </td>
                 <td><input className="input" inputMode="numeric" placeholder="12 digits" maxLength={14} value={r.aadhaar_number} onChange={(e) => put(i, "aadhaar_number", e.target.value)} /></td>

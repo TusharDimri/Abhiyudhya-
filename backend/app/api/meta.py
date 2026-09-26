@@ -105,6 +105,17 @@ def _user_profile(user):
     return profile
 
 
+def _year_labels(user):
+    from datetime import date
+    from app.services.academic_year import academic_year_for
+    configured = {r.label for r in apply_scope(
+        db.session.query(AcademicYear).filter(AcademicYear.is_deleted.is_(False)), AcademicYear, user)}
+    today = date.today()
+    recent = {academic_year_for(user.organisation_id, date(today.year - k, today.month, min(today.day, 28)))
+              for k in range(0, 5)}
+    return sorted(configured | recent, reverse=True)
+
+
 @bp.get("/meta/bootstrap")
 @login_required
 @cached_json("bootstrap", ttl=300)
@@ -140,6 +151,7 @@ def bootstrap():
             name: {
                 "label": cfg.label,
                 "can_write": user.role in cfg.write_roles,
+                "can_edit": cfg.can_edit(user.role),
                 "filters": cfg.filters,
                 "sortable": cfg.sortable,
                 "search": cfg.search,
@@ -154,6 +166,9 @@ def bootstrap():
             "job_roles": _options(JobRole, user, extra=lambda r: {"nsqf_level": r.nsqf_level, "class_band": r.class_band}),
             "social_categories": _options(SocialCategory, user),
             "academic_years": _options(AcademicYear, user, label_attr="label", extra=lambda r: {"is_current": r.is_current}),
+            # every year worth filtering by: the ones set up, and (since a
+            # record's year follows its date) this school year and the last few
+            "year_labels": _year_labels(user),
             "states": _options(State, user),
             "districts": _options(District, user),
             "schools": _options(School, user, extra=lambda r: {

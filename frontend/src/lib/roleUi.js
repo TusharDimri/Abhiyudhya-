@@ -23,6 +23,7 @@ export const CARD_LINKS = {
   pending_issues_action: { to: "/app/issues", params: { workflow_status: "open" } },
   issues_resolved: { to: "/app/issues", params: { workflow_status: "resolved" } },
   pending_endorsement: { to: "/app/attendance", params: { endorsement_status: "submitted" } },
+  my_open_issues: { to: "/app/principal-issues", params: { workflow_status: "open" } },
   class_pending_endorsement: { to: "/app/class-attendance", params: { endorsement_status: "submitted" } },
   endorsed: { to: "/app/attendance", params: { endorsement_status: "endorsed" } },
   diaries: { to: "/app/diaries" },
@@ -44,11 +45,12 @@ export function cardHref(key) {
 const create = (path) => `${path}?new=1`;
 
 // Attendance is "verified" by the Principal; the stored values keep their
-// original names (endorsed / submitted / returned).
+// original names (endorsed / submitted).
+export const ISSUE_STATUS_LABELS = { open: "Open", "in-progress": "In progress", resolved: "Resolved" };
+
 export const VERIFICATION_LABELS = {
   endorsed: "Verified",
   submitted: "Pending verification",
-  returned: "Returned",
 };
 
 // What each role most likely opened the app to do.
@@ -72,6 +74,7 @@ export const QUICK_ACTIONS = {
   PR: [
     { label: "Verify daily attendance", icon: "✅", to: "/app/attendance?endorsement_status=submitted" },
     { label: "Verify class attendance", icon: "🧑‍🏫", to: "/app/class-attendance?endorsement_status=submitted" },
+    { label: "Raise an issue", icon: "📣", to: "/app/principal-issues?new=1" },
     { label: "My school's students", icon: "🧑‍🎓", to: "/app/students" },
     { label: "Trainers at my school", icon: "👨‍🏫", to: "/app/trainers" },
   ],

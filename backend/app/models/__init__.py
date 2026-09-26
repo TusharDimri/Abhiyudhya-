@@ -13,7 +13,7 @@ from app.models.student import StudentPromotion, Student, Assessment  # noqa: F4
 from app.models.operations import (  # noqa: F401
     DailyAttendance, AttendanceStudentMark, VTIssue, FieldVisit,
     FieldVisitStudentMark, GuestLecture, GuestLectureStudentMark,
-    ClassAttendance, ClassAttendanceStudentMark, LabEquipment, EquipmentMaintenance,
+    ClassAttendance, ClassAttendanceStudentMark, PrincipalIssue, LabEquipment, EquipmentMaintenance,
 )
 from app.models.internship import (  # noqa: F401
     Employer, EmployerStudentMap, DailyDiary, OJTPlacement,

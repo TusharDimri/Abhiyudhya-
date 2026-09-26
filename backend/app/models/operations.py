@@ -142,6 +142,23 @@ class ClassAttendanceStudentMark(BaseModel):
     present = db.Column(db.Boolean, default=False)
 
 
+class PrincipalIssue(BaseModel):
+    """An issue a principal raises about their school. (Trainers' issues are
+    VTIssue and go to the admins, not to the principal.)"""
+    __tablename__ = "principal_issue"
+    organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
+    school_id = db.Column(GUID(), db.ForeignKey("school.id"), nullable=False, index=True)
+    principal_id = db.Column(GUID(), db.ForeignKey("principal.id"), index=True)
+    academic_year = db.Column(db.String(20), index=True)
+    reporting_date = db.Column(db.Date, nullable=False)
+    reporting_time = db.Column(db.Time)
+    details = db.Column(db.Text, nullable=False)
+    # what the admins do with it (their side comes later)
+    workflow_status = db.Column(db.String(20), default="open", server_default="open", index=True)
+    resolution_note = db.Column(db.Text)
+    resolved_on = db.Column(db.DateTime)
+
+
 class VTIssue(CapturesLocation, BaseModel):
     """VT Issue Reporting with workflow - spec Part 3.12. Records where it was logged."""
     __tablename__ = "vt_issue"

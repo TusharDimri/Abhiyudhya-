@@ -20,7 +20,7 @@ import {
   labById, jobRoleForClass, labJobRoleIds, labSections,
 } from "./fieldOptions";
 import { todayISO } from "./dates";
-import { VERIFICATION_LABELS } from "./roleUi";
+import { ISSUE_STATUS_LABELS, VERIFICATION_LABELS } from "./roleUi";
 
 // shared option-key shortcuts
 const SECTOR = { optionsKey: "sectors" };
@@ -221,6 +221,7 @@ export const MODULES = {
   },
   schools: {
     label: "Schools", singular: "School", icon: "🏫", group: "Master Data",
+    searchHint: "Search by name, UDISE code or block",
     columns: [
       { key: "name", label: "School" },
       { key: "udise_code", label: "UDISE" },
@@ -252,6 +253,7 @@ export const MODULES = {
   },
   principals: {
     label: "Principals", singular: "Principal", icon: "🎓", group: "Master Data",
+    searchHint: "Search by name, email or mobile",
     columns: [
       { key: "full_name", label: "Name" },
       { key: "email", label: "Email" },
@@ -274,6 +276,7 @@ export const MODULES = {
   },
   labs: {
     label: "Labs", singular: "Lab", icon: "🧪", group: "Master Data",
+    searchHint: "Search labs by name",
     columns: [
       { key: "name", label: "Lab" },
       { key: "school_name", label: "School" },
@@ -298,6 +301,7 @@ export const MODULES = {
   },
   trainers: {
     label: "Trainers", singular: "Vocational Trainer", icon: "👨‍🏫", group: "People & Students",
+    searchHint: "Search by name, email or phone",
     columns: [
       { key: "full_name", label: "Name" },
       { key: "school_name", label: "School" },
@@ -323,6 +327,7 @@ export const MODULES = {
   },
   "academic-years": {
     label: "Academic Years", singular: "Academic Year", icon: "📅", group: "Master Data",
+    searchable: false,
     columns: [
       { key: "label", label: "Label" },
       { key: "start_date", label: "Start" },
@@ -346,6 +351,7 @@ export const MODULES = {
   },
   "job-roles": {
     label: "Job Roles", singular: "Job Role", icon: "💼", group: "Master Data",
+    searchHint: "Search by name or QP code",
     columns: [
       { key: "name", label: "Job Role" },
       { key: "sector_name", label: "Sector" },
@@ -405,6 +411,7 @@ export const MODULES = {
   // ---------------- STUDENTS ----------------
   students: {
     label: "Students", singular: "Student", icon: "🧑‍🎓", group: "People & Students",
+    searchHint: "Search by name, roll no. or admission no.",
     columns: [
       { key: "admission_number", label: "Adm. No." },
       { key: "full_name", label: "Student Name" },
@@ -423,13 +430,16 @@ export const MODULES = {
       { key: "district_name", label: "District" },
       { key: "school_name", label: "School" },
       { key: "verification_status", label: "Verification", badge: true },
-      { key: "enrolment_status", label: "Status", badge: true },
+      // Status (studying / completed / left): switched off for trainers for now -
+      // remove "VT" from hideFor to bring it back
+      { key: "enrolment_status", label: "Status", badge: true, hideFor: ["VT"] },
     ],
     formHint: "Students can be added in any class the lab runs; at the end of the year they move up through Promote Students.",
     // a trainer promotes from the Manage Students tab (StudentsHub) instead
     pageActions: [{ key: "promote", label: "⬆ Promote Students", roles: ["DM", "OA", "SA"] }],
     // the filters a trainer actually uses, all dropdowns
-    filtersFor: { VT: ["class_grade", "section", "academic_year", "verification_status", "enrolment_status"] },
+    // (a "enrolment_status" filter goes back in here with the Status column)
+    filtersFor: { VT: ["class_grade", "section", "academic_year", "verification_status"] },
     fields: [
       { name: "school_id", label: "School", type: "select", ...SCHOOL, autoFor: ["VT", "PR"], required: true, group: "Placement" },
       { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, autoFor: ["VT"], group: "Placement" },
@@ -498,6 +508,7 @@ export const MODULES = {
   },
   assessments: {
     label: "Assessments", singular: "Assessment", icon: "🎯", group: "People & Students",
+    searchable: false,
     columns: [
       { key: "student_name", label: "Student" },
       { key: "name", label: "Assessment" },
@@ -528,6 +539,7 @@ export const MODULES = {
   // ---------------- DAILY OPERATIONS ----------------
   attendance: {
     label: "Daily Attendance", singular: "Attendance", icon: "🗓️", group: "Daily Operations",
+    searchable: false,
     // the trainer's own attendance for the day: marked at the school (within
     // 1 km - checked by the server against the school's location)
     captureLocation: true,
@@ -556,6 +568,7 @@ export const MODULES = {
   },
   "class-attendance": {
     label: "Class Attendance", singular: "Class Attendance", icon: "🧑‍🏫", group: "Daily Operations",
+    searchable: false,
     captureLocation: true,
     filtersFor: { PR: ["trainer_id", "lab_id", "class_grade", "section", "date", "endorsement_status"] },
     columns: [
@@ -596,14 +609,30 @@ export const MODULES = {
     ],
     defaultGroup: "Class",
   },
+  "principal-issues": {
+    label: "Principal Issues", singular: "Issue", icon: "📣", group: "Daily Operations",
+    searchHint: "Search the issue text",
+    columns: [
+      { key: "reporting_date", label: "Date" },
+      { key: "reporting_time", label: "Time" },
+      { key: "details", label: "Issue" },
+      { key: "workflow_status", label: "Status", badge: true, valueLabels: ISSUE_STATUS_LABELS },
+    ],
+    fields: [
+      { name: "reporting_date", label: "Date", required: true, ...PAST_DATE },
+      { name: "reporting_time", label: "Time", type: "time", required: true, defaultValue: nowTime },
+      { name: "details", label: "Issue", type: "textarea", rows: 4, required: true, placeholder: "What is the issue?" },
+    ],
+  },
   issues: {
     label: "VT Issues", singular: "Issue", icon: "⚠️", group: "Daily Operations",
+    searchHint: "Search the issue text",
     captureLocation: true,
     columns: [
       { key: "reporting_date", label: "Date" },
       { key: "reporting_time", label: "Time" },
       { key: "details", label: "Issue" },
-      { key: "workflow_status", label: "Status", badge: true },
+      { key: "workflow_status", label: "Status", badge: true, valueLabels: ISSUE_STATUS_LABELS },
     ],
     fields: [
       { name: "reporting_date", label: "Date", required: true, ...PAST_DATE },
@@ -620,6 +649,7 @@ export const MODULES = {
   },
   "field-visits": {
     label: "Field / Industry Visits", singular: "Field Visit", icon: "🚌", group: "Daily Operations",
+    searchHint: "Search by organisation, address or purpose",
     captureLocation: true,
     yearlyTarget: true,   // 2 per level per academic year (api/targets.py)
     columns: [
@@ -660,6 +690,7 @@ export const MODULES = {
   },
   "guest-lectures": {
     label: "Guest Lectures", singular: "Guest Lecture", icon: "🎤", group: "Daily Operations",
+    searchHint: "Search by topic or lecturer",
     captureLocation: true,
     yearlyTarget: true,   // 15 per level per academic year (api/targets.py)
     columns: [
@@ -698,6 +729,7 @@ export const MODULES = {
   },
   equipment: {
     label: "Lab Equipment", singular: "Equipment", icon: "🖥️", group: "Daily Operations",
+    searchHint: "Search by equipment name, description or note",
     columns: [
       { key: "name", label: "Equipment" },
       { key: "lab_name", label: "Lab" },
@@ -721,6 +753,7 @@ export const MODULES = {
   },
   "equipment-maintenance": {
     label: "Maintenance Log", singular: "Maintenance", icon: "🔧", group: "Daily Operations",
+    searchHint: "Search by issue or note",
     columns: [
       { key: "date", label: "Date" },
       { key: "equipment_name", label: "Equipment" },
@@ -811,6 +844,7 @@ export const MODULES = {
   },
   "ojt-placements": {
     label: "OJT / Placement", singular: "OJT / Placement", icon: "🎓", group: "Internship & Placement",
+    searchable: false,
     columns: [
       { key: "student_name", label: "Student" },
       { key: "ojt_hours_logged", label: "OJT hrs" },
@@ -839,6 +873,7 @@ export const MODULES = {
   // ---------------- CROSS-CUTTING ----------------
   feedback: {
     label: "Feedback", singular: "Feedback", icon: "💬", group: "Cross-cutting",
+    searchHint: "Search subject or comments",
     columns: [
       { key: "date", label: "Date" },
       { key: "source", label: "Source" },

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { optionText } from "../lib/fieldOptions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
 import { useToast } from "../lib/toast";
@@ -164,7 +165,7 @@ function Control({ f, value, onChange, boot, disabled }) {
     return (
       <select className="select" value={value ?? ""} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
         <option value="">— Select —</option>
-        {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        {opts.map((o) => <option key={o.value} value={o.value}>{optionText(o.label)}</option>)}
       </select>
     );
   return (

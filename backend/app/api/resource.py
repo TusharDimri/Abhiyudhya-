@@ -290,7 +290,7 @@ def list_trash(resource):
     """Soft-deleted rows (Recycle Bin) - visible to writers, for restore."""
     cfg = _cfg(resource)
     user = current_user()
-    if user.role not in cfg.write_roles:
+    if not cfg.can_edit(user.role):
         abort(403, description="Only editors can view the recycle bin")
     model = cfg.model
     if not hasattr(model, "is_deleted"):
@@ -316,7 +316,7 @@ def list_trash(resource):
 def restore_resource(resource, uid):
     cfg = _cfg(resource)
     user = current_user()
-    if user.role not in cfg.write_roles:
+    if not cfg.can_edit(user.role):
         abort(403, description="You cannot restore this record")
     obj = db.session.get(cfg.model, uid)
     if obj is None or not getattr(obj, "is_deleted", False):
@@ -369,6 +369,10 @@ def create_resource(resource):
             data["organisation_id"] = user.organisation_id
 
     obj = cfg.model(**data)
+    if cfg.prepare:
+        err = cfg.prepare(obj, user)
+        if err:
+            abort(400, description=err)
     if cfg.captures_location:
         _capture_location(obj, payload, user)
     if cfg.manual_location:
@@ -403,7 +407,7 @@ def create_resource(resource):
 def update_resource(resource, uid):
     cfg = _cfg(resource)
     user = current_user()
-    if user.role not in cfg.write_roles:
+    if not cfg.can_edit(user.role):
         abort(403, description="You cannot edit this record")
 
     obj = db.session.get(cfg.model, uid)
@@ -453,7 +457,7 @@ def update_resource(resource, uid):
 def delete_resource(resource, uid):
     cfg = _cfg(resource)
     user = current_user()
-    if user.role not in cfg.write_roles:
+    if not cfg.can_edit(user.role):
         abort(403, description="You cannot delete this record")
 
     obj = db.session.get(cfg.model, uid)

@@ -113,9 +113,13 @@ button { font-family: inherit; }
   position: absolute; right: .3rem; border: 0; background: none; cursor: pointer;
   font-size: 1rem; line-height: 1; padding: .25rem;
 }
+/* The browser opens its calendar against this (hidden) input, so it covers
+   the whole field: the calendar then drops down right below the field,
+   aligned to its left edge. Invisible and click-through - typing still goes
+   to the text box, and the 📅 button opens the calendar. */
 .date-input .date-native {
-  position: absolute; right: 0; bottom: 0; width: 1px; height: 1px;
-  opacity: 0; pointer-events: none; border: 0; padding: 0;
+  position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+  opacity: 0; pointer-events: none; border: 0; padding: 0; margin: 0;
 }
 .field-error { font-size: .75rem; color: var(--danger); }
 

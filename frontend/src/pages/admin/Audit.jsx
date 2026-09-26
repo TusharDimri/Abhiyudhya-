@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { optionText } from "../../lib/fieldOptions";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import api from "../../lib/api";
 
@@ -41,7 +42,7 @@ export default function Audit() {
         </div>
         <select className="select filter-ctl" value={action} onChange={(e) => { setAction(e.target.value); setPage(1); }}>
           <option value="">All actions</option>
-          {["create", "update", "delete", "restore"].map((a) => <option key={a} value={a}>{a}</option>)}
+          {["create", "update", "delete", "restore"].map((a) => <option key={a} value={a}>{optionText(a)}</option>)}
         </select>
       </div>
 

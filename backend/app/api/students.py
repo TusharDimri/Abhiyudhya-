@@ -179,3 +179,71 @@ def add_students():
         "added": len(made), "class_grade": class_grade, "section": section, "academic_year": year,
         "students": [{"id": str(s.id), "full_name": s.full_name, "roll_number": s.roll_number} for s in made],
     }), 201
+
+
+# ------------------------------------------------------------------ sections
+SECTION_NAME = re.compile(r"^[A-Z0-9]{1,3}$")
+MAX_SECTIONS = 10
+
+
+def _section_target(user, data):
+    """The trainer's lab and class a section change is about, checked."""
+    if user.role != Role.TRAINER.value:
+        abort(403, description="Only a trainer changes their lab's sections.")
+    lab = db.session.get(Lab, data.get("lab_id")) if data.get("lab_id") else None
+    if lab is None or lab.id not in {l.id for l in user.labs}:
+        abort(400, description="Choose one of your labs.")
+    class_grade = str(data.get("class_grade") or "")
+    if class_grade not in REGISTRATION_CLASSES:
+        abort(400, description="Select a class first.")
+    job_role = lab.job_role_for(class_grade)
+    if not job_role or class_grade not in allowed_class_grades(user, job_role):
+        abort(400, description=f"Your lab doesn't run Class {class_grade}.")
+    name = str(data.get("section") or "").strip().upper()
+    if not SECTION_NAME.match(name):
+        abort(400, description="A section is 1 to 3 letters or digits, e.g. C.")
+    return lab, class_grade, name
+
+
+def _save_sections(user, lab, class_grade, sections, what):
+    before = lab.sections_for(class_grade)
+    setattr(lab, f"sections_{class_grade}", ",".join(sections))
+    lab.updated_by = user.id
+    audit.record(user, "update", "lab", lab.id, before={f"sections_{class_grade}": before},
+                 after={f"sections_{class_grade}": sections, "change": what})
+    db.session.commit()
+    return jsonify({"lab_id": str(lab.id), "class_grade": class_grade, "sections": sections})
+
+
+@bp.post("/sections")
+@login_required
+def add_section():
+    """A trainer adds a section to one class of their lab (Class 9 gets a 'C')."""
+    user = current_user()
+    lab, class_grade, name = _section_target(user, request.get_json(silent=True) or {})
+    sections = lab.sections_for(class_grade)
+    if name in sections:
+        abort(400, description=f"Class {class_grade} already has Section {name}.")
+    if len(sections) >= MAX_SECTIONS:
+        abort(400, description=f"A class can have up to {MAX_SECTIONS} sections.")
+    return _save_sections(user, lab, class_grade, sorted(sections + [name]), f"added {name}")
+
+
+@bp.post("/sections/remove")
+@login_required
+def remove_section():
+    """Remove a section - only an empty one, and never a class's last."""
+    user = current_user()
+    lab, class_grade, name = _section_target(user, request.get_json(silent=True) or {})
+    sections = lab.sections_for(class_grade)
+    if name not in sections:
+        abort(400, description=f"Class {class_grade} has no Section {name}.")
+    if len(sections) == 1:
+        abort(400, description="A class needs at least one section.")
+    in_it = db.session.query(Student.id).filter(
+        Student.lab_id == lab.id, Student.class_grade == class_grade, Student.section == name,
+        Student.is_deleted.is_(False), Student.enrolment_status == "Studying").count()
+    if in_it:
+        abort(400, description=f"Section {name} still has {in_it} student{'s' if in_it != 1 else ''} "
+                               "- move them to another section first.")
+    return _save_sections(user, lab, class_grade, [x for x in sections if x != name], f"removed {name}")

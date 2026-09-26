@@ -49,7 +49,8 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
   const [searchInput, setSearchInput] = useState(sp.get("q") || "");
 
   const perm = boot?.resources?.[resource];
-  const canWrite = perm?.can_write && !readOnly;
+  const canWrite = perm?.can_write && !readOnly;            // may add
+  const canEdit = canWrite && perm?.can_edit !== false;       // may change / delete
   // a role may be offered just the filters that matter to it
   const roleFilters = mod?.filtersFor?.[user?.role];
   const filterCols = (perm?.filters || []).filter((c) => !roleFilters || roleFilters.includes(c));
@@ -173,6 +174,16 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     else patch({ sort: key, order: "asc" }, false);
   };
 
+  // With no search box the page size sits at the end of the filters row
+  // instead of alone on a row of its own.
+  const showSearch = mod.searchable !== false && (perm?.search?.length ?? 0) > 0;
+  const toolbarRow = showSearch || (isSA && orgScoped);
+  const pageSizeBox = (
+    <select className="select pagesize" value={pageSize} onChange={(e) => patch({ page_size: e.target.value })} aria-label="Rows per page">
+      {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} / page</option>)}
+    </select>
+  );
+
   const rows = list.data?.data || [];
   const pg = list.data?.pagination || { total: 0, pages: 1, page };
   const from = pg.total === 0 ? 0 : (pg.page - 1) * pageSize + 1;
@@ -206,13 +217,14 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         />
       )}
 
+      {toolbarRow && (
       <div className="toolbar">
-        {mod.searchable !== false && (
+        {showSearch && (
           <div className="search-wrap">
             <span className="search-ico">🔍</span>
             <input
               className="input search"
-              placeholder={`Search ${mod.label.toLowerCase()}…`}
+              placeholder={`${mod.searchHint || `Search ${mod.label.toLowerCase()}`}…`}
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
             />
@@ -226,10 +238,9 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
             {orgOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         )}
-        <select className="select pagesize" value={pageSize} onChange={(e) => patch({ page_size: e.target.value })}>
-          {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} / page</option>)}
-        </select>
+        {pageSizeBox}
       </div>
+      )}
 
       <Filters
         filters={visibleFilterCols}
@@ -238,6 +249,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         values={filterValues}
         onChange={(col, val) => patch({ [col]: val })}
         onClear={() => patch(Object.fromEntries(filterCols.map((c) => [c, ""])))}
+        aside={toolbarRow ? null : pageSizeBox}
       />
 
       {shownColumns.some((c) => c.dot === "distance") && <DistanceLegend />}
@@ -250,7 +262,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         sort={sort}
         order={order}
         onSort={onSort}
-        canWrite={canWrite}
+        canWrite={canEdit}
         rowActions={rowActions}
         onEdit={(r) => setEditing(r)}
         onDelete={(r) => window.confirm(`Delete this ${mod.singular}?`) && del.mutate(r)}

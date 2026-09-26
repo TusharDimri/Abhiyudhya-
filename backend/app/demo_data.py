@@ -138,7 +138,7 @@ def _phone():
 def _endorsement(day, today):
     if (today - day).days <= 5:
         return "submitted"
-    return R.choices(["endorsed", "returned", "submitted"], weights=[90, 3, 7])[0]
+    return R.choices(["endorsed", "submitted"], weights=[92, 8])[0]
 
 
 def run_demo_data():
