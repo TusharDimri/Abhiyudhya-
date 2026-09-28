@@ -141,16 +141,11 @@ def add_students():
             problems.append("Aadhaar number must be 12 digits")
         elif aadhaar in taken_aadhaar or aadhaar in batch_aadhaar:
             problems.append("this Aadhaar number is already registered")
-        roll = (raw.get("roll_number") or "").strip() or None
-        if roll and (roll in used or roll in rolls_in_batch):
-            problems.append(f"roll number {roll} is already taken")
         if problems:
             msg = "; ".join(problems)
             errors.append({"row": i, "message": msg[:1].upper() + msg[1:] + "."})
             continue
-        roll = roll or next(auto_iter)
-        while roll in used or roll in rolls_in_batch:   # a typed roll may have taken an auto one
-            roll = next(auto_iter, None) or f"{class_grade}{section}-{len(used) + len(rolls_in_batch) + 1:02d}"
+        roll = next(auto_iter)   # always the next free one - never typed in
         rolls_in_batch.add(roll)
         batch_admissions.add(admission)
         batch_aadhaar.add(aadhaar)
@@ -227,6 +222,31 @@ def add_section():
     if len(sections) >= MAX_SECTIONS:
         abort(400, description=f"A class can have up to {MAX_SECTIONS} sections.")
     return _save_sections(user, lab, class_grade, sorted(sections + [name]), f"added {name}")
+
+
+@bp.post("/<uid>/section")
+@login_required
+def move_to_section(uid):
+    """Move a student to another section of the same class (e.g. to empty a
+    section before removing it). They get the next roll number there."""
+    user = current_user()
+    s = db.session.get(Student, uid)
+    if s is None or s.is_deleted:
+        abort(404)
+    data = request.get_json(silent=True) or {}
+    lab, class_grade, name = _section_target(user, {**data, "lab_id": s.lab_id, "class_grade": s.class_grade})
+    if s.enrolment_status != "Studying":
+        abort(400, description=f"{s.full_name} is no longer studying here.")
+    if name not in lab.sections_for(class_grade):
+        abort(400, description=f"Class {class_grade} has no Section {name}.")
+    if name == s.section:
+        abort(400, description=f"{s.full_name} is already in Section {name}.")
+    before = {"section": s.section, "roll_number": s.roll_number}
+    (roll,), _ = _next_rolls(lab, class_grade, name, s.academic_year, 1)
+    s.section, s.roll_number, s.updated_by = name, roll, user.id
+    audit.record(user, "update", "student", s.id, before=before, after={"section": name, "roll_number": roll})
+    db.session.commit()
+    return jsonify({"id": str(s.id), "full_name": s.full_name, "section": name, "roll_number": roll})
 
 
 @bp.post("/sections/remove")

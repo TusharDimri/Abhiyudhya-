@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
 import { useToast } from "../lib/toast";
@@ -6,6 +6,8 @@ import { useBootstrap } from "../hooks/useBootstrap";
 import { labById, optionText } from "../lib/fieldOptions";
 import { todayISO } from "../lib/dates";
 import DateInput from "./DateInput";
+import { useReviewGate, ReviewNotice, reviewLabel } from "./ReviewGate";
+import SectionManager from "./SectionManager";
 
 /* Adding students, as easy as it can be: pick the class and section once,
    then one row per student - as many as you like, saved together. Blank rows
@@ -13,7 +15,7 @@ import DateInput from "./DateInput";
 
 const blank = () => ({
   admission_number: "", first_name: "", last_name: "", gender: "", dob: "", father_name: "",
-  mobile_primary: "", social_category_id: "", aadhaar_number: "", roll_number: "", cwsn: false,
+  mobile_primary: "", social_category_id: "", aadhaar_number: "", cwsn: false,
 });
 const isBlank = (r) => !Object.entries(r).some(([k, v]) => k !== "cwsn" && String(v || "").trim()) && !r.cwsn;
 const START_ROWS = 3;
@@ -43,6 +45,7 @@ export default function AddStudents() {
 
   // a trainer can add a section to the chosen class - or remove an empty one
   const [newSection, setNewSection] = useState(null);   // null: closed; string: typing
+  const [managing, setManaging] = useState(null);       // the section whose students are shown
   const changeSections = useMutation({
     mutationFn: async ({ path, name }) => (await api.post(`/students/sections${path}`, {
       lab_id: lab.value, class_grade: classGrade, section: name,
@@ -55,6 +58,7 @@ export default function AddStudents() {
     onError: (e) => push(apiError(e), "error"),
   });
   const pickSection = (v) => {
+    if (v === "__remove") { setManaging(section); return; }
     if (v !== "__add") { setSec(v); return; }
     if (!classGrade) { push("Select a class first, then add its section.", "error"); return; }
     setNewSection("");
@@ -71,6 +75,8 @@ export default function AddStudents() {
   const [rows, setRows] = useState(() => Array.from({ length: START_ROWS }, blank));
   const [errors, setErrors] = useState({});   // row index -> message
   const [done, setDone] = useState(null);
+  const review = useReviewGate();
+  const topRef = useRef(null);
   const put = (i, k, v) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
   const filled = rows.map((r, i) => [r, i]).filter(([r]) => !isBlank(r));
 
@@ -105,6 +111,7 @@ export default function AddStudents() {
     onSuccess: (r) => {
       setDone(r);
       setErrors({});
+      review.reset();
       setRows(Array.from({ length: START_ROWS }, blank));
       push(`Added ${r.added} student${r.added === 1 ? "" : "s"} to Class ${r.class_grade} ${r.section}`, "success");
       for (const key of [["list", "students"], ["roster"], ["promotion"], ["dashboard"]]) qc.invalidateQueries({ queryKey: key });
@@ -124,7 +131,7 @@ export default function AddStudents() {
   if (!labs.length) return <div className="card card-pad">You aren't assigned to a lab yet - ask your admin.</div>;
 
   return (
-    <section className="card add-students">
+    <section className="card add-students" ref={topRef}>
       <div className="add-students-head">
         {labs.length > 1 && (
           <label className="field compact">
@@ -145,6 +152,7 @@ export default function AddStudents() {
           <select className="select" value={section} onChange={(e) => pickSection(e.target.value)}>
             {sections.map((s) => <option key={s} value={s}>Section {s}</option>)}
             <option value="__add">＋ Add a section…</option>
+            {section && sections.length > 1 && <option value="__remove">－ Remove Section {section}…</option>}
           </select>
           {newSection !== null ? (
             <div className="section-add">
@@ -155,13 +163,7 @@ export default function AddStudents() {
                 onClick={() => changeSections.mutate({ path: "", name: newSection.trim() })}>Add to Class {classGrade}</button>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNewSection(null)}>Cancel</button>
             </div>
-          ) : section && sections.length > 1 && (
-            <button type="button" className="link-btn" disabled={changeSections.isPending}
-              onClick={() => window.confirm(`Remove Section ${section} from Class ${classGrade}? (Only an empty section can be removed.)`)
-                && changeSections.mutate({ path: "/remove", name: section })}>
-              Remove section {section}
-            </button>
-          )}
+          ) : null}
         </div>
         <div className="field compact">
           <span>Job role</span>
@@ -171,8 +173,9 @@ export default function AddStudents() {
           {already.data != null && <>Class {classGrade} {section} has <b>{already.data}</b> student{already.data === 1 ? "" : "s"} now</>}
         </div>
       </div>
+      <ReviewNotice gate={review} />
       <p className="muted add-students-hint">
-        One row per student. Every student needs the fields marked *; roll numbers left blank are given the next free ones.
+        One row per student. Every student needs the fields marked *; roll numbers are given automatically.
         Tip: paste a column of names from Excel into a “First name” box.
       </p>
 
@@ -210,7 +213,7 @@ export default function AddStudents() {
                 </td>
                 <td><input className="input" inputMode="numeric" placeholder="12 digits" maxLength={14} value={r.aadhaar_number} onChange={(e) => put(i, "aadhaar_number", e.target.value)} /></td>
                 <td className="center"><input type="checkbox" checked={r.cwsn} onChange={(e) => put(i, "cwsn", e.target.checked)} /></td>
-                <td><input className="input" placeholder="auto" value={r.roll_number} onChange={(e) => put(i, "roll_number", e.target.value)} /></td>
+                <td><input className="input" value="Auto" disabled title="Given automatically when the students are saved" /></td>
                 <td>
                   <button type="button" className="btn btn-ghost btn-sm" title="Remove this row"
                     onClick={() => setRows((rs) => (rs.length > 1 ? rs.filter((_, j) => j !== i) : [blank()]))}>✕</button>
@@ -227,8 +230,13 @@ export default function AddStudents() {
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRows((rs) => [...rs, blank()])}>＋ Add row</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRows((rs) => [...rs, ...Array.from({ length: 5 }, blank)])}>＋ Add 5 rows</button>
         <span className="grow" />
-        <button type="button" className="btn btn-primary" disabled={!filled.length || save.isPending || !classGrade} onClick={() => save.mutate()}>
-          {save.isPending ? "Saving…" : `Add ${filled.length || ""} student${filled.length === 1 ? "" : "s"} to Class ${classGrade} ${section}`}
+        <button type="button" className="btn btn-primary"
+          disabled={!filled.length || save.isPending || !classGrade || (review.reviewing && !review.ready)}
+          onClick={() => {
+            if (!review.reviewing) { review.start(); topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+            save.mutate();
+          }}>
+          {reviewLabel(review, { busy: save.isPending, submitText: `Add ${filled.length || ""} student${filled.length === 1 ? "" : "s"} to Class ${classGrade} ${section}` })}
         </button>
       </div>
 
@@ -237,6 +245,11 @@ export default function AddStudents() {
           ✓ Added {done.added} to Class {done.class_grade} {done.section} ({done.academic_year}):{" "}
           {done.students.map((s) => `${s.full_name} (${s.roll_number})`).join(", ")}. They're waiting for verification under “Edit & Verify”.
         </div>
+      )}
+      {managing && (
+        <SectionManager lab={lab} classGrade={classGrade} section={managing} sections={sections}
+          onClose={() => setManaging(null)}
+          onRemoved={() => { setManaging(null); setSec(""); }} />
       )}
     </section>
   );

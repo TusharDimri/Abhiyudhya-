@@ -154,6 +154,19 @@ def test_trainer_marks_attendance_at_the_school(client, world):
     assert body["school_id"] == str(world["school"].id)
 
 
+def test_saved_records_cannot_be_deleted_by_anyone(client, world):
+    _school_located(world)
+    rid = _save(client, "/api/attendance", _day(world)).get_json()["id"]
+    sa = User(full_name="SA", email="sa@x.com", role="SA")
+    sa.set_password("Password@123")
+    db.session.add(sa)
+    db.session.commit()
+    for email in ("vt@x.com", "sa@x.com"):
+        r = client.delete(f"/api/attendance/{rid}", headers=_login(client, email))
+        assert r.status_code == 403 and "can't be deleted" in r.get_json()["message"]
+    assert client.get(f"/api/attendance/{rid}", headers=_login(client)).status_code == 200
+
+
 def test_within_a_kilometre_is_fine(client, world):
     _school_located(world)
     r = _save(client, "/api/attendance", _day(world), **NEARBY)
@@ -365,16 +378,14 @@ def test_trainer_owns_the_equipment_they_add(client, world):
     assert body["lab_name"] == world["lab"].name
 
 
-def test_trainer_cannot_reassign_equipment(client, world):
-    other = _other_trainer(world)
+def test_trainer_cannot_edit_a_saved_record(client, world):
     h = _login(client)
     eq = client.post("/api/equipment", headers=h, json=_equipment(world)).get_json()
-    r = client.patch(f"/api/equipment/{eq['id']}", headers=h, json={"trainer_id": str(other.id)})
-    assert r.status_code == 400
-    assert "Principal" in r.get_json()["message"]
-    # other edits are fine
     r = client.patch(f"/api/equipment/{eq['id']}", headers=h, json={"note": "Kept in cupboard 2"})
-    assert r.status_code == 200, r.get_json()
+    assert r.status_code == 403
+    assert "can't be edited" in r.get_json()["message"]
+    boot = client.get("/api/meta/bootstrap", headers=h).get_json()
+    assert boot["resources"]["equipment"]["can_edit"] is False
 
 
 def test_equipment_needs_a_name_and_a_past_date(client, world):
@@ -935,8 +946,7 @@ def test_principal_endorses_and_it_becomes_final(client, world, principal, kind)
     assert r.status_code == 200, r.get_json()
     h_vt = _as(client, "vt@x.com")
     edit = client.patch(f"{url}/{rid}", headers=h_vt, json={"comment": "late change", "details": "late change"})
-    assert edit.status_code == 400
-    assert "verified" in edit.get_json()["message"]
+    assert edit.status_code == 403
 
 
 def test_attendance_can_only_be_verified(client, world, principal):
@@ -1042,7 +1052,8 @@ def test_trainer_adds_several_students_at_once(client, world, category):
     body = r.get_json()
     assert body["added"] == 2 and body["academic_year"]
     rolls = sorted(s["roll_number"] for s in body["students"])
-    assert "9A-50" in rolls and len(set(rolls)) == 2            # blank roll got the next free one
+    assert "9A-50" not in rolls and len(set(rolls)) == 2        # roll numbers are always given, never typed
+    assert all(r.startswith("9A-") for r in rolls)
     listed = client.get("/api/students?class_grade=9&section=A&search=Kid1", headers=_login(client)).get_json()["data"][0]
     assert listed["aadhaar_number"] == "XXXXXXXX0001"            # never sent out whole
     assert listed["verification_status"] == "pending"
@@ -1077,13 +1088,23 @@ def test_aadhaar_is_unique_and_stays_masked_when_editing(client, world, category
     first = _bulk(client, world, [_kid(category, 7)]).get_json()["students"][0]["id"]
     dup = _bulk(client, world, [_kid(category, 8, aadhaar_number="123412340007")])
     assert dup.status_code == 400 and "already registered" in dup.get_json()["errors"][0]["message"]
-    h = _login(client)
+    h = _login(client)   # a student's details stay editable by the trainer
     # the edit form sends back what it was shown - the stored number stays
     r = client.patch(f"/api/students/{first}", headers=h, json={"aadhaar_number": "XXXXXXXX0007", "father_name": "New Father"})
     assert r.status_code == 200, r.get_json()
     from app.models.student import Student as S
     assert db.session.get(S, first).aadhaar_number == "123412340007"
     assert client.patch(f"/api/students/{first}", headers=h, json={"aadhaar_number": "12"}).status_code == 400
+
+
+def test_move_a_student_to_another_section(client, world, category):
+    kid = _bulk(client, world, [_kid(category, 3)]).get_json()["students"][0]
+    h = _login(client)
+    r = client.post(f"/api/students/{kid['id']}/section", headers=h, json={"section": "B"})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["section"] == "B" and r.get_json()["roll_number"].startswith("9B-")
+    assert client.post(f"/api/students/{kid['id']}/section", headers=h, json={"section": "Z"}).status_code == 400
+    assert client.post(f"/api/students/{kid['id']}/section", headers=h, json={"section": "B"}).status_code == 400
 
 
 def test_bulk_add_into_class_10(client, world, category):

@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import { useBootstrap } from "../../hooks/useBootstrap";
 import { toDMY } from "../../lib/dates";
+import { useReviewGate, ReviewNotice, reviewLabel } from "../../components/ReviewGate";
 
 const ROLE_LABELS = {
   SA: "Super Admin", OA: "Organisation Admin", DM: "District Manager",
@@ -102,6 +103,8 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
   const { push } = useToast();
   const [f, setF] = useState({ role: roles[0] || "VT", full_name: "", email: "", password: "", organisation_id: "", school_id: "", lab_ids: [], district_ids: [] });
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const review = useReviewGate();
+  const drawerRef = useRef(null);
   const bootOpts = boot?.options || {};
   const orgOptions = bootOpts.organisations || [];
 
@@ -132,9 +135,10 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
 
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="drawer" style={{ width: "min(480px,100%)" }}>
+      <div className="drawer" style={{ width: "min(480px,100%)" }} ref={drawerRef}>
         <header><h3 style={{ margin: 0 }}>New User</h3><button className="close" onClick={onClose}>×</button></header>
         <div className="body">
+          <ReviewNotice gate={review} />
           <div className="field"><label>Role</label>
             <select className="select" value={f.role} onChange={(e) => set("role", e.target.value)}>
               {roles.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
@@ -180,7 +184,11 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
         </div>
         <footer>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => create.mutate()} disabled={create.isPending || orgLocked || !f.email || f.password.length < 8}>{create.isPending ? "Creating…" : "Create user"}</button>
+          <button className="btn btn-primary"
+            onClick={() => (review.reviewing ? create.mutate() : review.start(drawerRef.current))}
+            disabled={create.isPending || orgLocked || !f.email || f.password.length < 8 || (review.reviewing && !review.ready)}>
+            {reviewLabel(review, { busy: create.isPending, busyText: "Creating…", submitText: "Create user" })}
+          </button>
         </footer>
       </div>
     </div>

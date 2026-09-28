@@ -49,6 +49,9 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                     {showActions ? (
                       <td>
                         <div className="cell-actions">
+                          {rowActions?.includes("view") && (
+                            <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("view", r)}>View</button>
+                          )}
                           {rowActions?.includes("endorse") && r.endorsement_status !== "endorsed" && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("endorse", r)}>Verify</button>
                           )}
@@ -67,7 +70,7 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                             </button>
                           )}
                           {canWrite && <button className="btn btn-ghost btn-sm" onClick={() => onEdit(r)}>Edit</button>}
-                          {canWrite && <button className="btn btn-danger btn-sm" onClick={() => onDelete(r)}>Delete</button>}
+                          {canWrite && onDelete && <button className="btn btn-danger btn-sm" onClick={() => onDelete(r)}>Delete</button>}
                         </div>
                       </td>
                     ) : null}

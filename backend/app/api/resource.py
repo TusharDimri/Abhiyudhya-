@@ -16,7 +16,7 @@ from sqlalchemy import or_, asc, desc
 
 from app.extensions import db
 from app.models.base import GUID
-from app.api.registry import REGISTRY
+from app.api.registry import LOCKED_MESSAGE, REGISTRY
 from app.rbac import login_required, current_user, apply_scope, can_access_row
 from app.rbac.roles import Role
 from app.services import audit
@@ -344,7 +344,34 @@ def get_resource(resource, uid):
         abort(404)
     if not can_access_row(obj, user):
         abort(403, description="Outside your scope")
-    return jsonify(_serialise(cfg, obj))
+    return jsonify(_for_viewing(cfg, _serialise(cfg, obj)))
+
+
+def _for_viewing(cfg, data):
+    """One record opened on its own (the View window): a link for each photo
+    and the name of each student in its lists, not just their ids."""
+    from app.models.student import Student
+    from app.services import storage
+
+    for key in ("photo_url", "picture_url"):
+        path = data.get(key)
+        if path:
+            try:
+                data[key.replace("_url", "_src")] = path if str(path).startswith("http") else storage.presign_download(path)
+            except Exception:  # storage not set up locally: just no picture
+                data[key.replace("_url", "_src")] = None
+    for child in cfg.children:
+        rows = data.get(child.payload_key) or []
+        ids = [r["student_id"] for r in rows if r.get("student_id")]
+        if not ids:
+            continue
+        found = {str(s.id): s for s in db.session.query(Student).filter(Student.id.in_(ids))}
+        for r in rows:
+            s = found.get(str(r.get("student_id")))
+            r["student_name"] = s.full_name if s else None
+            r["roll_number"] = s.roll_number if s else None
+            r["section"] = s.section if s else None
+    return data
 
 
 @bp.post("/<resource>")
@@ -407,6 +434,8 @@ def create_resource(resource):
 def update_resource(resource, uid):
     cfg = _cfg(resource)
     user = current_user()
+    if cfg.locked_for(user.role):
+        abort(403, description=LOCKED_MESSAGE)
     if not cfg.can_edit(user.role):
         abort(403, description="You cannot edit this record")
 
@@ -455,22 +484,7 @@ def update_resource(resource, uid):
 @bp.delete("/<resource>/<uid>")
 @login_required
 def delete_resource(resource, uid):
-    cfg = _cfg(resource)
-    user = current_user()
-    if not cfg.can_edit(user.role):
-        abort(403, description="You cannot delete this record")
-
-    obj = db.session.get(cfg.model, uid)
-    if obj is None or getattr(obj, "is_deleted", False):
-        abort(404)
-    if not can_access_row(obj, user):
-        abort(403, description="Outside your scope")
-
-    before = obj.to_dict()
-    obj.is_deleted = True  # soft-delete (spec 0.5)
-    obj.status = "deleted"
-    if hasattr(obj, "updated_by"):
-        obj.updated_by = user.id
-    audit.record(user, "delete", cfg.model.__tablename__, obj.id, before=before)
-    db.session.commit()
-    return jsonify({"deleted": True, "id": str(obj.id)})
+    """Nothing is deleted once saved - by anyone. Forms ask for a 30-second
+    review before they save instead; mistakes are fixed by editing."""
+    _cfg(resource)
+    abort(403, description="Saved records can't be deleted. Edit the record to correct it.")

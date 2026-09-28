@@ -555,3 +555,49 @@
 
 /* the page-size box at the right end of the filters row (pages without search) */
 .filterbar-aside { margin-left: auto; }
+
+/* while a side form or dialog is open, only it scrolls - not the page behind */
+html:has(.overlay), html:has(.overlay) body { overflow: hidden; }
+.drawer { overscroll-behavior: contain; }
+
+/* the 30-second "check it over" step before a form saves */
+.review-note {
+  background: #fff7e6; border: 1px solid #f5c26b; color: #7a4b00; border-radius: 10px;
+  padding: .7rem .9rem; margin-bottom: 1rem; font-size: .86rem; line-height: 1.45;
+}
+.review-note.ready { background: #ecfdf3; border-color: #7bd3a4; color: #05603a; }
+
+/* the "View" window: a record's details, read-only, centred over the list */
+.overlay.center { justify-content: center; align-items: center; padding: 1rem; }
+.modal {
+  width: min(720px, 100%); max-height: calc(100vh - 2rem); background: #fff; border-radius: 14px;
+  box-shadow: var(--shadow-lg); display: flex; flex-direction: column; overflow: hidden; animation: popIn .15s ease;
+}
+@keyframes popIn { from { transform: scale(.97); opacity: .6; } to { transform: none; opacity: 1; } }
+.modal header { padding: 1rem 1.3rem; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.modal .body { padding: 1.1rem 1.3rem; overflow-y: auto; overscroll-behavior: contain; }
+.modal footer { padding: .8rem 1.3rem; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; }
+.modal .close { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--muted); }
+.view-status { display: flex; flex-wrap: wrap; gap: .5rem 1.4rem; align-items: center; background: var(--navy-050);
+  border-radius: 10px; padding: .6rem .8rem; margin-bottom: 1rem; font-size: .84rem; }
+.view-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem 1.2rem; margin: 0; }
+.view-item { min-width: 0; }
+.view-item.wide { grid-column: 1 / -1; }
+.view-item dt { font-size: .7rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: .2rem; }
+.view-item dd { margin: 0; font-size: .92rem; color: var(--navy-800); overflow-wrap: anywhere; }
+.view-text { white-space: pre-wrap; }
+.view-photo { max-width: 100%; max-height: 260px; border-radius: 8px; border: 1px solid var(--line); display: block; }
+.view-students { display: flex; flex-direction: column; gap: .35rem; font-size: .88rem; line-height: 1.5; }
+.view-tag { display: inline-block; font-size: .7rem; font-weight: 700; padding: .05rem .45rem; border-radius: 999px;
+  background: #fde8e8; color: #b42318; margin-right: .3rem; }
+.view-tag.ok { background: #e7f6ec; color: #067647; }
+@media (max-width: 560px) { .view-grid { grid-template-columns: 1fr; } }
+
+/* student tables inside the View / section windows */
+.view-table-wrap { border: 1px solid var(--line); border-radius: 10px; }
+table.data.view-table { min-width: 0; font-size: .86rem; }
+table.data.view-table th, table.data.view-table td { padding: .45rem .7rem; }
+.modal.modal-wide { width: min(880px, 100%); }
+.section-student-actions, .section-leave { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+.select.select-sm, .input.input-sm { padding: .3rem .5rem; font-size: .8rem; height: auto; width: auto; }
+.section-leave .input-sm { min-width: 10rem; }

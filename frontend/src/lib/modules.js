@@ -564,7 +564,7 @@ export const MODULES = {
       { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"], quiet: true,
         defaultValue: FIRST_LAB },
     ],
-    rowActions: [{ action: "endorse", roles: ["PR", "OA", "SA"] }],
+    rowActions: [{ action: "view", roles: ["PR"] }, { action: "endorse", roles: ["PR", "OA", "SA"] }],
   },
   "class-attendance": {
     label: "Class Attendance", singular: "Class Attendance", icon: "🧑‍🏫", group: "Daily Operations",
@@ -583,7 +583,7 @@ export const MODULES = {
       // where it was marked, for whoever reviews it - never shown to the trainer
       { key: "distance_from_school_m", label: "At school?", dot: "distance", hideFor: ["VT"] },
     ],
-    rowActions: [{ action: "endorse", roles: ["PR", "OA", "SA"] }],
+    rowActions: [{ action: "view", roles: ["PR"] }, { action: "endorse", roles: ["PR", "OA", "SA"] }],
     fields: [
       { name: "date", label: "Date", required: true, ...PAST_DATE, readOnlyFor: ["VT"] },
       { name: "time", label: "Time", type: "time", required: true, defaultValue: nowTime, readOnlyFor: ["VT"] },
@@ -652,6 +652,7 @@ export const MODULES = {
     searchHint: "Search by organisation, address or purpose",
     captureLocation: true,
     yearlyTarget: true,   // 2 per level per academic year (api/targets.py)
+    rowActions: [{ action: "view", roles: ["PR"] }],
     columns: [
       { key: "reporting_date", label: "Date" },
       { key: "organisation_name", label: "Organisation" },
@@ -693,6 +694,7 @@ export const MODULES = {
     searchHint: "Search by topic or lecturer",
     captureLocation: true,
     yearlyTarget: true,   // 15 per level per academic year (api/targets.py)
+    rowActions: [{ action: "view", roles: ["PR"] }],
     columns: [
       { key: "reporting_date", label: "Date" },
       { key: "lecturer_name", label: "Lecturer" },

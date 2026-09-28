@@ -7,6 +7,7 @@ import DateInput from "./DateInput";
 import { toDMY } from "../lib/dates";
 import { useLocationFix, locationPayload, locationErrorMessage } from "../lib/location";
 import { staticOptionsFor, enumList, splitList, joinList, optionText } from "../lib/fieldOptions";
+import { useReviewGate, ReviewNotice, reviewLabel } from "./ReviewGate";
 
 // display label for an async-loaded option row
 const displayFor = (row) =>
@@ -110,6 +111,8 @@ export default function ResourceForm({
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState("");
   const [locating, setLocating] = useState(false);
+  const review = useReviewGate();
+  const drawerRef = useRef(null);
   const loc = useLocationFix();
   // a trainer's new record is stamped with where they were (never shown here)
   const needsLocation = !!mod.captureLocation && isNew && role === "VT";
@@ -317,6 +320,9 @@ export default function ResourceForm({
       first?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
+    // first press: back to the top to look it all over; Submit unlocks after 30s
+    if (!review.reviewing) { review.start(drawerRef.current); return; }
+    if (!review.ready) return;
     const payload = {};
     for (const f of fields) {
       // A branch that isn't on screen isn't part of this record: clear it, so
@@ -509,7 +515,7 @@ export default function ResourceForm({
 
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <form className="drawer" onSubmit={submit}>
+      <form className="drawer" onSubmit={submit} ref={drawerRef}>
         <header>
           <div>
             <h3 style={{ margin: 0 }}>{initial ? "Edit" : "New"} {mod.singular}</h3>
@@ -518,6 +524,7 @@ export default function ResourceForm({
           <button type="button" className="close" onClick={onClose}>×</button>
         </header>
         <div className="body">
+          <ReviewNotice gate={review} locked={boot?.resources?.[resource]?.can_edit === false} />
           {isSA && orgScoped && (
             <div className="prefill-note">🏢 Select the organisation first — dependent lists load for that organisation.</div>
           )}
@@ -560,8 +567,8 @@ export default function ResourceForm({
         {formError && <div className="form-error" role="alert">📍 {formError}</div>}
         <footer>
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving || locating}>
-            {locating ? "Getting your location…" : saving ? "Saving…" : initial ? "Save changes" : `Create ${mod.singular}`}
+          <button type="submit" className="btn btn-primary" disabled={saving || locating || (review.reviewing && !review.ready)}>
+            {locating ? "Getting your location…" : reviewLabel(review, { busy: saving })}
           </button>
         </footer>
       </form>

@@ -95,11 +95,26 @@ class ResourceConfig:
     # (A role in write_roles but not here can add records and nothing more.)
     edit_roles: Optional[List[str]] = None
 
+    def locked_for(self, role):
+        """A saved record this role may no longer change (see LOCKED_AFTER_SAVE)."""
+        return role in LOCKED_AFTER_SAVE and self.name not in PEOPLE_DATA
+
     def can_edit(self, role):
+        if self.locked_for(role):
+            return False
         return role in (self.write_roles if self.edit_roles is None else self.edit_roles)
 
 
 REGISTRY = {}
+
+# Trainers and principals can't edit (or delete) a saved record - attendance,
+# visits, lectures, equipment, maintenance, issues ... - their forms ask for a
+# 30-second review before saving instead. Only people's details stay editable
+# (students here; their own profile via /api/profile). Admins can still
+# correct set-up data (schools, labs, users ...).
+LOCKED_AFTER_SAVE = {"VT", "PR"}
+PEOPLE_DATA = {"students", "trainers", "principals"}
+LOCKED_MESSAGE = "Saved records can't be edited or deleted."
 
 
 def register(cfg: ResourceConfig):

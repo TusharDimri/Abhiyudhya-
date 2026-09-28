@@ -13,6 +13,7 @@ import Filters from "./Filters";
 import TargetProgress from "./TargetProgress";
 import PromoteDialog from "./PromoteDialog";
 import StudentHistory from "./StudentHistory";
+import RecordView from "./RecordView";
 import { DistanceLegend, EndorsementLegend } from "./DistanceDot";
 import { visibleFilters, visibleColumns } from "../lib/scope";
 import { EMPTY_HINTS } from "../lib/roleUi";
@@ -50,7 +51,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
 
   const perm = boot?.resources?.[resource];
   const canWrite = perm?.can_write && !readOnly;            // may add
-  const canEdit = canWrite && perm?.can_edit !== false;       // may change / delete
+  const canEdit = canWrite && perm?.can_edit !== false;       // may change (nothing is ever deleted)
   // a role may be offered just the filters that matter to it
   const roleFilters = mod?.filtersFor?.[user?.role];
   const filterCols = (perm?.filters || []).filter((c) => !roleFilters || roleFilters.includes(c));
@@ -157,16 +158,6 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     onError: (e) => push(apiError(e), "error"),
   });
 
-  const del = useMutation({
-    mutationFn: async (row) => api.delete(`/${resource}/${row.id}`),
-    onSuccess: () => {
-      push("Deleted", "success");
-      qc.invalidateQueries({ queryKey: ["list", resource] });
-      qc.invalidateQueries({ queryKey: ["targets", resource] });
-    },
-    onError: (e) => push(apiError(e), "error"),
-  });
-
   if (!mod) return <div className="card card-pad">Unknown module: {resource}</div>;
 
   const onSort = (key) => {
@@ -265,7 +256,6 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         canWrite={canEdit}
         rowActions={rowActions}
         onEdit={(r) => setEditing(r)}
-        onDelete={(r) => window.confirm(`Delete this ${mod.singular}?`) && del.mutate(r)}
         onRowAction={(action, r) => setWorkflow({ action, row: r })}
         emptyHint={EMPTY_HINTS[resource]?.[user?.role]}
         emptyAction={canWrite && !hideCreate ? `New ${mod.singular}` : null}
@@ -316,7 +306,11 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         <StudentHistory row={workflow.row} onClose={() => setWorkflow(null)} />
       )}
 
-      {workflow && workflow.action !== "history" && (
+      {workflow?.action === "view" && (
+        <RecordView mod={mod} resource={resource} row={workflow.row} onClose={() => setWorkflow(null)} />
+      )}
+
+      {workflow && !["history", "view"].includes(workflow.action) && (
         <WorkflowDialog
           resource={resource}
           action={workflow.action}
