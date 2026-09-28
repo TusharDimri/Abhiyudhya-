@@ -280,6 +280,8 @@ def change_status(uid):
     else:
         if s.enrolment_status not in LEAVING:
             abort(400, description=f"{s.full_name} is {s.enrolment_status.lower()} - only a student who left can rejoin.")
+        if s.enrolment_status == "Transferred Out":
+            abort(400, description=f"{s.full_name} was transferred out to another school and can't rejoin here.")
         s.left_on, s.left_reason = None, None
     s.enrolment_status = status
     s.updated_by = user.id

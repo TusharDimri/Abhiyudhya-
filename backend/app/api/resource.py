@@ -163,6 +163,21 @@ LOCATION_NEEDED = ("We need your location to save this. Click \u201cDetect My Lo
                    "at the top of the page and allow location access.")
 
 
+def _missing_required(cfg, obj, payload=None):
+    """The required fields left empty: all of them for a new record; for an
+    edit (payload given) only the ones it tries to blank."""
+    missing = []
+    for name, label in cfg.required.items():
+        if payload is not None:
+            sent = name in payload or (name == "location" and ("location_lat" in payload or "location_lng" in payload))
+            if not sent:
+                continue
+        if getattr(obj, name, None) in (None, ""):
+            missing.append(label)
+    if missing:
+        abort(400, description="Please fill in: " + ", ".join(missing) + ".")
+
+
 def _set_manual_location(obj, payload):
     """A point typed in (or picked) by an admin, sent as location_lat /
     location_lng. Both blank clears it; absent leaves it as it is."""
@@ -344,7 +359,31 @@ def get_resource(resource, uid):
         abort(404)
     if not can_access_row(obj, user):
         abort(403, description="Outside your scope")
-    return jsonify(_for_viewing(cfg, _serialise(cfg, obj)))
+    data = _for_viewing(cfg, _serialise(cfg, obj))
+    if cfg.profile_role and cfg.can_edit(user.role):
+        from app.api.profile import admin_profile_view
+        data.update(admin_profile_view(cfg.profile_role, obj))
+    return jsonify(data)
+
+
+def _apply_profile(cfg, obj, payload, user):
+    """The profile part of an admin's trainer / principal form."""
+    from app.api.profile import Invalid, apply_admin_profile
+    try:
+        apply_admin_profile(cfg.profile_role, obj, payload, user, base_fields=cfg.writable)
+    except Invalid as exc:
+        db.session.rollback()
+        abort(400, description=str(exc))
+    db.session.flush()
+
+
+def _create_login(cfg, obj, user):
+    from app.api.users import LoginError, create_login_for
+    try:
+        return create_login_for(cfg.profile_role, obj, user)
+    except LoginError as exc:
+        db.session.rollback()
+        abort(400, description=str(exc))
 
 
 def _for_viewing(cfg, data):
@@ -404,6 +443,7 @@ def create_resource(resource):
         _capture_location(obj, payload, user)
     if cfg.manual_location:
         _set_manual_location(obj, payload)
+    _missing_required(cfg, obj)
     if hasattr(obj, "created_by"):
         obj.created_by = user.id
     db.session.add(obj)
@@ -418,6 +458,11 @@ def create_resource(resource):
 
     if cfg.children:
         _write_children(cfg, obj, payload, user)
+    if cfg.profile_role:
+        _apply_profile(cfg, obj, payload, user)
+    # a new trainer / principal gets their login now; its password goes back
+    # in this one response and is never shown again
+    login = _create_login(cfg, obj, user) if cfg.profile_role and not obj.user_id else None
 
     # Verify the newly created row is inside the creator's scope.
     if not can_access_row(obj, user):
@@ -426,7 +471,10 @@ def create_resource(resource):
 
     audit.record(user, "create", cfg.model.__tablename__, obj.id, after=obj.to_dict())
     db.session.commit()
-    return jsonify(_serialise(cfg, obj)), 201
+    out = _serialise(cfg, obj)
+    if login:
+        out["login"] = login
+    return jsonify(out), 201
 
 
 @bp.route("/<resource>/<uid>", methods=["PUT", "PATCH"])
@@ -459,6 +507,7 @@ def update_resource(resource, uid):
             setattr(obj, k, _coerce(cfg.model, k, payload[k]))
     if cfg.manual_location:
         _set_manual_location(obj, payload)
+    _missing_required(cfg, obj, payload)
     if hasattr(obj, "updated_by"):
         obj.updated_by = user.id
     db.session.flush()
@@ -471,6 +520,8 @@ def update_resource(resource, uid):
 
     if cfg.children:
         _write_children(cfg, obj, payload, user)
+    if cfg.profile_role:
+        _apply_profile(cfg, obj, payload, user)
 
     if not can_access_row(obj, user):
         db.session.rollback()

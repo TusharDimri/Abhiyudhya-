@@ -11,13 +11,14 @@ const STATUSES = [
 /* How far each level is towards its yearly target (15 guest lectures / 2
    field visits per level per academic year). Clicking a level narrows the
    table below to exactly the records that count towards it. */
-export default function TargetProgress({ resource, onPick, picked }) {
+export default function TargetProgress({ resource, onPick, picked, schoolId }) {
   const [year, setYear] = useState("");
   const [status, setStatus] = useState("");
 
   const params = new URLSearchParams();
   if (year) params.set("academic_year", year);
   if (status) params.set("status", status);
+  if (schoolId) params.set("school_id", schoolId);
   const q = useQuery({
     queryKey: ["targets", resource, params.toString()],
     queryFn: async () => (await api.get(`/targets/${resource}?${params}`)).data,

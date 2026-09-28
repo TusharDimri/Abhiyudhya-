@@ -382,6 +382,56 @@ def _serialise(kind, rec):
     return data
 
 
+def _write_lists(kind, rec, payload, user):
+    """Replace the profile's tables (qualifications, experience ...) sent in
+    the payload; a table not sent is left alone, blank rows are skipped."""
+    fk = kind["parent_fk"]
+    for key, (model, fields) in kind["lists"].items():
+        if key not in payload:
+            continue
+        items = payload.get(key) or []
+        if not isinstance(items, list):
+            raise Invalid(f"{key} must be a list.")
+        rows = [_row(model, fields, it) for it in items if isinstance(it, dict)]
+        rows = [r for r in rows if any(v not in (None, "") for v in r.values())]  # skip blank rows
+        db.session.query(model).filter(getattr(model, fk) == rec.id).delete()
+        for r in rows:
+            db.session.add(model(organisation_id=rec.organisation_id, created_by=user.id,
+                                 **{fk: rec.id}, **r))
+
+
+# ------------------------------------------------- an admin filling it in
+def admin_profile_view(role, rec):
+    """The profile fields and tables of a trainer / principal, for the admin's
+    add-and-edit form (sensitive numbers masked, pictures as links)."""
+    kind = PROFILES[role]
+    data = _serialise(kind, rec)
+    keys = kind["fields"] | set(kind["lists"]) | {k.replace("_url", "_src") for k in kind["pictures"]}
+    return {k: data.get(k) for k in keys}
+
+
+def apply_admin_profile(role, rec, payload, user, base_fields=()):
+    """Save the profile part of an admin's trainer / principal form. Same
+    checks as the profile page, except an admin may change locked details.
+    A section only has to be complete once something beyond the basic record
+    (`base_fields`: name, contact, posting) has been filled in it. Raises
+    Invalid."""
+    kind = PROFILES[role]
+    for name, value in payload.items():
+        if name not in kind["fields"]:
+            continue
+        if name in kind["sensitive"] and value is not None and value == mask(getattr(rec, name)):
+            continue  # the masked value the form was shown - keep what is stored
+        setattr(rec, name, _field(name, value))
+    for section in kind["sections"].values():
+        started = [f for f in section["fields"] - set(base_fields) if getattr(rec, f) not in (None, "")]
+        if started:
+            missing = [FIELD_LABELS.get(f, f) for f in section["required"] if getattr(rec, f) in (None, "")]
+            if missing:
+                raise Invalid("Please fill in: " + ", ".join(missing) + ".")
+    _write_lists(kind, rec, payload, user)
+
+
 @bp.get("")
 @login_required
 @cached_json("profile", ttl=120)
@@ -415,19 +465,7 @@ def update_profile():
                 if missing:
                     raise Invalid("Please fill in: " + ", ".join(missing) + ".")
 
-        fk = kind["parent_fk"]
-        for key, (model, fields) in kind["lists"].items():
-            if key not in payload:
-                continue
-            items = payload.get(key) or []
-            if not isinstance(items, list):
-                raise Invalid(f"{key} must be a list.")
-            rows = [_row(model, fields, it) for it in items if isinstance(it, dict)]
-            rows = [r for r in rows if any(v not in (None, "") for v in r.values())]  # skip blank rows
-            db.session.query(model).filter(getattr(model, fk) == rec.id).delete()
-            for r in rows:
-                db.session.add(model(organisation_id=rec.organisation_id, created_by=user.id,
-                                     **{fk: rec.id}, **r))
+        _write_lists(kind, rec, payload, user)
     except Invalid as exc:
         db.session.rollback()
         abort(400, description=str(exc))

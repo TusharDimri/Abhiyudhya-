@@ -22,7 +22,7 @@ Each ResourceConfig declares:
 """
 import re
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Dict
 
 from app import models as M
 from app.rbac.roles import Role
@@ -88,9 +88,15 @@ class ResourceConfig:
     manual_location: bool = False
     # sensitive fields sent out masked; the masked value coming back means "unchanged"
     masked_fields: List[str] = field(default_factory=list)
+    # a person with a profile page (VT / PR): the admin's form also reads and
+    # writes that profile - personal, bank, qualifications ... (api/profile.py)
+    profile_role: Optional[str] = None
     # fills in what a new record needs before it is first saved (e.g. whose
     # school it belongs to): (instance, user) -> error message or None
     prepare: Optional[Callable] = None
+    # fields a new record must have ({field: label}; the form stars the same
+    # ones). An edit may not blank them either. "location" = the map point.
+    required: Dict[str, str] = field(default_factory=dict)
     # roles that may edit / delete / restore existing records; None = write_roles.
     # (A role in write_roles but not here can add records and nothing more.)
     edit_roles: Optional[List[str]] = None
@@ -107,12 +113,13 @@ class ResourceConfig:
 
 REGISTRY = {}
 
-# Trainers and principals can't edit (or delete) a saved record - attendance,
-# visits, lectures, equipment, maintenance, issues ... - their forms ask for a
-# 30-second review before saving instead. Only people's details stay editable
-# (students here; their own profile via /api/profile). Admins can still
-# correct set-up data (schools, labs, users ...).
-LOCKED_AFTER_SAVE = {"VT", "PR"}
+# Trainers, principals and org admins can't edit (or delete) a saved record -
+# attendance, visits, lectures, equipment, issues, and for org admins schools,
+# labs and the other set-up lists too. Their forms ask for a 30-second review
+# before saving instead. Only people's details stay editable (students,
+# trainers, principals; one's own profile via /api/profile, logins via
+# Users & Access). The super admin can still correct anything.
+LOCKED_AFTER_SAVE = {"VT", "PR", "OA"}
 PEOPLE_DATA = {"students", "trainers", "principals"}
 LOCKED_MESSAGE = "Saved records can't be edited or deleted."
 
@@ -531,6 +538,12 @@ def _validate_lab(instance, user, is_create=False):
     same role, but each must belong to the band it is filed under."""
     from app.extensions import db
 
+    # sections aren't asked for when a lab is added: each class starts with
+    # Section A and the trainer adds more from Add Students
+    for grade in ("9", "10", "11", "12"):
+        if not instance.sections_for(grade):
+            setattr(instance, f"sections_{grade}", "A")
+
     for field_name, band in (("job_role_9_10_id", "9-10"), ("job_role_11_12_id", "11-12")):
         jr_id = getattr(instance, field_name)
         if not jr_id:
@@ -557,6 +570,7 @@ register(ResourceConfig(
 
 register(ResourceConfig(
     name="states", model=M.State, label="State",
+    required={'name': 'State name', 'code': 'Code'},
     write_roles=[SA, OA],
     writable=["name", "code", "status"],
     search=["name", "code"], filters=[], sortable=["name"],
@@ -565,6 +579,7 @@ register(ResourceConfig(
 
 register(ResourceConfig(
     name="districts", model=M.District, label="District",
+    required={'name': 'District name', 'state_id': 'State'},
     write_roles=[SA, OA],
     writable=["name", "code", "state_id", "status"],
     search=["name", "code"], filters=["state_id"], sortable=["name"],
@@ -573,18 +588,38 @@ register(ResourceConfig(
 
 register(ResourceConfig(
     name="schools", model=M.School, label="School",
+    required={'name': 'School name', 'udise_code': 'UDISE code', 'district_id': 'District', 'school_type': 'School type', 'address': 'Full address', 'location': 'Location'},
+    # a school sits in a district - asked before the first save, so a missing
+    # one gets a clear message rather than a database error
+    prepare=lambda school, user: None if school.district_id else "Choose the school's district.",
     write_roles=[SA, OA, DM],
     writable=["name", "udise_code", "district_id", "block", "principal_id",
               "school_type", "address", "email", "phone", "status"],
     search=["name", "udise_code", "block"],
-    filters=["district_id", "block"],
+    filters=["district_id", "block", "school_type"],
     sortable=["name", "udise_code", "created_at"], default_sort=("name", "asc"),
     computed=lambda o: {"district_name": o.district.name if o.district else None},
     manual_location=True,
 ))
 
+def _link_principal_to_school(instance, user, is_create=False):
+    """Schools are added first and their principal afterwards: the school the
+    principal is posted to records them as its principal."""
+    from app.extensions import db
+
+    if not instance.linked_school_id:
+        return "Choose the principal's school."
+    school = db.session.get(M.School, instance.linked_school_id)
+    if school is not None and instance.status != "inactive" and not instance.date_of_resignation:
+        school.principal_id = instance.id
+    return None
+
+
 register(ResourceConfig(
     name="principals", model=M.Principal, label="Principal / Headmaster",
+    required={'full_name': 'Full name', 'gender': 'Gender', 'mobile': 'Mobile', 'email': 'Email', 'linked_school_id': 'School', 'designation': 'Designation', 'date_of_joining': 'Date of joining'},
+    profile_role=PR,
+    validate=_link_principal_to_school,
     write_roles=[SA, OA, DM],
     writable=["full_name", "mobile", "email", "gender", "years_in_school",
               "date_of_joining", "date_of_resignation", "linked_school_id",
@@ -596,6 +631,7 @@ register(ResourceConfig(
 
 register(ResourceConfig(
     name="labs", model=M.Lab, label="Lab",
+    required={'name': 'Lab name', 'school_id': 'School', 'sector_id': 'Trade / Sector', 'job_role_9_10_id': 'Job role (Class 9-10)', 'job_role_11_12_id': 'Job role (Class 11-12)', 'academic_year_of_setup': 'AY of setup'},
     write_roles=[SA, OA, DM],
     writable=["name", "sector_id", "school_id", "job_role_9_10_id",
               "job_role_11_12_id", "curriculum_level", "sections_per_class",
@@ -609,6 +645,8 @@ register(ResourceConfig(
 
 register(ResourceConfig(
     name="trainers", model=M.Trainer, label="Vocational Trainer",
+    required={'full_name': 'Full name', 'gender': 'Gender', 'email': 'Email', 'phone': 'Mobile no.', 'school_id': 'School', 'lab_id': 'Lab', 'job_role_id': 'Job role', 'date_of_joining': 'Date of joining', 'vtp_name': 'VTP (training provider)'},
+    profile_role=VT,
     write_roles=[SA, OA, DM],
     writable=["full_name", "school_id", "lab_id", "job_role_id", "email", "phone",
               "gender", "date_of_joining", "date_of_exit", "trainer_status",
@@ -623,6 +661,7 @@ register(ResourceConfig(
 # ---- masters ----
 register(ResourceConfig(
     name="academic-years", model=M.AcademicYear, label="Academic Year",
+    required={'label': 'Label', 'start_date': 'Start date', 'end_date': 'End date'},
     write_roles=[SA, OA],
     writable=["label", "start_date", "end_date", "is_current", "status"],
     search=["label"], filters=["is_current"], sortable=["label"],
@@ -630,12 +669,14 @@ register(ResourceConfig(
 ))
 register(ResourceConfig(
     name="sectors", model=M.Sector, label="Sector / Trade",
+    required={'name': 'Sector name'},
     write_roles=[SA, OA, DM],
     writable=["name", "code", "status"], search=["name", "code"],
     filters=[], sortable=["name"], default_sort=("name", "asc"),
 ))
 register(ResourceConfig(
     name="job-roles", model=M.JobRole, label="Job Role",
+    required={'name': 'Job role name', 'sector_id': 'Sector', 'class_band': 'Class band'},
     write_roles=[SA, OA, DM],
     writable=["name", "sector_id", "qp_code", "nsqf_level", "class_band", "status"],
     search=["name", "qp_code"], filters=["sector_id", "nsqf_level", "class_band"],
@@ -644,6 +685,7 @@ register(ResourceConfig(
 ))
 register(ResourceConfig(
     name="social-categories", model=M.SocialCategory, label="Social Category",
+    required={'name': 'Category name'},
     write_roles=[SA, OA],
     writable=["name", "status"], search=["name"], sortable=["name"],
     default_sort=("name", "asc"),
@@ -665,6 +707,44 @@ register(ResourceConfig(
     search=["name"], filters=["module_id"], sortable=["sort_order", "name"],
     default_sort=("sort_order", "asc"),
 ))
+# ?school_id= on records that reach their school through a lab, a piece of
+# equipment or a student (an org admin's lists open one school at a time)
+def _school_uuid(value):
+    import uuid
+    try:
+        return uuid.UUID(str(value))
+    except ValueError:
+        return None
+
+
+def _school_by_lab(query, model, value):
+    from app.extensions import db
+    from sqlalchemy import false
+    value = _school_uuid(value)
+    if value is None:
+        return query.filter(false())
+    return query.filter(model.lab_id.in_(db.session.query(M.Lab.id).filter(M.Lab.school_id == value)))
+
+
+def _school_by_equipment(query, model, value):
+    from app.extensions import db
+    from sqlalchemy import false
+    value = _school_uuid(value)
+    if value is None:
+        return query.filter(false())
+    return query.filter(model.equipment_id.in_(
+        db.session.query(M.LabEquipment.id).filter(M.LabEquipment.school_id == value)))
+
+
+def _school_by_student(query, model, value):
+    from app.extensions import db
+    from sqlalchemy import false
+    value = _school_uuid(value)
+    if value is None:
+        return query.filter(false())
+    return query.filter(model.student_id.in_(db.session.query(M.Student.id).filter(M.Student.school_id == value)))
+
+
 def _any_section(query, model, value):
     """?section=B on a record covering several sections ("A,B"): the ones
     that include B. Several at once (?section=A,C) means any of them."""
@@ -726,6 +806,7 @@ register(ResourceConfig(
 ))
 register(ResourceConfig(
     name="assessments", model=M.Assessment, label="Assessment / Marks",
+    extra_filters={"school_id": _school_by_student},   # ?school_id= (org admins pick a school first)
     write_roles=[SA, OA, DM, VT],
     writable=["student_id", "academic_year", "class_grade", "job_role_id", "nsqf_level",
               "assessment_type", "name", "date", "max_marks", "marks_obtained",
@@ -748,7 +829,7 @@ register(ResourceConfig(
     # past answers but are no longer written.
     writable=["trainer_id", "lab_id", "date", "attendance_time", "photo_url", "details", "status"],
     search=["details"],
-    filters=["trainer_id", "lab_id", "academic_year", "date", "endorsement_status"],
+    filters=["school_id", "trainer_id", "lab_id", "academic_year", "date", "endorsement_status"],
     sortable=["date", "created_at"], default_sort=("date", "desc"),
     computed=_attendance_display,
     validate=_validate_vt_attendance,
@@ -762,7 +843,7 @@ register(ResourceConfig(
     writable=["trainer_id", "lab_id", "job_role_id", "date", "time", "class_grade",
               "sections", "activity", "photo_url", "comment", "status"],
     search=["activity", "comment"],
-    filters=["trainer_id", "lab_id", "academic_year", "class_grade", "section", "date", "endorsement_status"],
+    filters=["school_id", "trainer_id", "lab_id", "academic_year", "class_grade", "section", "date", "endorsement_status"],
     extra_filters={"section": _any_section},
     sortable=["date", "created_at"], default_sort=("date", "desc"),
     computed=_class_attendance_display,
@@ -777,12 +858,13 @@ register(ResourceConfig(
     write_roles=[PR], edit_roles=[],
     writable=["reporting_date", "reporting_time", "details"],
     prepare=_prepare_principal_issue,
-    search=["details"], filters=["workflow_status", "academic_year"],
+    search=["details"], filters=["school_id", "workflow_status", "academic_year"],
     sortable=["reporting_date", "created_at"], default_sort=("reporting_date", "desc"),
     validate=_validate_principal_issue,
 ))
 register(ResourceConfig(
     name="issues", model=M.VTIssue, label="VT Issue",
+    extra_filters={"school_id": _school_by_lab},   # ?school_id= (org admins pick a school first)
     write_roles=[SA, OA, DM, VT],
     writable=["trainer_id", "lab_id", "academic_year", "reporting_date", "reporting_time",
               "details", "workflow_status", "assigned_to", "resolution_note", "status"],
@@ -800,7 +882,7 @@ register(ResourceConfig(
               "picture_url", "contact_person", "contact_mobile", "contact_email",
               "contact_designation", "status"],
     search=["organisation_name", "address", "purpose"],
-    filters=["lab_id", "job_role_id", "academic_year", "class_grade", "section"],
+    filters=["school_id", "lab_id", "job_role_id", "academic_year", "class_grade", "section"],
     extra_filters={"section": _any_section},
     sortable=["reporting_date", "created_at"], default_sort=("reporting_date", "desc"),
     computed=_school_name,
@@ -817,7 +899,7 @@ register(ResourceConfig(
               "lecturer_qualification", "lecturer_phone", "lecturer_email",
               "lecturer_experience", "status"],
     search=["topic", "lecturer_name"],
-    filters=["lab_id", "academic_year", "class_grade", "section"],
+    filters=["school_id", "lab_id", "academic_year", "class_grade", "section"],
     extra_filters={"section": _any_section},
     sortable=["reporting_date", "created_at"], default_sort=("reporting_date", "desc"),
     computed=_school_name,
@@ -831,7 +913,7 @@ register(ResourceConfig(
     write_roles=[SA, OA, DM, VT],
     writable=["trainer_id", "lab_id", "name", "receipt_date", "details",
               "photo_url", "note", "status"],
-    search=["name", "details", "note"], filters=["lab_id", "trainer_id"],
+    search=["name", "details", "note"], filters=["school_id", "lab_id", "trainer_id"],
     sortable=["name", "receipt_date", "created_at"], default_sort=("created_at", "desc"),
     computed=_equipment_display,
     validate=_validate_equipment,
@@ -839,6 +921,7 @@ register(ResourceConfig(
 ))
 register(ResourceConfig(
     name="equipment-maintenance", model=M.EquipmentMaintenance, label="Maintenance Log",
+    extra_filters={"school_id": _school_by_equipment},   # ?school_id= (org admins pick a school first)
     write_roles=[SA, OA, DM, VT],
     writable=["equipment_id", "date", "issue", "maintenance_status", "note", "status"],
     search=["issue", "note"], filters=["equipment_id", "maintenance_status"],
@@ -881,6 +964,7 @@ register(ResourceConfig(
 ))
 register(ResourceConfig(
     name="ojt-placements", model=M.OJTPlacement, label="OJT / Placement",
+    extra_filters={"school_id": _school_by_student},   # ?school_id= (org admins pick a school first)
     write_roles=[SA, OA, DM, VT],
     writable=["student_id", "academic_year", "job_role_id", "ojt_hours_logged",
               "ojt_hours_required", "ojt_establishment", "ojt_start", "ojt_end",

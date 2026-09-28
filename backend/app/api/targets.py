@@ -54,6 +54,8 @@ def progress(resource):
     labs_q = db.session.query(Lab).filter(Lab.is_deleted.is_(False))
     if request.args.get("lab_id"):
         labs_q = labs_q.filter(Lab.id == request.args["lab_id"])
+    if request.args.get("school_id"):   # an org admin looks at one school at a time
+        labs_q = labs_q.filter(Lab.school_id == request.args["school_id"])
     labs = apply_scope(labs_q, Lab, user).order_by(Lab.name).all()
     lab_ids = [lab.id for lab in labs]
     schools = {

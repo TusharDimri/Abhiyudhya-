@@ -6,7 +6,10 @@ import api, { tokens, setUnauthorizedHandler } from "./api";
 // location fix - must be gone before the next one sees a single screen.
 function forgetSession(queryClient) {
   queryClient.clear();
-  try { sessionStorage.removeItem("rnaf.location"); } catch { /* nothing kept */ }
+  try {
+    sessionStorage.removeItem("rnaf.location");
+    sessionStorage.removeItem("rnaf.orgScope");   // the district / school an org admin had picked
+  } catch { /* nothing kept */ }
 }
 
 const AuthCtx = createContext(null);

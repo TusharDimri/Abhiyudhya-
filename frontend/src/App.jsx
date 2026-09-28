@@ -1,7 +1,7 @@
 import { Suspense, lazy } from "react";
 import { Routes, Route, Navigate, useParams, useLocation } from "react-router-dom";
 import { useAuth } from "./lib/auth";
-import { isSectionHidden, MODULES, MASTER_GROUP } from "./lib/modules";
+import { isSectionHidden, MODULES, MASTER_GROUP, groupOf } from "./lib/modules";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 
@@ -42,7 +42,7 @@ function SectionRoute() {
   const { search } = useLocation();
   if (isSectionHidden(user?.role, resource)) return <Navigate to="/app/dashboard" replace />;
   // master-data lists live on the tabbed Master Data page
-  if (MODULES[resource]?.group === MASTER_GROUP) return <Navigate to={`/app/master/${resource}${search}`} replace />;
+  if (groupOf(MODULES[resource], user?.role) === MASTER_GROUP) return <Navigate to={`/app/master/${resource}${search}`} replace />;
   // a trainer's Students page: View / Manage tabs, adding many at once
   if (resource === "students" && user?.role === "VT") return <StudentsHub />;
   return <ResourcePage />;

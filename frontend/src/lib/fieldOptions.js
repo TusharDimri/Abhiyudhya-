@@ -34,6 +34,7 @@ export function staticOptionsFor(field, boot) {
   if (field.options) return field.options.map(normalise);
   if (field.optionsKey && boot?.options?.[field.optionsKey]) {
     return boot.options[field.optionsKey].map((o) => ({
+      ...o,   // keeps e.g. a lab's school_id, so a list can be narrowed to one school
       value: field.valueKey ? o[field.valueKey] ?? o.value : o.value,
       label: field.labelKey ? o[field.labelKey] ?? o.label : o.label,
     }));

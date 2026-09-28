@@ -5,6 +5,7 @@ import { useToast } from "../../lib/toast";
 import { useBootstrap } from "../../hooks/useBootstrap";
 import { toDMY } from "../../lib/dates";
 import { useReviewGate, ReviewNotice, reviewLabel } from "../../components/ReviewGate";
+import LoginCreated from "../../components/LoginCreated";
 
 const ROLE_LABELS = {
   SA: "Super Admin", OA: "Organisation Admin", DM: "District Manager",
@@ -105,6 +106,7 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   const review = useReviewGate();
   const drawerRef = useRef(null);
+  const [made, setMade] = useState(null);   // the login just created, to hand over
   const bootOpts = boot?.options || {};
   const orgOptions = bootOpts.organisations || [];
 
@@ -124,7 +126,7 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
 
   const create = useMutation({
     mutationFn: async () => api.post("/users", { ...f, must_change_password: true }),
-    onSuccess: () => { push("User created", "success"); onDone(); },
+    onSuccess: () => { push("User created", "success"); setMade({ name: f.full_name, username: f.email.trim().toLowerCase(), password: f.password }); },
     onError: (e) => push(apiError(e), "error"),
   });
 
@@ -132,6 +134,12 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
   const needsLab = f.role === "VT";
   const needsDistrict = f.role === "DM";
   const orgLocked = isSA && f.role !== "SA" && !f.organisation_id;
+  // every starred field has an answer (the server checks the same)
+  const requiredFilled = f.full_name.trim() && f.email.trim()
+    && (!needsSchool || f.school_id) && (!needsLab || f.lab_ids.length) && (!needsDistrict || f.district_ids.length);
+
+  // saved: the same side form now shows what to hand over
+  if (made) return <LoginCreated {...made} onDone={onDone} />;
 
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -139,7 +147,7 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
         <header><h3 style={{ margin: 0 }}>New User</h3><button className="close" onClick={onClose}>×</button></header>
         <div className="body">
           <ReviewNotice gate={review} />
-          <div className="field"><label>Role</label>
+          <div className="field"><label>Role <span className="req">*</span></label>
             <select className="select" value={f.role} onChange={(e) => set("role", e.target.value)}>
               {roles.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
             </select>
@@ -152,14 +160,14 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
               </select>
             </div>
           )}
-          <div className="field"><label>Full name</label><input className="input" value={f.full_name} onChange={(e) => set("full_name", e.target.value)} /></div>
+          <div className="field"><label>Full name <span className="req">*</span></label><input className="input" value={f.full_name} onChange={(e) => set("full_name", e.target.value)} /></div>
           <div className="field"><label>Email <span className="req">*</span></label><input className="input" type="email" value={f.email} onChange={(e) => set("email", e.target.value)} /></div>
           <div className="field"><label>Temporary password <span className="req">*</span></label>
             <input className="input" type="text" value={f.password} onChange={(e) => set("password", e.target.value)} placeholder="Min 8 chars, letters + number" />
             <span className="hint">User will be asked to change it on first login.</span>
           </div>
           {needsSchool && (
-            <div className="field"><label>School</label>
+            <div className="field"><label>School <span className="req">*</span></label>
               <select className="select" value={f.school_id} disabled={orgLocked} onChange={(e) => set("school_id", e.target.value)}>
                 <option value="">{orgLocked ? "Select organisation first" : "— Select —"}</option>
                 {(opts.schools || []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -167,7 +175,7 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
             </div>
           )}
           {needsLab && (
-            <div className="field"><label>Lab(s)</label>
+            <div className="field"><label>Lab(s) <span className="req">*</span></label>
               <select className="select" multiple value={f.lab_ids} disabled={orgLocked} onChange={(e) => set("lab_ids", [...e.target.selectedOptions].map((o) => o.value))}>
                 {(opts.labs || []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
@@ -175,7 +183,7 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
             </div>
           )}
           {needsDistrict && (
-            <div className="field"><label>District(s)</label>
+            <div className="field"><label>District(s) <span className="req">*</span></label>
               <select className="select" multiple value={f.district_ids} disabled={orgLocked} onChange={(e) => set("district_ids", [...e.target.selectedOptions].map((o) => o.value))}>
                 {(opts.districts || []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
@@ -186,7 +194,7 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary"
             onClick={() => (review.reviewing ? create.mutate() : review.start(drawerRef.current))}
-            disabled={create.isPending || orgLocked || !f.email || f.password.length < 8 || (review.reviewing && !review.ready)}>
+            disabled={create.isPending || orgLocked || !requiredFilled || f.password.length < 8 || (review.reviewing && !review.ready)}>
             {reviewLabel(review, { busy: create.isPending, busyText: "Creating…", submitText: "Create user" })}
           </button>
         </footer>

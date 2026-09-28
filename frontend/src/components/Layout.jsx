@@ -2,7 +2,7 @@ import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useBootstrap } from "../hooks/useBootstrap";
-import { MODULES, NAV_GROUPS, NAV_GROUP_ORDER, MASTER_GROUP, isSectionHidden } from "../lib/modules";
+import { MODULES, NAV_GROUPS, NAV_GROUP_ORDER, MASTER_GROUP, isSectionHidden, groupOf } from "../lib/modules";
 import LocationButton from "./LocationButton";
 import ScopeBadges from "./ScopeBadges";
 
@@ -37,7 +37,7 @@ export default function Layout() {
   const grouped = {};
   for (const [key, mod] of Object.entries(MODULES)) {
     if (!visible[key] || isSectionHidden(user?.role, key)) continue;
-    (grouped[mod.group] ||= []).push({ key, ...mod });
+    (grouped[groupOf(mod, user?.role)] ||= []).push({ key, ...mod });
   }
   const adminLinks = ADMIN_LINKS.filter((l) => l.roles.includes(user?.role));
   // each role opens on the section it actually works in

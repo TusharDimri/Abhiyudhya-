@@ -1,7 +1,7 @@
 import { NavLink, Navigate, useLocation, useParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useBootstrap } from "../hooks/useBootstrap";
-import { MASTER_GROUP, visibleModules } from "../lib/modules";
+import { MASTER_GROUP, visibleModules, groupOf } from "../lib/modules";
 import ResourcePage from "./ResourcePage";
 
 /* Every master-data list (schools, labs, job roles …) on one page, one tab
@@ -12,7 +12,7 @@ export default function MasterData() {
   const { data: boot } = useBootstrap();
   const { search } = useLocation();
 
-  const tabs = visibleModules(boot, user?.role).filter(([, m]) => m.group === MASTER_GROUP);
+  const tabs = visibleModules(boot, user?.role).filter(([, m]) => groupOf(m, user?.role) === MASTER_GROUP);
   if (!boot) return null;
   if (!tabs.length) return <Navigate to="/app/dashboard" replace />;
   if (!resource || !tabs.some(([k]) => k === resource)) {

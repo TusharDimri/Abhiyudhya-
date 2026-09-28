@@ -2,7 +2,9 @@ import { useState, useEffect, useMemo } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
-import { MODULES } from "../lib/modules";
+import { MODULES, groupOf, ORG_ADMIN_SCOPE } from "../lib/modules";
+import { useOrgScope } from "../lib/orgScope";
+import ScopePicker, { ScopeEmpty } from "./ScopePicker";
 import { useBootstrap } from "../hooks/useBootstrap";
 import { useAuth } from "../lib/auth";
 import { useToast } from "../lib/toast";
@@ -14,6 +16,7 @@ import TargetProgress from "./TargetProgress";
 import PromoteDialog from "./PromoteDialog";
 import StudentHistory from "./StudentHistory";
 import RecordView from "./RecordView";
+import LoginCreated from "./LoginCreated";
 import { DistanceLegend, EndorsementLegend } from "./DistanceDot";
 import { visibleFilters, visibleColumns } from "../lib/scope";
 import { EMPTY_HINTS } from "../lib/roleUi";
@@ -46,8 +49,15 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
 
   const [editing, setEditing] = useState(null);
   const [workflow, setWorkflow] = useState(null);
+  const [newLogin, setNewLogin] = useState(null);   // a login just made with a new trainer / principal
   const [pageAction, setPageAction] = useState(null);
   const [searchInput, setSearchInput] = useState(sp.get("q") || "");
+
+  // an org admin picks a district, then a school, before anything is listed
+  const [orgScope, setOrgScope] = useOrgScope();
+  const gate = user?.role === "OA" ? ORG_ADMIN_SCOPE[resource] : null;
+  const gateValue = gate ? orgScope[`${gate.needs}_id`] : null;
+  const gateOpen = !gate || !!gateValue;
 
   const perm = boot?.resources?.[resource];
   const canWrite = perm?.can_write && !readOnly;            // may add
@@ -133,14 +143,15 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     if (sort) { p.set("sort", sort); p.set("order", order); }
     for (const [k, v] of Object.entries(filterValues)) if (v !== "" && k !== "new") p.set(k, v);
     if (isSA && orgFilter && orgScoped) p.set("organisation_id", orgFilter);
+    if (gate && gateValue) p.set(gate.param, gateValue);
     return p.toString();
-  }, [page, pageSize, q, sort, order, filterValues, isSA, orgFilter, orgScoped]);
+  }, [page, pageSize, q, sort, order, filterValues, isSA, orgFilter, orgScoped, gate, gateValue]);
 
   const list = useQuery({
     queryKey: ["list", resource, apiParams],
     queryFn: async () => (await api.get(`/${resource}?${apiParams}`)).data,
     placeholderData: keepPreviousData,
-    enabled: !!mod,
+    enabled: !!mod && gateOpen,
   });
 
   const save = useMutation({
@@ -148,8 +159,9 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
       editing?.id
         ? (await api.put(`/${resource}/${editing.id}`, payload)).data
         : (await api.post(`/${resource}`, payload)).data,
-    onSuccess: () => {
+    onSuccess: (saved) => {
       push(editing?.id ? "Saved changes" : `${mod.singular} created`, "success");
+      if (saved?.login) setNewLogin({ name: saved.full_name, ...saved.login });
       setEditing(null);
       qc.invalidateQueries({ queryKey: ["list", resource] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
@@ -157,6 +169,17 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     },
     onError: (e) => push(apiError(e), "error"),
   });
+
+  // some records (a trainer's, a principal's) carry more than the list row
+  // shows - their profile and tables - so the edit form opens the whole record
+  const openEdit = async (r) => {
+    if (!mod?.fetchOnEdit) { setEditing(r); return; }
+    try {
+      setEditing((await api.get(`/${resource}/${r.id}`)).data);
+    } catch (e) {
+      push(apiError(e), "error");
+    }
+  };
 
   if (!mod) return <div className="card card-pad">Unknown module: {resource}</div>;
 
@@ -167,7 +190,8 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
 
   // With no search box the page size sits at the end of the filters row
   // instead of alone on a row of its own.
-  const showSearch = mod.searchable !== false && (perm?.search?.length ?? 0) > 0;
+  // org admins narrow things down with the district / school picker and filters instead
+  const showSearch = mod.searchable !== false && (perm?.search?.length ?? 0) > 0 && user?.role !== "OA";
   const toolbarRow = showSearch || (isSA && orgScoped);
   const pageSizeBox = (
     <select className="select pagesize" value={pageSize} onChange={(e) => patch({ page_size: e.target.value })} aria-label="Rows per page">
@@ -185,7 +209,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
       {!embedded && (
         <div className="page-head">
           <div>
-            <div className="crumb">{mod.group}</div>
+            <div className="crumb">{groupOf(mod, user?.role)}</div>
             <h1>{mod.icon} {mod.label}</h1>
           </div>
           <div className="page-actions">
@@ -199,8 +223,13 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         </div>
       )}
 
-      {mod.yearlyTarget && (
+      {gate && <ScopePicker needs={gate.needs} scope={orgScope} setScope={(next) => { setOrgScope(next); patch({}); }} boot={boot} />}
+
+      {!gateOpen && <ScopeEmpty needs={gate.needs} label={mod.label} />}
+
+      {gateOpen && mod.yearlyTarget && (
         <TargetProgress
+          schoolId={gate?.needs === "school" ? gateValue : undefined}
           resource={resource}
           picked={{ academic_year: sp.get("academic_year"), class_grade: sp.get("class_grade"), lab_id: sp.get("lab_id") }}
           // show exactly the records counted towards that level and year
@@ -208,6 +237,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         />
       )}
 
+      {gateOpen && (<>
       {toolbarRow && (
       <div className="toolbar">
         {showSearch && (
@@ -241,6 +271,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         onChange={(col, val) => patch({ [col]: val })}
         onClear={() => patch(Object.fromEntries(filterCols.map((c) => [c, ""])))}
         aside={toolbarRow ? null : pageSizeBox}
+        schoolId={gate?.needs === "school" ? gateValue : undefined}
       />
 
       {shownColumns.some((c) => c.dot === "distance") && <DistanceLegend />}
@@ -255,7 +286,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         onSort={onSort}
         canWrite={canEdit}
         rowActions={rowActions}
-        onEdit={(r) => setEditing(r)}
+        onEdit={openEdit}
         onRowAction={(action, r) => setWorkflow({ action, row: r })}
         emptyHint={EMPTY_HINTS[resource]?.[user?.role]}
         emptyAction={canWrite && !hideCreate ? `New ${mod.singular}` : null}
@@ -272,6 +303,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         <button className="btn btn-ghost btn-sm" disabled={pg.page >= (pg.pages || 1)} onClick={() => patch({ page: pg.page + 1 }, false)}>Next ›</button>
         <button className="btn btn-ghost btn-sm" disabled={pg.page >= (pg.pages || 1)} onClick={() => patch({ page: pg.pages }, false)}>Last »</button>
       </div>
+      </>)}
 
       {editing !== null && (
         <ResourceForm
@@ -279,7 +311,10 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
           mod={mod}
           initial={editing.id ? editing : null}
           boot={boot}
-          context={formContext}
+          context={gate ? {
+            ...formContext, state_id: orgScope.state_id, district_id: orgScope.district_id,
+            school_id: orgScope.school_id, linked_school_id: orgScope.school_id,
+          } : formContext}
           isSA={isSA}
           orgScoped={orgScoped}
           orgOptions={orgOptions}
@@ -305,6 +340,8 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
       {workflow?.action === "history" && (
         <StudentHistory row={workflow.row} onClose={() => setWorkflow(null)} />
       )}
+
+      {newLogin && <LoginCreated {...newLogin} onDone={() => setNewLogin(null)} />}
 
       {workflow?.action === "view" && (
         <RecordView mod={mod} resource={resource} row={workflow.row} onClose={() => setWorkflow(null)} />

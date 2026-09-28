@@ -64,7 +64,7 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                           {rowActions?.includes("verify") && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("verify", r)}>Verify</button>
                           )}
-                          {rowActions?.includes("status") && r.enrolment_status !== "Completed" && (
+                          {rowActions?.includes("status") && !["Completed", "Transferred Out"].includes(r.enrolment_status) && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("status", r)}>
                               {r.enrolment_status === "Studying" ? "Left?" : "Rejoin"}
                             </button>

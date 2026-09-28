@@ -3,6 +3,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { useAuth } from "../lib/auth";
 import api from "../lib/api";
 import StudentRoster from "./StudentRoster";
+import { RowsInput } from "./ProfileFields";
 import DateInput from "./DateInput";
 import { toDMY } from "../lib/dates";
 import { useLocationFix, locationPayload, locationErrorMessage } from "../lib/location";
@@ -25,7 +26,7 @@ const OPTIONKEY_RESOURCE = {
 };
 
 // Field types that need the full width of the drawer.
-const WIDE = new Set(["textarea", "file", "multiselect", "studentmarks", "geopoint"]);
+const WIDE = new Set(["textarea", "file", "multiselect", "studentmarks", "geopoint", "rows"]);
 
 // A field may cascade off more than one answer (a curriculum module list is
 // narrowed by job role *and* by Employability/Vocational). The first parent
@@ -83,6 +84,7 @@ export default function ResourceForm({
       let val = initial?.[f.name];
       if (f.type === "checkbox") val = !!val;
       else if (f.type === "studentmarks") val = Array.isArray(val) ? val : undefined;
+      else if (f.type === "rows") val = Array.isArray(val) ? val.map(({ id, ...r }) => r) : [];
       else if (val === null || val === undefined) val = "";
       else if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}T/.test(val)) val = val.slice(0, 10);
       // prefill from what we already know about this user (new records only,
@@ -440,6 +442,9 @@ export default function ResourceForm({
         </>
       );
     }
+
+    if (f.type === "rows")
+      return <RowsInput table={f.table} boot={boot} value={val} onChange={(v) => set(f.name, v)} />;
 
     if (f.type === "studentmarks")
       return <StudentRoster field={f} values={values} value={val} onChange={(v) => set(f.name, v)} />;

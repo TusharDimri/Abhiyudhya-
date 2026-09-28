@@ -162,7 +162,7 @@ def test_saved_records_cannot_be_deleted_by_anyone(client, world):
     db.session.add(sa)
     db.session.commit()
     for email in ("vt@x.com", "sa@x.com"):
-        r = client.delete(f"/api/attendance/{rid}", headers=_login(client, email))
+        r = client.delete(f"/api/attendance/{rid}", headers=_as(client, email))
         assert r.status_code == 403 and "can't be deleted" in r.get_json()["message"]
     assert client.get(f"/api/attendance/{rid}", headers=_login(client)).status_code == 200
 
@@ -248,9 +248,25 @@ def test_class_attendance_too_far_is_refused(client, world):
 def test_admin_sets_a_schools_location(client, world):
     oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
     oa.set_password("Password@123")
-    db.session.add(oa)
+    sa = User(full_name="SA", email="sa@x.com", role="SA")
+    sa.set_password("Password@123")
+    db.session.add_all([oa, sa])
     db.session.commit()
-    h = _login(client, email="oa@x.com")
+    # an org admin gives the location when adding the school, and can't change a saved one
+    oa_h = _login(client, email="oa@x.com")
+    made = client.post("/api/schools", headers=oa_h, json={
+        "name": "New School", "udise_code": "27999999999", "location_lat": 18.6, "location_lng": 73.9})
+    assert made.status_code == 400 and "district" in made.get_json()["message"]
+    made = client.post("/api/schools", headers=oa_h, json={
+        "name": "New School", "udise_code": "27999999999", "district_id": str(world["school"].district_id),
+        "school_type": "Co-education", "address": "Main Road",
+        "location_lat": 18.6, "location_lng": 73.9})
+    assert made.status_code == 201, made.get_json()
+    assert (made.get_json()["location_lat"], made.get_json()["location_lng"]) == (18.6, 73.9)
+    locked = client.patch(f"/api/schools/{made.get_json()['id']}", headers=oa_h, json={"phone": "020-1"})
+    assert locked.status_code == 403 and "can't be edited" in locked.get_json()["message"]
+    # the super admin can still correct it
+    h = _as(client, "sa@x.com")
     url = f"/api/schools/{world['school'].id}"
     r = client.patch(url, headers=h, json={"location_lat": 18.5204, "location_lng": 73.8567})
     assert r.status_code == 200, r.get_json()
@@ -314,6 +330,29 @@ def test_sessions_can_be_listed_by_module(client, world):
     assert [s["name"] for s in r.get_json()["data"]] == ["S1"]
 
 
+def _trainer_body(world, **extra):
+    return {"full_name": "A Trainer", "gender": "Female", "email": "a.trainer@x.com", "phone": "9876500001",
+            "school_id": str(world["school"].id), "lab_id": str(world["lab"].id),
+            "job_role_id": str(world["jr_low"].id), "date_of_joining": "2024-06-15", "vtp_name": "Skills Co", **extra}
+
+
+def test_admin_form_needs_the_required_fields(client, world):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    h = _login(client, "oa@x.com")
+    r = client.post("/api/trainers", headers=h, json={"full_name": "Half Done", "school_id": str(world["school"].id)})
+    assert r.status_code == 400
+    assert r.get_json()["message"].startswith("Please fill in:") and "VTP" in r.get_json()["message"]
+    # a district needs its state (the database insists - now with a message, not a crash)
+    r = client.post("/api/districts", headers=h, json={"name": "No State"})
+    assert r.status_code == 400 and "State" in r.get_json()["message"]
+    # a login made from Users & Access needs its school / lab
+    r = client.post("/api/users", headers=h, json={"role": "VT", "full_name": "V", "email": "v@x.com", "password": "Password1"})
+    assert r.status_code == 400 and "School" in r.get_json()["message"] and "Lab" in r.get_json()["message"]
+
+
 def test_one_trainer_per_job_role_in_a_lab(client, world):
     # an org admin adding a second trainer on the same slot is refused
     org = world["org"]
@@ -322,19 +361,55 @@ def test_one_trainer_per_job_role_in_a_lab(client, world):
     db.session.add(oa)
     db.session.commit()
     h = _login(client, "oa@x.com")
-    r = client.post("/api/trainers", headers=h, json={
-        "full_name": "Second VT", "school_id": str(world["school"].id),
-        "lab_id": str(world["lab"].id), "job_role_id": str(world["jr_low"].id),
-    })
+    r = client.post("/api/trainers", headers=h, json=_trainer_body(world, full_name="Second VT", email="second.vt@x.com"))
     assert r.status_code == 400
     assert "already holds this job role" in r.get_json()["message"]
 
     # the other slot is free
-    ok = client.post("/api/trainers", headers=h, json={
-        "full_name": "Senior VT", "school_id": str(world["school"].id),
-        "lab_id": str(world["lab"].id), "job_role_id": str(world["jr_high"].id),
-    })
+    ok = client.post("/api/trainers", headers=h, json=_trainer_body(
+        world, full_name="Senior VT", email="senior.vt@x.com", job_role_id=str(world["jr_high"].id)))
     assert ok.status_code == 201, ok.get_json()
+
+
+def test_admin_adds_a_trainer_with_their_profile(client, world):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    h = _login(client, "oa@x.com")
+    base = _trainer_body(world, full_name="New VT", job_role_id=str(world["jr_high"].id), phone="9876543210",
+                         email="new.vt@x.com")
+    general = {"father_name": "Ramesh", "dob": "1990-04-01", "gender": "Male", "aadhaar_number": "123412341234"}
+    # a started section must be complete, and formats are checked
+    r = client.post("/api/trainers", headers=h, json={**base, **general, "bank_name": "SBI"})
+    assert r.status_code == 400 and "Please fill in" in r.get_json()["message"]
+    r = client.post("/api/trainers", headers=h, json={**base, **general, "beneficiary_name": "New VT", "bank_name": "SBI",
+                                                      "account_number": "123456789012", "ifsc_code": "BAD"})
+    assert r.status_code == 400 and "IFSC" in r.get_json()["message"]
+    r = client.post("/api/trainers", headers=h, json={
+        **base, **general,
+        "qualifications": [{"qualification": "Graduation", "course": "BCA", "institution": "Pune University",
+                            "passing_year": 2012}, {"course": ""}],
+    })
+    assert r.status_code == 201, r.get_json()
+    assert "aadhaar_number" not in r.get_json() and "father_name" not in r.get_json()   # never in the list row
+    tid = r.get_json()["id"]
+    # their login came with it: the email is the username, the password is shown this once
+    login = r.get_json()["login"]
+    assert login["username"] == "new.vt@x.com"
+    signed_in = client.post("/api/auth/login", json={"email": login["username"], "password": login["password"]})
+    assert signed_in.status_code == 200 and signed_in.get_json()["user"]["must_change_password"] is True
+    assert "login" not in client.get(f"/api/trainers/{tid}", headers=h).get_json()
+    # the same email can't make a second login
+    again = client.post("/api/trainers", headers=h, json={**base, "trainer_status": "exited"})
+    assert again.status_code == 400 and "already exists" in again.get_json()["message"]
+    full = client.get(f"/api/trainers/{tid}", headers=h).get_json()
+    assert full["father_name"] == "Ramesh" and full["aadhaar_number"] == "XXXXXXXX1234"
+    assert [q["course"] for q in full["qualifications"]] == ["BCA"]            # the blank row is skipped
+    # sending the masked number back keeps the real one
+    assert client.patch(f"/api/trainers/{tid}", headers=h, json={"aadhaar_number": "XXXXXXXX1234"}).status_code == 200
+    from app.models.lab import Trainer as T
+    assert db.session.get(T, tid).aadhaar_number == "123412341234"
 
 
 def test_lab_slot_rejects_a_job_role_from_the_wrong_band(client, world):
@@ -345,8 +420,9 @@ def test_lab_slot_rejects_a_job_role_from_the_wrong_band(client, world):
     db.session.commit()
     h = _login(client, "oa2@x.com")
     r = client.post("/api/labs", headers=h, json={
-        "name": "Bad Lab", "school_id": str(world["school"].id),
-        "job_role_9_10_id": str(world["jr_high"].id),
+        "name": "Bad Lab", "school_id": str(world["school"].id), "sector_id": str(world["lab"].sector_id),
+        "job_role_9_10_id": str(world["jr_high"].id), "job_role_11_12_id": str(world["jr_high"].id),
+        "academic_year_of_setup": "2024-25",
     })
     assert r.status_code == 400
     assert "cannot fill the 9-10 slot" in r.get_json()["message"]
@@ -766,6 +842,11 @@ def test_student_leaves_and_rejoins(client, world):
     assert db.session.get(Student, a).left_on is None
     # only someone who left can rejoin
     assert client.post(url, headers=h, json={"enrolment_status": "Studying"}).status_code == 400
+    # a student transferred out to another school doesn't rejoin here
+    other = f"/api/promotion/students/{b}/status"
+    assert client.post(other, headers=h, json={"enrolment_status": "Transferred Out", "reason": "Moved school"}).status_code == 200
+    r = client.post(other, headers=h, json={"enrolment_status": "Studying"})
+    assert r.status_code == 400 and "can't rejoin" in r.get_json()["message"]
 
 
 # --------------------------------------------------------------- redis cache

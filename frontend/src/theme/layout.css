@@ -601,3 +601,16 @@ table.data.view-table th, table.data.view-table td { padding: .45rem .7rem; }
 .section-student-actions, .section-leave { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
 .select.select-sm, .input.input-sm { padding: .3rem .5rem; font-size: .8rem; height: auto; width: auto; }
 .section-leave .input-sm { min-width: 10rem; }
+
+/* "Login created": username / password with copy buttons */
+.copy-row { display: flex; gap: .5rem; align-items: center; }
+.copy-row .copy-value { flex: 1; font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: .02em; background: var(--bg-soft); }
+
+/* an org admin's District -> School picker, above each list */
+.scope-bar { display: flex; flex-wrap: wrap; gap: .8rem 1rem; align-items: flex-end; background: #fff;
+  border: 1px solid var(--line); border-radius: 12px; padding: .75rem 1rem; }
+.scope-pick { display: flex; flex-direction: column; gap: .3rem; min-width: 220px; flex: 0 1 300px; }
+.scope-pick > span { font-size: .7rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--navy-700); }
+.scope-empty { display: flex; flex-direction: column; align-items: center; gap: .35rem; padding: 2.2rem 1rem; text-align: center; }
+.scope-empty-ico { font-size: 1.8rem; }
+@media (max-width: 560px) { .scope-pick { min-width: 0; flex: 1 1 100%; } }

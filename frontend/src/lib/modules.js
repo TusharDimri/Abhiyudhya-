@@ -21,6 +21,7 @@ import {
 } from "./fieldOptions";
 import { todayISO } from "./dates";
 import { ISSUE_STATUS_LABELS, VERIFICATION_LABELS } from "./roleUi";
+import { principalProfileFields, trainerProfileFields } from "../components/ProfileFields";
 
 // shared option-key shortcuts
 const SECTOR = { optionsKey: "sectors" };
@@ -207,7 +208,7 @@ export const MODULES = {
     columns: [{ key: "name", label: "Name" }, { key: "code", label: "Code" }],
     fields: [
       { name: "name", label: "State name", required: true },
-      { name: "code", label: "Code" },
+      { name: "code", label: "Code", required: true, placeholder: "e.g. MH" },
     ],
   },
   districts: {
@@ -215,7 +216,7 @@ export const MODULES = {
     columns: [{ key: "name", label: "Name" }, { key: "code", label: "Code" }],
     fields: [
       { name: "name", label: "District name", required: true },
-      { name: "state_id", label: "State", type: "select", optionsKey: "states" },
+      { name: "state_id", label: "State", type: "select", optionsKey: "states", required: true },
       { name: "code", label: "Code" },
     ],
   },
@@ -233,19 +234,14 @@ export const MODULES = {
     fields: [
       { name: "name", label: "School name", required: true, group: "School" },
       { name: "udise_code", label: "UDISE code", required: true, group: "School" },
-      { name: "district_id", label: "District", type: "select", ...DISTRICT, autoFor: ["DM"], group: "School" },
+      { name: "district_id", label: "District", type: "select", ...DISTRICT, required: true, autoFor: ["DM"], group: "School" },
       { name: "block", label: "Block", group: "School" },
-      { name: "school_type", label: "School type", type: "select", enumKey: "school_types", group: "School" },
-      {
-        name: "principal_id", label: "Headmaster / Principal", type: "select",
-        optionsKey: "principals", group: "School",
-        hint: "Add them in Master Data → Principals first if they are not listed.",
-      },
-      { name: "address", label: "Full address", type: "textarea", group: "Contact" },
+      { name: "school_type", label: "School type", type: "select", enumKey: "school_types", required: true, group: "School" },
+      { name: "address", label: "Full address", type: "textarea", required: true, group: "Contact" },
       { name: "email", label: "Email", type: "email", group: "Contact" },
       { name: "phone", label: "Phone", type: "tel", group: "Contact" },
       {
-        name: "location_lat", label: "Location", type: "geopoint", lngField: "location_lng", group: "Location",
+        name: "location_lat", label: "Location", type: "geopoint", lngField: "location_lng", required: true, group: "Location",
         hint: "Trainers can only mark attendance within 1 km of this point. Stand at the school and use your current location, or copy the coordinates from Google Maps (right-click the school).",
       },
       { name: "location_lng", label: "Longitude", hidden: true },
@@ -260,18 +256,24 @@ export const MODULES = {
       { key: "mobile", label: "Mobile" },
       { key: "status", label: "Status", badge: true },
     ],
+    // the edit form needs the whole record (profile, tables), not the list row
+    fetchOnEdit: true,
+    formHint: "Everything on the principal's profile page. Start a section and fill its main fields; the rest can wait.",
     fields: [
-      { name: "full_name", label: "Full name", required: true, group: "Person" },
-      { name: "gender", label: "Gender", type: "select", enumKey: "genders", group: "Person" },
-      { name: "mobile", label: "Mobile", type: "tel", group: "Person" },
-      { name: "email", label: "Email", type: "email", group: "Person" },
-      { name: "linked_school_id", label: "School", type: "select", ...SCHOOL, group: "Posting" },
+      { name: "full_name", label: "Full name", required: true, group: "Personal details" },
+      { name: "gender", label: "Gender", type: "select", enumKey: "genders", required: true, group: "Personal details" },
+      { name: "mobile", label: "Mobile", type: "tel", placeholder: "10 digits", required: true, group: "Personal details" },
+      { name: "email", label: "Email", type: "email", required: true, group: "Personal details",
+        hint: "Their username for logging in - the login is made when you save." },
+      { name: "linked_school_id", label: "School", type: "select", ...SCHOOL, required: true, group: "Posting" },
       { name: "years_in_school", label: "Years in school", type: "number", min: 0, group: "Posting" },
-      { name: "date_of_joining", label: "Date of joining", type: "date", group: "Posting" },
+      { name: "date_of_joining", label: "Date of joining", type: "date", required: true, group: "Posting" },
       { name: "date_of_resignation", label: "Date of resignation", type: "date", group: "Posting", hint: "Leave blank while they are still in post." },
-      { name: "designation", label: "Designation", type: "select", enumKey: "principal_designations", group: "Posting" },
+      { name: "designation", label: "Designation", type: "select", enumKey: "principal_designations", required: true, group: "Posting" },
       { name: "employee_id", label: "Employee ID", group: "Posting" },
       { name: "appointment_nature", label: "Nature of appointment", type: "select", enumKey: "appointment_nature", group: "Posting" },
+      // ... and the rest of the principal's profile
+      ...principalProfileFields(["full_name", "gender", "mobile", "email", "designation", "employee_id"]),
     ],
   },
   labs: {
@@ -283,24 +285,21 @@ export const MODULES = {
       { key: "curriculum_level", label: "Level" },
       { key: "status", label: "Status", badge: true },
     ],
-    formHint: "What you set here drives the job-role and section dropdowns everywhere else.",
+    formHint: "What you set here drives the job-role dropdowns everywhere else. Each class starts with Section A; "
+      + "trainers add more sections themselves.",
     fields: [
       { name: "name", label: "Lab name", required: true, placeholder: "e.g. Computer Lab 1", group: "Lab" },
       { name: "school_id", label: "School", type: "select", ...SCHOOL, required: true, group: "Lab" },
-      { name: "sector_id", label: "Trade / Sector", type: "select", ...SECTOR, group: "Lab", hint: "The industry taught here, e.g. IT/ITeS." },
-      { name: "academic_year_of_setup", label: "AY of setup", type: "select", ...AY, valueKey: "label", group: "Lab" },
-      { name: "job_role_9_10_id", label: "Job Role (Class 9-10)", type: "select", ...JOBROLE_9_10, group: "Job roles", hint: "Entry-level title, e.g. Data Entry Operator. Pick a sector first." },
-      { name: "job_role_11_12_id", label: "Job Role (Class 11-12)", type: "select", ...JOBROLE_11_12, group: "Job roles", hint: "Advanced title, e.g. Junior Software Developer. Use the same role in both slots if the lab runs one role across all four years." },
+      { name: "sector_id", label: "Trade / Sector", type: "select", ...SECTOR, required: true, group: "Lab", hint: "The industry taught here, e.g. IT/ITeS." },
+      { name: "academic_year_of_setup", label: "AY of setup", type: "select", ...AY, valueKey: "label", required: true, group: "Lab" },
+      { name: "job_role_9_10_id", label: "Job Role (Class 9-10)", type: "select", ...JOBROLE_9_10, required: true, group: "Job roles", hint: "Entry-level title, e.g. Data Entry Operator. Pick a sector first." },
+      { name: "job_role_11_12_id", label: "Job Role (Class 11-12)", type: "select", ...JOBROLE_11_12, required: true, group: "Job roles", hint: "Advanced title, e.g. Junior Software Developer. Use the same role in both slots if the lab runs one role across all four years." },
       { name: "curriculum_level", label: "Curriculum levels", placeholder: "e.g. 1-4", group: "Job roles", hint: "Level 1 in Class 9 through Level 4 in Class 12." },
-      { name: "sections_9", label: "Class 9 sections", type: "multiselect", allowCustom: true, options: ["A", "B", "C", "D"], customPlaceholder: "Another section…", group: "Sections", emptyHint: "Add the sections this class runs." },
-      { name: "sections_10", label: "Class 10 sections", type: "multiselect", allowCustom: true, options: ["A", "B", "C", "D"], customPlaceholder: "Another section…", group: "Sections" },
-      { name: "sections_11", label: "Class 11 sections", type: "multiselect", allowCustom: true, options: ["A", "B", "C", "D"], customPlaceholder: "Another section…", group: "Sections" },
-      { name: "sections_12", label: "Class 12 sections", type: "multiselect", allowCustom: true, options: ["A", "B", "C", "D"], customPlaceholder: "Another section…", group: "Sections" },
-      { name: "sections_per_class", label: "Sections per class (total)", type: "number", min: 0, group: "Sections", hint: "Optional summary count kept for older reports." },
     ],
   },
   trainers: {
     label: "Trainers", singular: "Vocational Trainer", icon: "👨‍🏫", group: "People & Students",
+    groupFor: { OA: "Master Data" },   // added from Master Data, beside Labs
     searchHint: "Search by name, email or phone",
     columns: [
       { key: "full_name", label: "Name" },
@@ -308,21 +307,26 @@ export const MODULES = {
       { key: "email", label: "Email" },
       { key: "trainer_status", label: "Status", badge: true },
     ],
-    formHint: "One trainer per job role in a lab — the 9-10 role and the 11-12 role each get their own.",
+    formHint: "One trainer per job role in a lab — the 9-10 role and the 11-12 role each get their own. "
+      + "Everything on the trainer's profile page is here too: start a section and fill its main fields; the rest can wait.",
+    fetchOnEdit: true,
     fields: [
-      { name: "full_name", label: "Full name", required: true, group: "Person" },
-      { name: "gender", label: "Gender", type: "select", enumKey: "genders", group: "Person" },
-      { name: "email", label: "Email", type: "email", group: "Person" },
-      { name: "phone", label: "Phone", type: "tel", group: "Person" },
-      { name: "qualification", label: "Qualification", group: "Person" },
-      { name: "school_id", label: "School", type: "select", ...SCHOOL, group: "Posting" },
-      { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, group: "Posting" },
-      { name: "job_role_id", label: "Job role", type: "select", dynamicOptions: JOBROLE_BY_LAB, group: "Posting", hint: "Only the roles this lab teaches." },
-      { name: "date_of_joining", label: "Date of joining", type: "date", group: "Posting" },
+      { name: "full_name", label: "Full name", required: true, group: "Personal details" },
+      { name: "gender", label: "Gender", type: "select", enumKey: "genders", required: true, group: "Personal details" },
+      { name: "email", label: "Email", type: "email", required: true, group: "Personal details",
+        hint: "Their username for logging in - the login is made when you save." },
+      { name: "phone", label: "Mobile no.", type: "tel", placeholder: "10 digits", required: true, group: "Personal details" },
+      { name: "qualification", label: "Qualification", group: "Personal details" },
+      { name: "school_id", label: "School", type: "select", ...SCHOOL, required: true, group: "Posting" },
+      { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, required: true, group: "Posting" },
+      { name: "job_role_id", label: "Job role", type: "select", dynamicOptions: JOBROLE_BY_LAB, required: true, group: "Posting", hint: "Only the roles this lab teaches." },
+      { name: "date_of_joining", label: "Date of joining", type: "date", required: true, group: "Posting" },
       { name: "date_of_exit", label: "Date of exit", type: "date", group: "Posting" },
       { name: "trainer_status", label: "Status", type: "select", enumKey: "trainer_status", defaultValue: "active", group: "Posting" },
-      { name: "vtp_name", label: "VTP (training provider)", group: "Posting", hint: "The company that employs this trainer." },
+      { name: "vtp_name", label: "VTP (training provider)", required: true, group: "Posting", hint: "The company that employs this trainer." },
       { name: "appointment_nature", label: "Nature of appointment", type: "select", enumKey: "appointment_nature", group: "Posting" },
+      // ... and the rest of the trainer's profile
+      ...trainerProfileFields(["full_name", "gender", "email", "phone", "vtp_name"]),
     ],
   },
   "academic-years": {
@@ -336,9 +340,9 @@ export const MODULES = {
     ],
     fields: [
       { name: "label", label: "Label", required: true, placeholder: "2025-26" },
-      { name: "start_date", label: "Start date", type: "date" },
-      { name: "end_date", label: "End date", type: "date" },
-      { name: "is_current", label: "Is current?", type: "checkbox" },
+      { name: "start_date", label: "Start date", type: "date", required: true },
+      { name: "end_date", label: "End date", type: "date", required: true },
+      { name: "is_current", label: "Current", type: "checkbox", hint: "Tick for the school year running now." },
     ],
   },
   sectors: {
@@ -364,7 +368,7 @@ export const MODULES = {
       { name: "sector_id", label: "Sector", type: "select", ...SECTOR, required: true },
       { name: "qp_code", label: "QP Code" },
       { name: "nsqf_level", label: "NSQF level (1-4)", type: "number", min: 1, max: 4 },
-      { name: "class_band", label: "Class band", type: "select", options: ["9-10", "11-12"], hint: "9-10 carries Levels 1-2; 11-12 carries Levels 3-4." },
+      { name: "class_band", label: "Class band", type: "select", options: ["9-10", "11-12"], required: true, hint: "9-10 carries Levels 1-2; 11-12 carries Levels 3-4." },
     ],
   },
   "social-categories": {
@@ -917,14 +921,60 @@ export const MODULES = {
 // them through the API, because its forms' dropdowns load from them (e.g. a
 // trainer's attendance form lists curriculum modules/units/sessions) - this
 // only removes the page, from the sidebar and from direct URLs.
+/* An org admin sees nothing until they pick where to look: a state for the
+   districts list, a district for the schools list, and a district then a
+   school for everything that happens in a school. `param` is how the list
+   asks the server for it. States - and set-up lists that belong to no school
+   (years, sectors, job roles, categories) - show straight away. */
+export const ORG_ADMIN_SCOPE = {
+  districts: { needs: "state", param: "state_id" },
+  schools: { needs: "district", param: "district_id" },
+  principals: { needs: "school", param: "linked_school_id" },
+  ...Object.fromEntries([
+    "labs", "trainers", "students", "assessments", "attendance", "class-attendance", "principal-issues",
+    "issues", "field-visits", "guest-lectures", "equipment", "equipment-maintenance", "ojt-placements",
+  ].map((k) => [k, { needs: "school", param: "school_id" }])),
+};
+
+// the filters an org admin gets on each list (no search boxes for them)
+const ORG_ADMIN_FILTERS = {
+  states: [], districts: [], sectors: [], "social-categories": [], principals: [],
+  schools: ["school_type"],
+  labs: ["sector_id"],
+  trainers: ["lab_id", "trainer_status"],
+  "academic-years": ["is_current"],
+  "job-roles": ["sector_id", "class_band"],
+  students: ["lab_id", "class_grade", "section", "academic_year", "verification_status", "enrolment_status"],
+  assessments: ["academic_year", "assessment_type", "result"],
+  attendance: ["trainer_id", "lab_id", "date", "endorsement_status"],
+  "class-attendance": ["trainer_id", "lab_id", "class_grade", "section", "date", "endorsement_status"],
+  "principal-issues": ["workflow_status", "academic_year"],
+  issues: ["trainer_id", "lab_id", "workflow_status", "academic_year"],
+  "field-visits": ["lab_id", "academic_year", "class_grade", "section"],
+  "guest-lectures": ["lab_id", "academic_year", "class_grade", "section"],
+  equipment: ["lab_id", "trainer_id"],
+  "equipment-maintenance": ["maintenance_status"],
+  "ojt-placements": ["academic_year", "placement_placed", "apprenticeship_placed"],
+  notifications: ["category", "is_read"],
+};
+for (const [key, cols] of Object.entries(ORG_ADMIN_FILTERS)) {
+  if (MODULES[key]) MODULES[key].filtersFor = { ...(MODULES[key].filtersFor || {}), OA: cols };
+}
+
 export const HIDDEN_SECTIONS = {
   // feedback: switched off for trainers for now - remove it here to bring it back
   VT: ["sectors", "modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "trainers", "feedback"],
   // feedback: switched off for principals for now too
   PR: ["sectors", "modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "equipment-maintenance", "feedback"],
+  // org admins: no curriculum tabs, employer lists or daily diaries; feedback off for now too
+  OA: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback"],
 };
 
 export const isSectionHidden = (role, key) => !!HIDDEN_SECTIONS[role]?.includes(key);
+
+// the sidebar group a module sits in for this role (`groupFor` moves it,
+// e.g. Trainers into Master Data beside Labs for org admins)
+export const groupOf = (mod, role) => mod?.groupFor?.[role] || mod?.group;
 
 // the modules this user can open, in catalog order: [[key, module], ...]
 export const visibleModules = (boot, role) =>

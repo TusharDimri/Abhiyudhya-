@@ -27,6 +27,51 @@ CREATE_MATRIX = {
 MANAGER_ROLES = {Role.SUPER_ADMIN.value, Role.ORG_ADMIN.value,
                  Role.DISTRICT_MANAGER.value}
 
+# no look-alike characters (0/O, 1/l/I) - the password is read off a screen
+_PW_UPPER, _PW_LOWER, _PW_DIGIT = "ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnpqrstuvwxyz", "23456789"
+
+
+def new_password(length=10):
+    """A one-time password for a new login: mixed case and digits."""
+    import secrets
+    chars = [secrets.choice(_PW_UPPER), secrets.choice(_PW_LOWER), secrets.choice(_PW_DIGIT)]
+    chars += [secrets.choice(_PW_UPPER + _PW_LOWER + _PW_DIGIT) for _ in range(length - 3)]
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
+
+
+class LoginError(ValueError):
+    pass
+
+
+def create_login_for(role, record, actor):
+    """The login for a trainer / principal an admin has just added: their
+    email is the username, the password is generated (and must be changed at
+    first login). Links the record to it. Returns {username, password} - the
+    only time the password is ever shown."""
+    email = (record.email or "").strip().lower()
+    if not email:
+        raise LoginError("Enter their email - it is their username for logging in.")
+    if db.session.query(User).filter(User.email == email).first():
+        raise LoginError(f"A login with the email {email} already exists.")
+    password = new_password()
+    u = User(
+        organisation_id=record.organisation_id, full_name=record.full_name, email=email,
+        phone=getattr(record, "phone", None) or getattr(record, "mobile", None), role=role,
+        school_id=getattr(record, "school_id", None) or getattr(record, "linked_school_id", None),
+        must_change_password=True, created_by=actor.id,
+    )
+    u.set_password(password)
+    if role == Role.TRAINER.value and getattr(record, "lab_id", None):
+        lab = db.session.get(Lab, record.lab_id)
+        if lab:
+            u.labs.append(lab)
+    db.session.add(u)
+    db.session.flush()
+    record.user_id = u.id
+    audit.record(actor, "create", "app_user", u.id, after=u.public_dict())
+    return {"username": email, "password": password}
+
 
 def _require_manager(user):
     if user.role not in MANAGER_ROLES:
@@ -74,8 +119,16 @@ def create_user():
     role = data.get("role")
     if role not in allowed:
         abort(403, description=f"You cannot create a '{role}' user")
-    if not data.get("email") or not data.get("password"):
-        abort(400, description="email and password are required")
+    missing = [label for key, label in (("full_name", "Full name"), ("email", "Email"), ("password", "Password"))
+               if not str(data.get(key) or "").strip()]
+    if role in (Role.PRINCIPAL.value, Role.TRAINER.value) and not data.get("school_id"):
+        missing.append("School")
+    if role == Role.TRAINER.value and not data.get("lab_ids"):
+        missing.append("Lab")
+    if role == Role.DISTRICT_MANAGER.value and not data.get("district_ids"):
+        missing.append("District")
+    if missing:
+        abort(400, description="Please fill in: " + ", ".join(missing) + ".")
     ok, msg = validate_password(data["password"])
     if not ok:
         abort(400, description=msg)

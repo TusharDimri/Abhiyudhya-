@@ -62,6 +62,12 @@ const RESOURCE_FILTERS = {
 const humanize = (s) =>
   s.replace(/_id$/, "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
+// a form asks "Is current?" / "Placed?"; a filter just says "Current" / "Placed"
+const filterLabel = (label) => {
+  const t = String(label || "").replace(/\?\s*$/, "").replace(/^Is\s+/i, "");
+  return t ? t[0].toUpperCase() + t.slice(1) : t;
+};
+
 // Columns that hold a name, not an id - the filter offers the same list the
 // form writes from, so "Pune" typed by hand and "Pune" picked from the list
 // are never two different values.
@@ -129,7 +135,7 @@ function controlFor(col, fields, boot, asyncOptions, values) {
   return { type: "text", label: field?.label || humanize(col), placeholder: `Filter ${humanize(col)}…` };
 }
 
-export default function Filters({ filters, fields, boot, values, onChange, onClear, aside }) {
+export default function Filters({ filters, fields, boot, values, onChange, onClear, aside, schoolId }) {
   const resourceCols = (filters || []).filter((c) => RESOURCE_FILTERS[c]);
 
   const results = useQueries({
@@ -145,7 +151,7 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
   const asyncOptions = {};
   resourceCols.forEach((col, i) => {
     const cfg = RESOURCE_FILTERS[col];
-    asyncOptions[col] = (results[i]?.data || []).map((r) => ({ value: r.id, label: cfg.label(r) }));
+    asyncOptions[col] = (results[i]?.data || []).map((r) => ({ value: r.id, label: cfg.label(r), school_id: r.school_id }));
   });
 
   if (!filters?.length) return aside ? <div className="filterbar-row"><div className="filterbar-aside">{aside}</div></div> : null;
@@ -157,11 +163,13 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
         <span className="filterbar-label">Filters</span>
         {filters.map((col) => {
           const ctl = controlFor(col, fields, boot, asyncOptions, values);
+          // with one school picked, its own labs / trainers only
+          if (schoolId && ctl.options) ctl.options = ctl.options.filter((o) => !o.school_id || String(o.school_id) === String(schoolId));
           const val = values[col] ?? "";
           if (ctl.type === "select") {
             return (
               <select key={col} className={`select filter-ctl ${val ? "on" : ""}`} value={val} onChange={(e) => onChange(col, e.target.value)}>
-                <option value="">{ctl.label}: All</option>
+                <option value="">{filterLabel(ctl.label)}: All</option>
                 {ctl.options.map((o) => <option key={o.value} value={o.value}>{optionText(o.label)}</option>)}
                 {/* a value set from elsewhere (e.g. a target tile) that the list doesn't offer */}
                 {val && !ctl.options.some((o) => String(o.value) === String(val)) && <option value={val}>{val}</option>}
@@ -191,7 +199,7 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
             const label = ctl.options?.find((o) => String(o.value) === String(v))?.label ?? v;
             return (
               <span className="chip" key={col}>
-                <b>{ctl.label}:</b> {optionText(String(label))}
+                <b>{filterLabel(ctl.label)}:</b> {optionText(String(label))}
                 <button onClick={() => onChange(col, "")} aria-label="remove">×</button>
               </span>
             );
