@@ -14,12 +14,15 @@ import WorkflowDialog from "./WorkflowDialog";
 import Filters from "./Filters";
 import TargetProgress from "./TargetProgress";
 import PromoteDialog from "./PromoteDialog";
-import StudentHistory from "./StudentHistory";
+import StudentHistory, { HistoryList } from "./StudentHistory";
+import TcIssueDialog from "./TcIssueDialog";
+import ResolveDialog from "./ResolveDialog";
 import RecordView from "./RecordView";
 import LoginCreated from "./LoginCreated";
 import { DistanceLegend, EndorsementLegend } from "./DistanceDot";
 import { visibleFilters, visibleColumns } from "../lib/scope";
 import { EMPTY_HINTS } from "../lib/roleUi";
+import { toDMY } from "../lib/dates";
 
 const CONTROL_KEYS = ["page", "page_size", "q", "sort", "order", "new"];
 const PAGE_SIZES = [15, 25, 50, 100];
@@ -30,8 +33,11 @@ const PAGE_SIZES = [15, 25, 50, 100];
      embedded     no page heading - the host page has its own
      readOnly     a list to look at: no create, edit, delete or row actions
      onlyActions  row actions to keep (e.g. ["verify"])
-     hideCreate   no "New" button (the host adds records its own way)        */
-export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActions, hideCreate } = {}) {
+     hideCreate   no "New" button (the host adds records its own way)
+     fixedParams  filters the host fixes (e.g. only students to verify)
+     scopeKey     whose District -> School pick this list uses (default: its
+                  resource - each list keeps its own)                       */
+export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActions, hideCreate, fixedParams, scopeKey } = {}) {
   const params = useParams();
   const resource = resourceKey || params.resource;
   const mod = MODULES[resource];
@@ -54,7 +60,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
   const [searchInput, setSearchInput] = useState(sp.get("q") || "");
 
   // an org admin picks a district, then a school, before anything is listed
-  const [orgScope, setOrgScope] = useOrgScope();
+  const [orgScope, setOrgScope] = useOrgScope(scopeKey || resource);
   const gate = user?.role === "OA" ? ORG_ADMIN_SCOPE[resource] : null;
   const gateValue = gate ? orgScope[`${gate.needs}_id`] : null;
   const gateOpen = !gate || !!gateValue;
@@ -96,7 +102,10 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
   );
 
   const profile = boot?.my_scope?.profile;
-  const visibleFilterCols = useMemo(() => visibleFilters(filterCols, profile), [filterCols, profile]);
+  const visibleFilterCols = useMemo(
+    () => visibleFilters(filterCols, profile).filter((c) => !(fixedParams && c in fixedParams)),
+    [filterCols, profile, fixedParams],
+  );
   const shownColumns = useMemo(
     () => visibleColumns(mod?.columns || [], boot?.options, profile, user?.role),
     [mod, boot?.options, profile, user?.role]
@@ -144,8 +153,9 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     for (const [k, v] of Object.entries(filterValues)) if (v !== "" && k !== "new") p.set(k, v);
     if (isSA && orgFilter && orgScoped) p.set("organisation_id", orgFilter);
     if (gate && gateValue) p.set(gate.param, gateValue);
+    for (const [k, v] of Object.entries(fixedParams || {})) p.set(k, v);
     return p.toString();
-  }, [page, pageSize, q, sort, order, filterValues, isSA, orgFilter, orgScoped, gate, gateValue]);
+  }, [page, pageSize, q, sort, order, filterValues, isSA, orgFilter, orgScoped, gate, gateValue, fixedParams]);
 
   const list = useQuery({
     queryKey: ["list", resource, apiParams],
@@ -166,6 +176,27 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
       qc.invalidateQueries({ queryKey: ["list", resource] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       qc.invalidateQueries({ queryKey: ["targets", resource] });
+    },
+    onError: (e) => push(apiError(e), "error"),
+  });
+
+  const verifyStudent = useMutation({
+    mutationFn: async (id) => (await api.post(`/workflow/students/${id}/verify`, { verification_status: "verified" })).data,
+    onSuccess: () => {
+      push("Student verified", "success");
+      setWorkflow(null);
+      for (const k of [["list", resource], ["view", resource], ["dashboard"], ["promotion"]]) qc.invalidateQueries({ queryKey: k });
+    },
+    onError: (e) => push(apiError(e), "error"),
+  });
+
+  // the org admin checks the TC and marks the student as left, for good
+  const confirmLeft = useMutation({
+    mutationFn: async (id) => (await api.post(`/promotion/students/${id}/left`)).data,
+    onSuccess: (r) => {
+      push(`Marked as left (${r.enrolment_status})`, "success");
+      setWorkflow(null);
+      for (const k of [["list", resource], ["view", resource], ["dashboard"], ["promotion"], ["roster"]]) qc.invalidateQueries({ queryKey: k });
     },
     onError: (e) => push(apiError(e), "error"),
   });
@@ -347,7 +378,79 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         <RecordView mod={mod} resource={resource} row={workflow.row} onClose={() => setWorkflow(null)} />
       )}
 
-      {workflow && !["history", "view"].includes(workflow.action) && (
+      {workflow?.action === "verify" && resource === "students" && (
+        <RecordView
+          mod={mod} resource={resource} row={workflow.row} onClose={() => setWorkflow(null)}
+          title={`Verify ${workflow.row.full_name || "student"}`}
+          subtitle="Check every detail below, then verify the student."
+          footer={(rec) => (
+            <>
+              <button type="button" className="btn btn-ghost" onClick={() => setWorkflow(null)}>Close</button>
+              <button type="button" className="btn btn-primary"
+                disabled={verifyStudent.isPending || rec.verification_status === "verified"}
+                onClick={() => verifyStudent.mutate(rec.id)}>
+                {verifyStudent.isPending ? "Verifying…" : rec.verification_status === "verified" ? "✓ Verified" : "✔ Verify student"}
+              </button>
+            </>
+          )}
+        />
+      )}
+
+      {workflow?.action === "record" && (
+        <RecordView mod={mod} resource={resource} row={workflow.row} onClose={() => setWorkflow(null)}
+          title={workflow.row.full_name || mod.singular}
+          subtitle={[workflow.row.status_label || workflow.row.enrolment_status, workflow.row.school_name].filter(Boolean).join(" · ")}>
+          {() => (
+            <section className="view-section">
+              <h4 className="view-section-title">History</h4>
+              <HistoryList studentId={workflow.row.id} />
+            </section>
+          )}
+        </RecordView>
+      )}
+
+      {workflow?.action === "resolve" && (
+        <ResolveDialog resource={resource} row={workflow.row} onClose={() => setWorkflow(null)}
+          onDone={() => { setWorkflow(null); for (const k of [["list", resource], ["dashboard"]]) qc.invalidateQueries({ queryKey: k }); }} />
+      )}
+
+      {workflow?.action === "tc" && (
+        <TcIssueDialog row={workflow.row} onClose={() => setWorkflow(null)}
+          onDone={() => { setWorkflow(null); qc.invalidateQueries({ queryKey: ["list", resource] }); }} />
+      )}
+
+      {workflow?.action === "leftverify" && (
+        <RecordView mod={mod} resource={resource} row={workflow.row} onClose={() => setWorkflow(null)}
+          title={`Verify TC · ${workflow.row.full_name || "Student"}`}
+          subtitle="Check the Transfer Certificate, then mark the student as left."
+          footer={(rec) => (
+            <>
+              <button type="button" className="btn btn-ghost" onClick={() => setWorkflow(null)}>Close</button>
+              <button type="button" className="btn btn-danger" disabled={confirmLeft.isPending || rec.leaving_stage !== "tc_issued"}
+                onClick={() => confirmLeft.mutate(rec.id)}>
+                {confirmLeft.isPending ? "Saving…" : `Verify TC & mark as left`}
+              </button>
+            </>
+          )}>
+          {(rec) => (
+            <section className="view-section tc-block">
+              <h4 className="view-section-title">Transfer Certificate</h4>
+              <dl className="view-grid">
+                <div className="view-item"><dt>Leaving as</dt><dd>{rec.leaving_type || "—"}</dd></div>
+                <div className="view-item"><dt>Reason (from the trainer)</dt><dd>{rec.left_reason || "—"}</dd></div>
+                <div className="view-item"><dt>TC number</dt><dd>{rec.tc_number || "—"}</dd></div>
+                <div className="view-item"><dt>TC date</dt><dd>{toDMY(rec.tc_issued_on) || "—"}</dd></div>
+                <div className="view-item wide"><dt>Photo of the TC</dt><dd>
+                  {rec.tc_src ? <a href={rec.tc_src} target="_blank" rel="noreferrer"><img className="view-photo" src={rec.tc_src} alt="TC" /></a>
+                    : <span className="muted">{rec.tc_url ? "Attached (not available here)" : "No photo"}</span>}
+                </dd></div>
+              </dl>
+            </section>
+          )}
+        </RecordView>
+      )}
+
+      {workflow && !["history", "view", "record", "tc", "leftverify", "resolve"].includes(workflow.action) && !(workflow.action === "verify" && resource === "students") && (
         <WorkflowDialog
           resource={resource}
           action={workflow.action}

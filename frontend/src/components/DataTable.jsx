@@ -2,9 +2,15 @@ import Badge from "./Badge";
 import DistanceDot, { EndorsementDot } from "./DistanceDot";
 import { isISODate, toDMY } from "../lib/dates";
 
+// a student who has left for good - only their record is shown then
+const isGone = (r) => r.leaving_stage === "left" || ["Dropped Out", "Transferred Out"].includes(r.enrolment_status);
+// where a leaving student is, for those who aren't the next to act
+const LEAVING_NOTE = { requested: "Leaving · TC pending", tc_issued: "Leaving · TC issued" };
+
 // Presentational, server-driven table with sortable headers + skeleton loader.
 export default function DataTable({ columns, rows, loading, sort, order, onSort, onEdit, onDelete, onRowAction, rowActions, canWrite, emptyHint, emptyAction, onEmptyAction }) {
   const showActions = canWrite || (rowActions && rowActions.length);
+  const statusShown = columns.some((c) => c.key === "status_label");
   return (
     <div className="card">
       <div className="table-wrap">
@@ -48,6 +54,12 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                     ))}
                     {showActions ? (
                       <td>
+                        {isGone(r) && rowActions?.includes("record") ? (
+                        // a student who has left: their record and history, nothing more
+                        <div className="cell-actions">
+                          <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("record", r)}>View</button>
+                        </div>
+                        ) : (
                         <div className="cell-actions">
                           {rowActions?.includes("view") && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("view", r)}>View</button>
@@ -56,7 +68,13 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("endorse", r)}>Verify</button>
                           )}
                           {rowActions?.includes("transition") && (
-                            <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("transition", r)}>Action</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("transition", r)}>Update status</button>
+                          )}
+                          {rowActions?.includes("resolve") && r.workflow_status !== "resolved" && r.maintenance_status !== "Resolved" && (
+                            <button className="btn btn-primary btn-sm" onClick={() => onRowAction("resolve", r)}>Resolve</button>
+                          )}
+                          {rowActions?.includes("maintenance") && (
+                            <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("maintenance", r)}>Update status</button>
                           )}
                           {rowActions?.includes("history") && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("history", r)}>History</button>
@@ -64,14 +82,24 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                           {rowActions?.includes("verify") && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("verify", r)}>Verify</button>
                           )}
-                          {rowActions?.includes("status") && !["Completed", "Transferred Out"].includes(r.enrolment_status) && (
-                            <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("status", r)}>
-                              {r.enrolment_status === "Studying" ? "Left?" : "Rejoin"}
-                            </button>
+                          {/* leaving: trainer marks -> principal records the TC -> org admin confirms */}
+                          {rowActions?.includes("status") && r.enrolment_status === "Studying" && !r.leaving_stage && (
+                            <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("status", r)}>Mark as left</button>
+                          )}
+                          {rowActions?.includes("tc") && r.leaving_stage === "requested" && (
+                            <button className="btn btn-primary btn-sm" onClick={() => onRowAction("tc", r)}>TC Issued</button>
+                          )}
+                          {rowActions?.includes("leftverify") && r.leaving_stage === "tc_issued" && (
+                            <button className="btn btn-primary btn-sm" onClick={() => onRowAction("leftverify", r)}>Verify TC</button>
+                          )}
+                          {LEAVING_NOTE[r.leaving_stage] && !statusShown && !(rowActions?.includes("tc") && r.leaving_stage === "requested")
+                            && !(rowActions?.includes("leftverify") && r.leaving_stage === "tc_issued") && (
+                            <span className="leaving-note">{LEAVING_NOTE[r.leaving_stage]}</span>
                           )}
                           {canWrite && <button className="btn btn-ghost btn-sm" onClick={() => onEdit(r)}>Edit</button>}
                           {canWrite && onDelete && <button className="btn btn-danger btn-sm" onClick={() => onDelete(r)}>Delete</button>}
                         </div>
+                        )}
                       </td>
                     ) : null}
                   </tr>

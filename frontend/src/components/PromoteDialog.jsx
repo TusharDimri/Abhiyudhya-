@@ -111,6 +111,9 @@ export default function PromoteDialog({ onClose, onDone, inline }) {
                   )}
                 </div>
               )}
+              {p?.ended && target === "Class 11" && (
+                <div className="prefill-note">Students are verified again at Class 11 - once moved up, they wait for verification.</div>
+              )}
 
               {preview.isLoading ? <div className="skeleton" style={{ height: 120 }} /> : (
                 <ul className="roster-list promote-list">

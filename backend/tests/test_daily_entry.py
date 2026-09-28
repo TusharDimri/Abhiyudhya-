@@ -167,6 +167,23 @@ def test_saved_records_cannot_be_deleted_by_anyone(client, world):
     assert client.get(f"/api/attendance/{rid}", headers=_login(client)).status_code == 200
 
 
+def test_a_student_is_never_deleted_only_marked_as_left(client, world, principal):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    sid = str(world["students"][0].id)
+    for email in ("vt@x.com", "pr@x.com", "oa@x.com"):
+        r = client.delete(f"/api/students/{sid}", headers=_as(client, email))
+        assert r.status_code == 403, email
+    assert db.session.get(Student, sid).is_deleted is False
+    # the way out is marking them as left - they stay on record
+    r = client.post(f"/api/promotion/students/{sid}/status", headers=_as(client, "vt@x.com"),
+                    json={"enrolment_status": "Dropped Out", "reason": "Family moved"})
+    assert r.status_code == 200, r.get_json()
+    assert client.get(f"/api/students/{sid}", headers=_as(client, "oa@x.com")).status_code == 200
+
+
 def test_within_a_kilometre_is_fine(client, world):
     _school_located(world)
     r = _save(client, "/api/attendance", _day(world), **NEARBY)
@@ -348,9 +365,58 @@ def test_admin_form_needs_the_required_fields(client, world):
     # a district needs its state (the database insists - now with a message, not a crash)
     r = client.post("/api/districts", headers=h, json={"name": "No State"})
     assert r.status_code == 400 and "State" in r.get_json()["message"]
-    # a login made from Users & Access needs its school / lab
+    # an org admin doesn't make logins in Users & Access (they come with the trainer / principal) ...
     r = client.post("/api/users", headers=h, json={"role": "VT", "full_name": "V", "email": "v@x.com", "password": "Password1"})
+    assert r.status_code == 403
+    # ... the super admin does, and a trainer's login needs its school and lab
+    sa = User(full_name="SA", email="sa@x.com", role="SA")
+    sa.set_password("Password@123")
+    db.session.add(sa)
+    db.session.commit()
+    r = client.post("/api/users", headers=_as(client, "sa@x.com"), json={
+        "role": "VT", "full_name": "V", "email": "v@x.com", "password": "Password1", "organisation_id": str(world["org"].id)})
     assert r.status_code == 400 and "School" in r.get_json()["message"] and "Lab" in r.get_json()["message"]
+
+
+def test_org_admin_sees_and_manages_only_their_schools_staff(client, world, principal, principal_record):
+    org = world["org"]
+    oa = User(organisation_id=org.id, full_name="OA", email="oa@x.com", role="OA")
+    oa2 = User(organisation_id=org.id, full_name="OA Two", email="oa2@x.com", role="OA")
+    for u in (oa, oa2):
+        u.set_password("Password@123")
+    db.session.add_all([oa, oa2])
+    db.session.commit()
+    h = _as(client, "oa@x.com")
+    listed = client.get("/api/users", headers=h).get_json()
+    assert sorted(u["role"] for u in listed["data"]) == ["PR", "VT"]      # no org admins, not even themselves
+    assert listed["can_create"] == []
+    # another org admin can't be touched; a trainer can only be disabled / enabled
+    assert client.patch(f"/api/users/{oa2.id}", headers=h, json={"status": "disabled"}).status_code == 403
+    vt = db.session.query(User).filter_by(email="vt@x.com").one()
+    r = client.patch(f"/api/users/{vt.id}", headers=h, json={"status": "disabled", "full_name": "Renamed"})
+    assert r.status_code == 200
+    db.session.refresh(vt)
+    assert (vt.status, vt.full_name) == ("disabled", "VT")
+    # and they can see attendance but not verify it
+    assert client.post("/api/auth/login", json={"email": "vt@x.com", "password": "Password@123"}).status_code == 403  # disabled
+    vt.status = "active"
+    db.session.commit()
+    _as(client, "vt@x.com")
+    url, rid = _endorsable(client, world, "daily")
+    r = client.post(f"/api/workflow/attendance/{rid}/endorse", headers=_as(client, "oa@x.com"), json={"decision": "endorsed"})
+    assert r.status_code == 403
+
+
+def test_a_principal_sees_only_their_schools_principals(client, world, principal, principal_record):
+    from app.models.geography import Principal, School
+    other_school = School(organisation_id=world["org"].id, name="Other School", udise_code="27000000009",
+                          district_id=world["school"].district_id)
+    db.session.add(other_school)
+    db.session.flush()
+    db.session.add(Principal(organisation_id=world["org"].id, full_name="Someone Else", linked_school_id=other_school.id))
+    db.session.commit()
+    names = [p["full_name"] for p in client.get("/api/principals", headers=_as(client, "pr@x.com")).get_json()["data"]]
+    assert names == ["PR"]
 
 
 def test_one_trainer_per_job_role_in_a_lab(client, world):
@@ -766,6 +832,57 @@ def _class_of(world, year="2024-25", grade="9", verified=(True, True, True)):
     return [str(s.id) for s in world["students"]]
 
 
+def test_moving_up_into_class_11_needs_verifying_again(client, world):
+    a, b, c = _class_of(world, grade="10")
+    r = client.post("/api/promotion", headers=_login(client), json={
+        "from_year": "2024-25", "class_grade": "10", "promote": [a, b], "hold_back": [c]})
+    assert r.status_code == 200, r.get_json()
+    moved, held = db.session.get(Student, a), db.session.get(Student, c)
+    assert (moved.class_grade, moved.verification_status) == ("11", "pending")   # verified again at Class 11
+    assert held.verification_status == "verified"                                # still in Class 10
+
+
+def test_previous_students_join_class_11(client, world):
+    from app.services.academic_year import academic_year_for
+    this_year = academic_year_for(world["org"].id, date.today())
+    a, b, c = world["students"]
+    for s, (status, year) in zip((a, b, c), (("Completed", "2024-25"), ("Studying", "2023-24"), ("Studying", this_year))):
+        s.class_grade, s.enrolment_status, s.academic_year, s.verification_status = "10", status, year, "verified"
+    db.session.commit()
+    h = _login(client)
+    listed = client.get(f"/api/students/previous?lab_id={world['lab'].id}", headers=h).get_json()["data"]
+    assert sorted(x["id"] for x in listed) == sorted([str(a.id), str(b.id)])   # not the one in Class 10 now
+    r = client.post("/api/students/previous", headers=h, json={
+        "lab_id": str(world["lab"].id), "section": "A", "student_ids": [str(a.id), str(b.id)]})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["added"] == 2 and all(x["roll_number"].startswith("11A-") for x in r.get_json()["students"])
+    s = db.session.get(Student, a.id)
+    assert (s.class_grade, s.enrolment_status, s.verification_status, s.academic_year) == ("11", "Studying", "pending", this_year)
+    # their Class 10 year is kept in the history
+    hist = client.get(f"/api/promotion/history/{a.id}", headers=h).get_json()
+    assert "Joined Class 11" in str(hist)
+    # someone still in Class 10 this year can't be pulled in this way
+    bad = client.post("/api/students/previous", headers=h, json={
+        "lab_id": str(world["lab"].id), "section": "A", "student_ids": [str(c.id)]})
+    assert bad.status_code == 400
+
+
+def test_only_an_admin_verifies_a_student(client, world):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    sid = str(world["students"][0].id)
+    url = f"/api/workflow/students/{sid}/verify"
+    # the trainer adds students but doesn't verify them - neither directly nor by editing
+    assert client.post(url, headers=_as(client, "vt@x.com"), json={"verification_status": "verified"}).status_code == 403
+    client.patch(f"/api/students/{sid}", headers=_as(client, "vt@x.com"), json={"verification_status": "verified"})
+    assert db.session.get(Student, sid).verification_status == "pending"
+    r = client.post(url, headers=_as(client, "oa@x.com"), json={"verification_status": "verified"})
+    assert r.status_code == 200, r.get_json()
+    assert db.session.get(Student, sid).verification_status == "verified"
+
+
 def test_promotion_preview(client, world):
     a, b, c = _class_of(world, verified=(True, True, False))
     body = client.get("/api/promotion/preview?from_year=2024-25&class_grade=9", headers=_login(client)).get_json()
@@ -828,25 +945,54 @@ def test_trainer_cannot_change_class_by_editing(client, world):
     assert "Promote Students" in r.get_json()["message"]
 
 
-def test_student_leaves_and_rejoins(client, world):
+def test_a_student_leaves_in_three_steps(client, world, principal, principal_record):
+    """Trainer marks as leaving -> principal records the TC -> org admin confirms."""
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
     a, b, c = _class_of(world)
-    h = _login(client)
     url = f"/api/promotion/students/{a}/status"
+    h = _as(client, "vt@x.com")
     assert client.post(url, headers=h, json={"enrolment_status": "Dropped Out"}).status_code == 400  # needs a reason
+    # 1. the trainer marks them as leaving - they're still on the list until it's confirmed
     r = client.post(url, headers=h, json={"enrolment_status": "Dropped Out", "reason": "Family moved"})
     assert r.status_code == 200, r.get_json()
     s = db.session.get(Student, a)
-    assert (s.enrolment_status, s.left_reason) == ("Dropped Out", "Family moved")
-    back = client.post(url, headers=h, json={"enrolment_status": "Studying"})
-    assert back.status_code == 200
-    assert db.session.get(Student, a).left_on is None
-    # only someone who left can rejoin
-    assert client.post(url, headers=h, json={"enrolment_status": "Studying"}).status_code == 400
-    # a student transferred out to another school doesn't rejoin here
-    other = f"/api/promotion/students/{b}/status"
-    assert client.post(other, headers=h, json={"enrolment_status": "Transferred Out", "reason": "Moved school"}).status_code == 200
-    r = client.post(other, headers=h, json={"enrolment_status": "Studying"})
-    assert r.status_code == 400 and "can't rejoin" in r.get_json()["message"]
+    assert (s.enrolment_status, s.leaving_stage, s.leaving_type) == ("Studying", "requested", "Dropped Out")
+    assert client.post(url, headers=h, json={"enrolment_status": "Dropped Out", "reason": "x"}).status_code == 400
+    assert client.post(url, headers=h, json={"enrolment_status": "Studying"}).status_code == 400    # no rejoining
+    box = _mine(client, "pr@x.com")
+    assert box["unread"] == 1 and "TC needed" in box["data"][0]["title"]
+    # the org admin can't skip the principal's TC
+    assert client.post(f"/api/promotion/students/{a}/left", headers=_as(client, "oa@x.com")).status_code == 400
+    # 2. the principal records the TC (a photo is required)
+    tc = f"/api/promotion/students/{a}/tc"
+    assert client.post(tc, headers=_as(client, "vt@x.com"), json={"tc_url": "uploads/tc.jpg"}).status_code == 403
+    assert client.post(tc, headers=_as(client, "pr@x.com"), json={"tc_number": "TC/1"}).status_code == 400
+    r = client.post(tc, headers=_as(client, "pr@x.com"), json={"tc_url": "uploads/tc.jpg", "tc_number": "TC/1"})
+    assert r.status_code == 200, r.get_json()
+    assert any("TC to verify" in n["title"] for n in _mine(client, "oa@x.com")["data"])
+    # 3. the org admin checks it and confirms - now they've left, for good
+    r = client.post(f"/api/promotion/students/{a}/left", headers=_as(client, "oa@x.com"))
+    assert r.status_code == 200, r.get_json()
+    s = db.session.get(Student, a)
+    assert (s.enrolment_status, s.leaving_stage, s.tc_number) == ("Dropped Out", "left", "TC/1")
+    # every step is in their history
+    hist = client.get(f"/api/promotion/history/{a}", headers=_as(client, "oa@x.com")).get_json()
+    assert [y["outcome"] for y in hist["years"]][:3] == ["Dropped Out", "TC issued", "Marked as leaving"]
+    assert hist["current"]["tc_number"] == "TC/1" and hist["current"]["tc_verified_on"]   # the TC, in their history
+    row = client.get(f"/api/students/{a}", headers=_as(client, "oa@x.com")).get_json()
+    assert row["status_label"] == "Left"
+
+
+def test_a_leaving_student_is_not_promoted(client, world):
+    a, b, c = _class_of(world)
+    client.post(f"/api/promotion/students/{a}/status", headers=_login(client),
+                json={"enrolment_status": "Transferred Out", "reason": "Moving"})
+    rows = {r["id"]: r for r in client.get("/api/promotion/preview?from_year=2024-25&class_grade=9",
+                                          headers=_login(client)).get_json()["students"]}
+    assert not rows[a]["eligible"] and rows[a]["reason"] == "Leaving the school"
 
 
 # --------------------------------------------------------------- redis cache
@@ -1074,6 +1220,130 @@ def principal_record(world, principal):
 
 PR_GENERAL = {"full_name": "PR", "designation": "Principal", "dob": "1975-03-10", "gender": "Male",
               "mobile": "9876501234", "email": "pr@example.com", "father_name": "S. Rao"}
+
+
+def _mine(client, email):
+    return client.get("/api/me/notifications?page_size=50", headers=_as(client, email)).get_json()
+
+
+def test_notifications_reach_the_right_people(client, world, principal, principal_record):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+
+    # the trainer marks attendance -> the principal is asked to verify it
+    _as(client, "vt@x.com")
+    url, rid = _endorsable(client, world, "daily")
+    pr_box = _mine(client, "pr@x.com")
+    assert pr_box["unread"] == 1 and pr_box["data"][0]["category"] == "attendance"
+    assert "endorsement_status=submitted" in pr_box["data"][0]["link"]
+    assert _mine(client, "vt@x.com")["unread"] == 0                 # nobody hears about their own action
+    # ... verifies it -> the trainer hears
+    client.post(f"/api/workflow/attendance/{rid}/endorse", headers=_as(client, "pr@x.com"), json={"decision": "endorsed"})
+    vt_box = _mine(client, "vt@x.com")
+    assert vt_box["unread"] == 1 and vt_box["data"][0]["title"] == "Attendance verified"
+
+    # the principal raises an issue -> org admins; resolved -> the principal
+    issue = client.post("/api/principal-issues", headers=_as(client, "pr@x.com"), json={
+        "reporting_date": date.today().isoformat(), "details": "Roof leaks"}).get_json()
+    oa_box = _mine(client, "oa@x.com")
+    assert any(n["category"] == "issue" and f"_school={world['school'].id}" in n["link"] for n in oa_box["data"])
+    r = client.post(f"/api/workflow/principal-issues/{issue['id']}/transition", headers=_as(client, "oa@x.com"),
+                    json={"workflow_status": "resolved", "resolution_note": "Roof fixed"})
+    assert r.status_code == 200, r.get_json()
+    assert any(n["title"] == "Your issue has been resolved" for n in _mine(client, "pr@x.com")["data"])
+
+    # equipment and its upkeep: org admins hear of both; the trainer hears of status changes
+    eq = client.post("/api/equipment", headers=_as(client, "vt@x.com"), json=_equipment(world)).get_json()
+    m = client.post("/api/equipment-maintenance", headers=_as(client, "vt@x.com"), json={
+        "equipment_id": eq["id"], "date": date.today().isoformat(), "issue": "Won't start",
+        "maintenance_status": "Reported"}).get_json()
+    cats = [n["category"] for n in _mine(client, "oa@x.com")["data"]]
+    assert "equipment" in cats and "maintenance" in cats
+    client.post(f"/api/workflow/equipment-maintenance/{m['id']}/status", headers=_as(client, "oa@x.com"),
+                json={"maintenance_status": "Under Repair"})
+    assert any(n["category"] == "maintenance" and "Under Repair" in n["title"] for n in _mine(client, "vt@x.com")["data"])
+
+    # reading them
+    box = _mine(client, "oa@x.com")
+    client.post(f"/api/me/notifications/{box['data'][0]['id']}/read", headers=_as(client, "oa@x.com"))
+    assert _mine(client, "oa@x.com")["unread"] == box["unread"] - 1
+    client.post("/api/me/notifications/read-all", headers=_as(client, "oa@x.com"))
+    assert _mine(client, "oa@x.com")["unread"] == 0
+    # nobody can mark someone else's
+    other = _mine(client, "vt@x.com")["data"][0]["id"]
+    assert client.post(f"/api/me/notifications/{other}/read", headers=_as(client, "oa@x.com")).status_code == 404
+
+
+def test_org_admin_adds_only_master_data(client, world):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    h = _as(client, "oa@x.com")
+    res = client.get("/api/meta/bootstrap", headers=h).get_json()["resources"]
+    for view_only in ("attendance", "class-attendance", "issues", "field-visits", "guest-lectures",
+                      "equipment", "equipment-maintenance", "assessments", "ojt-placements"):
+        assert res[view_only]["can_write"] is False, view_only
+    for master in ("schools", "labs", "trainers", "principals", "districts", "job-roles"):
+        assert res[master]["can_write"] is True, master
+    assert client.post("/api/equipment", headers=h, json=_equipment(world)).status_code == 403
+
+
+def test_org_admin_resolves_issues_and_maintenance(client, world):
+    from app.models.operations import VTIssue
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    vt = db.session.query(User).filter_by(email="vt@x.com").one()
+    issue = VTIssue(organisation_id=world["org"].id, lab_id=world["lab"].id, reporting_date=date.today(),
+                    details="Projector cable missing", created_by=vt.id)
+    db.session.add(issue)
+    db.session.commit()
+    h = _as(client, "oa@x.com")
+    row = next(r for r in client.get("/api/issues", headers=h).get_json()["data"] if r["id"] == str(issue.id))
+    assert row["trainer_name"] == "VT" and row["school_name"] == world["school"].name      # filled in on the form
+    url = f"/api/workflow/issues/{issue.id}/transition"
+    assert client.post(url, headers=h, json={"workflow_status": "resolved"}).status_code == 400   # needs a resolution
+    r = client.post(url, headers=h, json={"workflow_status": "resolved", "resolution_note": "New cable fitted"})
+    assert r.status_code == 200, r.get_json()
+    assert any(n["title"] == "Your issue has been resolved" for n in _mine(client, "vt@x.com")["data"])
+
+    eq = client.post("/api/equipment", headers=_as(client, "vt@x.com"), json=_equipment(world)).get_json()
+    m = client.post("/api/equipment-maintenance", headers=_as(client, "vt@x.com"), json={
+        "equipment_id": eq["id"], "date": date.today().isoformat(), "issue": "No display",
+        "maintenance_status": "Reported"}).get_json()
+    murl = f"/api/workflow/equipment-maintenance/{m['id']}/status"
+    h = _as(client, "oa@x.com")
+    assert client.post(murl, headers=h, json={"maintenance_status": "Resolved"}).status_code == 400
+    r = client.post(murl, headers=h, json={"maintenance_status": "Resolved", "resolution": "Vendor replaced the board"})
+    assert r.status_code == 200, r.get_json()
+    listed = next(x for x in client.get("/api/equipment-maintenance", headers=h).get_json()["data"] if x["id"] == m["id"])
+    assert (listed["maintenance_status"], listed["action"], listed["equipment_name"]) == ("Resolved", "Vendor replaced the board", "Desktop computer")
+    assert any("Resolved" in n["title"] for n in _mine(client, "vt@x.com")["data"])
+    # and back to open if it wasn't
+    assert client.post(murl, headers=_as(client, "oa@x.com"), json={"maintenance_status": "Open"}).get_json()["maintenance_status"] == "Reported"
+
+
+def test_a_trainer_editing_a_verified_student_sends_them_back(client, world, category):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    kid = _bulk(client, world, [_kid(category, 21)]).get_json()["students"][0]["id"]
+    assert any(n["category"] == "verification" for n in _mine(client, "oa@x.com")["data"])   # new student to verify
+    client.post(f"/api/workflow/students/{kid}/verify", headers=_as(client, "oa@x.com"), json={"verification_status": "verified"})
+    client.post("/api/me/notifications/read-all", headers=_as(client, "oa@x.com"))
+    # saving without a change keeps it verified; a real change sends it back
+    same = client.get(f"/api/students/{kid}", headers=_as(client, "vt@x.com")).get_json()
+    client.patch(f"/api/students/{kid}", headers=_as(client, "vt@x.com"), json={"father_name": same["father_name"]})
+    assert db.session.get(Student, kid).verification_status == "verified"
+    client.patch(f"/api/students/{kid}", headers=_as(client, "vt@x.com"), json={"father_name": "New Father"})
+    assert db.session.get(Student, kid).verification_status == "pending"
+    box = _mine(client, "oa@x.com")
+    assert box["unread"] == 1 and "changed after verification" in box["data"][0]["body"]
 
 
 def test_principal_profile_shows_their_school(client, world, principal_record):

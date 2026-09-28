@@ -20,12 +20,17 @@ bp = Blueprint("users", __name__, url_prefix="/api/users")
 # who may create/manage which roles
 CREATE_MATRIX = {
     Role.SUPER_ADMIN.value: {"SA", "OA", "DM", "PR", "VT"},
-    Role.ORG_ADMIN.value: {"DM", "PR", "VT"},
+    # an org admin's principals and trainers get their logins when they are
+    # added (Master Data), so Users & Access only resets and disables them
+    Role.ORG_ADMIN.value: set(),
     Role.DISTRICT_MANAGER.value: {"PR", "VT"},
 }
 
 MANAGER_ROLES = {Role.SUPER_ADMIN.value, Role.ORG_ADMIN.value,
                  Role.DISTRICT_MANAGER.value}
+# the logins an org admin looks after: their schools' principals and trainers
+# (not other org admins, nor district managers)
+SCHOOL_STAFF = (Role.PRINCIPAL.value, Role.TRAINER.value)
 
 # no look-alike characters (0/O, 1/l/I) - the password is read off a screen
 _PW_UPPER, _PW_LOWER, _PW_DIGIT = "ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnpqrstuvwxyz", "23456789"
@@ -84,6 +89,8 @@ def _scoped_target(actor, target):
         abort(404)
     if actor.role != Role.SUPER_ADMIN.value and target.organisation_id != actor.organisation_id:
         abort(403, description="Outside your organisation")
+    if actor.role == Role.ORG_ADMIN.value and target.role not in SCHOOL_STAFF:
+        abort(403, description="Org admins look after principals' and trainers' logins only.")
 
 
 @bp.get("")
@@ -95,6 +102,8 @@ def list_users():
     q = db.session.query(User).filter(User.is_deleted.is_(False))
     if user.role != Role.SUPER_ADMIN.value:
         q = q.filter(User.organisation_id == user.organisation_id)
+    if user.role == Role.ORG_ADMIN.value:
+        q = q.filter(User.role.in_(SCHOOL_STAFF), User.school_id.isnot(None))
     role = request.args.get("role")
     if role:
         q = q.filter(User.role == role)
@@ -176,6 +185,8 @@ def update_user(uid):
     target = db.session.get(User, uid)
     _scoped_target(actor, target)
     data = request.get_json(silent=True) or {}
+    if actor.role == Role.ORG_ADMIN.value:
+        data = {k: v for k, v in data.items() if k == "status"}   # disable / enable only
     before = target.public_dict()
     for f in ("full_name", "phone"):
         if f in data:

@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import { useBootstrap } from "../../hooks/useBootstrap";
+import { useAuth } from "../../lib/auth";
+import { optionText } from "../../lib/fieldOptions";
 import { toDMY } from "../../lib/dates";
 import { useReviewGate, ReviewNotice, reviewLabel } from "../../components/ReviewGate";
 import LoginCreated from "../../components/LoginCreated";
@@ -16,6 +18,11 @@ export default function Users() {
   const qc = useQueryClient();
   const { push } = useToast();
   const { data: boot } = useBootstrap();
+  const { user: me } = useAuth();
+  // an org admin looks after their schools' principals and trainers only
+  const isOA = me?.role === "OA";
+  const roleChoices = isOA ? ["PR", "VT"] : Object.keys(ROLE_LABELS);
+  const schoolName = (id) => (boot?.options?.schools || []).find((s) => String(s.value) === String(id))?.label;
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [creating, setCreating] = useState(false);
@@ -57,7 +64,7 @@ export default function Users() {
         </div>
         <select className="select filter-ctl" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
           <option value="">All roles</option>
-          {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          {roleChoices.map((k) => <option key={k} value={k}>{ROLE_LABELS[k]}</option>)}
         </select>
       </div>
 
@@ -65,17 +72,18 @@ export default function Users() {
         <div className="table-wrap">
           <table className="data">
             <thead>
-              <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last login</th><th>Actions</th></tr>
+              <tr><th>Name</th><th>Email</th><th>Role</th>{isOA && <th>School</th>}<th>Status</th><th>Last login</th><th>Actions</th></tr>
             </thead>
             <tbody>
               {list.isLoading
-                ? Array.from({ length: 5 }).map((_, i) => <tr key={i}><td colSpan={6}><div className="skeleton" style={{ width: "60%" }} /></td></tr>)
+                ? Array.from({ length: 5 }).map((_, i) => <tr key={i}><td colSpan={isOA ? 7 : 6}><div className="skeleton" style={{ width: "60%" }} /></td></tr>)
                 : users.map((u) => (
                     <tr key={u.id}>
                       <td>{u.full_name}</td>
                       <td className="mono-sm">{u.email}</td>
                       <td><span className="badge info">{u.role_label || ROLE_LABELS[u.role]}</span></td>
-                      <td><span className={`badge ${u.status === "active" ? "success" : "danger"}`}>{u.status}</span></td>
+                      {isOA && <td>{schoolName(u.school_id) || "—"}</td>}
+                      <td><span className={`badge ${u.status === "active" ? "success" : "danger"}`}>{optionText(u.status)}</span></td>
                       <td className="muted">{u.last_login_at ? toDMY(u.last_login_at) : "—"}</td>
                       <td>
                         <div className="cell-actions">

@@ -91,6 +91,9 @@ class ResourceConfig:
     # a person with a profile page (VT / PR): the admin's form also reads and
     # writes that profile - personal, bank, qualifications ... (api/profile.py)
     profile_role: Optional[str] = None
+    # after a create / edit, inside the same transaction: (obj, user, created,
+    # changed) - changed = the writable fields an edit really changed
+    on_saved: Optional[Callable] = None
     # fills in what a new record needs before it is first saved (e.g. whose
     # school it belongs to): (instance, user) -> error message or None
     prepare: Optional[Callable] = None
@@ -100,6 +103,13 @@ class ResourceConfig:
     # roles that may edit / delete / restore existing records; None = write_roles.
     # (A role in write_roles but not here can add records and nothing more.)
     edit_roles: Optional[List[str]] = None
+
+    def can_create(self, role):
+        """An org admin adds set-up records (the Master Data tabs) only; the
+        rest - attendance, visits, issues, equipment ... - they just view."""
+        if role == "OA" and self.name not in ORG_ADMIN_CREATES:
+            return False
+        return role in self.write_roles
 
     def locked_for(self, role):
         """A saved record this role may no longer change (see LOCKED_AFTER_SAVE)."""
@@ -121,6 +131,9 @@ REGISTRY = {}
 # Users & Access). The super admin can still correct anything.
 LOCKED_AFTER_SAVE = {"VT", "PR", "OA"}
 PEOPLE_DATA = {"students", "trainers", "principals"}
+# what an org admin may add: the Master Data tabs
+ORG_ADMIN_CREATES = {"states", "districts", "schools", "principals", "labs", "trainers", "academic-years",
+                     "sectors", "job-roles", "social-categories"}
 LOCKED_MESSAGE = "Saved records can't be edited or deleted."
 
 
@@ -418,7 +431,29 @@ def _validate_principal_issue(instance, user, is_create=False):
 def _maintenance_display(obj):
     from app.extensions import db
     eq = db.session.get(M.LabEquipment, obj.equipment_id) if obj.equipment_id else None
-    return {"equipment_name": eq.name if eq else None}
+    lab = db.session.get(M.Lab, eq.lab_id) if eq and eq.lab_id else None
+    school = db.session.get(M.School, eq.school_id) if eq and eq.school_id else None
+    by = db.session.get(M.User, obj.created_by) if obj.created_by else None
+    return {"equipment_name": eq.name if eq else None, "lab_name": lab.name if lab else None,
+            "school_name": school.name if school else None, "logged_by": by.full_name if by else None}
+
+
+def _vt_issue_display(obj):
+    """Who raised it and where - for the org admin resolving it."""
+    from app.extensions import db
+    lab = db.session.get(M.Lab, obj.lab_id) if obj.lab_id else None
+    school = db.session.get(M.School, lab.school_id) if lab and lab.school_id else None
+    by = db.session.get(M.User, obj.created_by) if obj.created_by else None
+    return {"trainer_name": _trainer_name(obj) or (by.full_name if by else None), "lab_name": lab.name if lab else None,
+            "school_name": school.name if school else None}
+
+
+def _principal_issue_display(obj):
+    from app.extensions import db
+    pr = db.session.get(M.Principal, obj.principal_id) if obj.principal_id else None
+    by = db.session.get(M.User, obj.created_by) if not pr and obj.created_by else None
+    return {"principal_name": pr.full_name if pr else (by.full_name if by else None),
+            **_school_name(obj)}
 
 
 def _validate_maintenance(instance, user, is_create=False):
@@ -468,7 +503,11 @@ def _student_display(obj):
     district = db.session.get(M.District, obj.school.district_id) if obj.school and obj.school.district_id else None
     category = db.session.get(M.SocialCategory, obj.social_category_id) if obj.social_category_id else None
     level = {"9": 1, "10": 2, "11": 3, "12": 4}.get(str(obj.class_grade))
+    stage = {"requested": "Leaving - TC pending", "tc_issued": "Leaving - TC issued", "left": "Left"}.get(obj.leaving_stage)
+    if obj.enrolment_status in ("Dropped Out", "Transferred Out"):
+        stage = "Left"
     return {"full_name": obj.full_name, **_school_name(obj),
+            "status_label": stage or obj.enrolment_status,
             "skill_name": sector.name if sector else None,
             "level": f"Level {level}" if level else None,
             "district_name": district.name if district else None,
@@ -601,6 +640,60 @@ register(ResourceConfig(
     computed=lambda o: {"district_name": o.district.name if o.district else None},
     manual_location=True,
 ))
+
+# ------------------------------------------------ what a save tells people
+def _saved_vt_issue(obj, user, created, changed):
+    from app.services import notify
+    if created:
+        notify.issue_raised(obj, user, "vt")
+
+
+def _saved_principal_issue(obj, user, created, changed):
+    from app.services import notify
+    if created:
+        notify.issue_raised(obj, user, "pr")
+
+
+def _saved_maintenance(obj, user, created, changed):
+    from app.extensions import db
+    from app.services import notify
+    equipment = db.session.get(M.LabEquipment, obj.equipment_id) if obj.equipment_id else None
+    if created:
+        notify.maintenance_logged(obj, equipment, user)
+    elif "maintenance_status" in (changed or ()):
+        notify.maintenance_status_changed(obj, equipment, user)
+
+
+def _saved_equipment(obj, user, created, changed):
+    from app.services import notify
+    if created or changed:
+        notify.equipment_saved(obj, user, created)
+
+
+def _saved_attendance(kind):
+    def hook(obj, user, created, changed):
+        from app.services import notify
+        if created and user.role == VT:
+            notify.attendance_submitted(obj, user, kind)
+    return hook
+
+
+def _saved_guest_lecture(obj, user, created, changed):
+    from app.services import notify
+    if created and user.role == VT:
+        notify.guest_lecture_added(obj, user)
+
+
+def _saved_student(obj, user, created, changed):
+    """A new student waits for the org admin; so does a verified one whose
+    details a trainer has since changed."""
+    from app.services import notify
+    if created:
+        notify.students_to_verify(obj.organisation_id, obj.school_id, 1, user, "added")
+    elif user.role == VT and changed and obj.verification_status == "verified":
+        obj.verification_status, obj.verified_by, obj.verified_on = "pending", None, None
+        notify.students_to_verify(obj.organisation_id, obj.school_id, 1, user, "edited")
+
 
 def _link_principal_to_school(instance, user, is_create=False):
     """Schools are added first and their principal afterwards: the school the
@@ -779,6 +872,7 @@ register(ResourceConfig(
 # =========================================================================
 register(ResourceConfig(
     name="students", model=M.Student, label="Student",
+    on_saved=_saved_student,
     # Only the trainer registers and maintains students; every other role just
     # views them. Verification is a separate workflow (workflow.py), not a write.
     # Students are records only - they never get a login.
@@ -788,11 +882,12 @@ register(ResourceConfig(
               "gender", "dob", "email", "father_name", "mother_name", "guardian_name",
               "stream", "mobile_primary", "mobile_secondary", "whatsapp_number",
               "cwsn", "social_category_id", "date_of_enrolment", "photo_url",
-              "had_vocational_9_10", "continuing_same_trade", "verification_status",
-              "verification_remarks", "admission_number", "aadhaar_number", "status"],
+              "had_vocational_9_10", "continuing_same_trade",
+              # (verification is not edited here - only an admin's Verify sets it)
+              "admission_number", "aadhaar_number", "status"],
     search=["first_name", "last_name", "roll_number", "admission_number", "email"],
     filters=["school_id", "lab_id", "job_role_id", "class_grade", "section",
-             "academic_year", "verification_status", "enrolment_status", "cwsn"],
+             "academic_year", "verification_status", "enrolment_status", "cwsn", "leaving_stage"],
     sortable=["first_name", "roll_number", "created_at"],
     default_sort=("created_at", "desc"),
     computed=_student_display,
@@ -823,6 +918,7 @@ register(ResourceConfig(
 # =========================================================================
 register(ResourceConfig(
     name="attendance", model=M.DailyAttendance, label="Daily Attendance",
+    on_saved=_saved_attendance("daily"),
     write_roles=[SA, OA, DM, VT],
     # the trainer's own daily attendance: date, time, photo, comment - and where
     # they were (within 1 km of the school). Older activity-branch columns keep
@@ -839,6 +935,7 @@ register(ResourceConfig(
 ))
 register(ResourceConfig(
     name="class-attendance", model=M.ClassAttendance, label="Class Attendance",
+    on_saved=_saved_attendance("class"),
     write_roles=[SA, OA, DM, VT],
     writable=["trainer_id", "lab_id", "job_role_id", "date", "time", "class_grade",
               "sections", "activity", "photo_url", "comment", "status"],
@@ -854,6 +951,8 @@ register(ResourceConfig(
 ))
 register(ResourceConfig(
     name="principal-issues", model=M.PrincipalIssue, label="Principal Issue",
+    computed=_principal_issue_display,
+    on_saved=_saved_principal_issue,
     # a principal raises their own issues; nothing else is theirs to change
     write_roles=[PR], edit_roles=[],
     writable=["reporting_date", "reporting_time", "details"],
@@ -864,6 +963,8 @@ register(ResourceConfig(
 ))
 register(ResourceConfig(
     name="issues", model=M.VTIssue, label="VT Issue",
+    computed=_vt_issue_display,
+    on_saved=_saved_vt_issue,
     extra_filters={"school_id": _school_by_lab},   # ?school_id= (org admins pick a school first)
     write_roles=[SA, OA, DM, VT],
     writable=["trainer_id", "lab_id", "academic_year", "reporting_date", "reporting_time",
@@ -893,6 +994,7 @@ register(ResourceConfig(
 ))
 register(ResourceConfig(
     name="guest-lectures", model=M.GuestLecture, label="Guest Lecture",
+    on_saved=_saved_guest_lecture,
     write_roles=[SA, OA, DM, VT],
     writable=["lab_id", "job_role_id", "class_grade", "sections", "academic_year",
               "reporting_date", "topic", "photo_url", "lecturer_name",
@@ -910,6 +1012,7 @@ register(ResourceConfig(
 ))
 register(ResourceConfig(
     name="equipment", model=M.LabEquipment, label="Lab Equipment",
+    on_saved=_saved_equipment,
     write_roles=[SA, OA, DM, VT],
     writable=["trainer_id", "lab_id", "name", "receipt_date", "details",
               "photo_url", "note", "status"],
@@ -921,6 +1024,7 @@ register(ResourceConfig(
 ))
 register(ResourceConfig(
     name="equipment-maintenance", model=M.EquipmentMaintenance, label="Maintenance Log",
+    on_saved=_saved_maintenance,
     extra_filters={"school_id": _school_by_equipment},   # ?school_id= (org admins pick a school first)
     write_roles=[SA, OA, DM, VT],
     writable=["equipment_id", "date", "issue", "maintenance_status", "note", "status"],

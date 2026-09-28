@@ -90,6 +90,8 @@ def apply_scope(query, model, user):
             query = query.filter(model.id.in_(district_ids or [None]))
         elif _has(model, "district_id"):
             query = query.filter(model.district_id.in_(district_ids or [None]))
+        elif _has(model, "linked_school_id"):   # principals
+            query = query.filter(model.linked_school_id.in_(_schools_in_districts(user, district_ids)))
         elif _has(model, "school_id"):
             query = query.filter(
                 model.school_id.in_(_schools_in_districts(user, district_ids))
@@ -103,6 +105,8 @@ def apply_scope(query, model, user):
             query = query.filter(model.id == user.school_id)
         elif model.__tablename__ == "district":
             query = _filter_to_district_of(query, model, user.school_id)
+        elif _has(model, "linked_school_id"):   # principals: themselves and any other at their school
+            query = query.filter(model.linked_school_id == user.school_id)
         elif _has(model, "school_id"):
             query = query.filter(model.school_id == user.school_id)
         else:
@@ -124,6 +128,8 @@ def apply_scope(query, model, user):
             query = query.filter(model.job_role_id.in_(allowed_job_role_ids(user) or [None]))
         elif _has(model, "lab_id"):
             query = query.filter(model.lab_id.in_(lab_ids or [None]))
+        elif _has(model, "linked_school_id"):   # their school's principal
+            query = query.filter(model.linked_school_id == user.school_id)
         elif _has(model, "school_id"):
             query = query.filter(model.school_id == user.school_id)
         else:

@@ -8,6 +8,7 @@ import { todayISO } from "../lib/dates";
 import DateInput from "./DateInput";
 import { useReviewGate, ReviewNotice, reviewLabel } from "./ReviewGate";
 import SectionManager from "./SectionManager";
+import PreviousStudents from "./PreviousStudents";
 
 /* Adding students, as easy as it can be: pick the class and section once,
    then one row per student - as many as you like, saved together. Blank rows
@@ -46,6 +47,7 @@ export default function AddStudents() {
   // a trainer can add a section to the chosen class - or remove an empty one
   const [newSection, setNewSection] = useState(null);   // null: closed; string: typing
   const [managing, setManaging] = useState(null);       // the section whose students are shown
+  const [previous, setPrevious] = useState(false);      // picking earlier Class 10 students for Class 11
   const changeSections = useMutation({
     mutationFn: async ({ path, name }) => (await api.post(`/students/sections${path}`, {
       lab_id: lab.value, class_grade: classGrade, section: name,
@@ -174,6 +176,12 @@ export default function AddStudents() {
         </div>
       </div>
       <ReviewNotice gate={review} />
+      {classGrade === "11" && section && (
+        <div className="prefill-note previous-note">
+          <span>Class 11 can also take this lab's earlier Class 10 students. They're verified again, as at Class 9.</span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPrevious(true)}>＋ Add previous students</button>
+        </div>
+      )}
       <p className="muted add-students-hint">
         One row per student. Every student needs the fields marked *; roll numbers are given automatically.
         Tip: paste a column of names from Excel into a “First name” box.
@@ -243,9 +251,10 @@ export default function AddStudents() {
       {done && (
         <div className="prefill-note" style={{ marginTop: ".8rem" }}>
           ✓ Added {done.added} to Class {done.class_grade} {done.section} ({done.academic_year}):{" "}
-          {done.students.map((s) => `${s.full_name} (${s.roll_number})`).join(", ")}. They're waiting for verification under “Edit & Verify”.
+          {done.students.map((s) => `${s.full_name} (${s.roll_number})`).join(", ")}. They're waiting for your admin to verify them.
         </div>
       )}
+      {previous && <PreviousStudents lab={lab} section={section} onClose={() => setPrevious(false)} />}
       {managing && (
         <SectionManager lab={lab} classGrade={classGrade} section={managing} sections={sections}
           onClose={() => setManaging(null)}

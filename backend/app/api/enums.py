@@ -134,7 +134,7 @@ EQUIPMENT_STATUS = _opts("working", "partially working", "not working")
 # the life of a repair: reported -> diagnosed -> being fixed -> an outcome
 MAINTENANCE_STATUS = _opts(
     "Reported", "Under Inspection", "Awaiting Spare Parts", "Sent for Repair",
-    "Under Repair", "Repaired", "Not Repairable", "Replaced",
+    "Under Repair", "Repaired", "Not Repairable", "Replaced", "Resolved",
 )
 RAW_MATERIAL_AVAILABILITY = [
     {"value": "available", "label": "Available"},

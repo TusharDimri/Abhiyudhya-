@@ -1,15 +1,46 @@
 import { useState } from "react";
-import { optionText } from "../../lib/fieldOptions";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import api from "../../lib/api";
 
+/* Who did what, and when - each entry in plain words: "Org Admin changed
+   student Aarav Nair", then what changed (Enrolment: Studying → Transferred
+   Out). */
 const ACTION_BADGE = { create: "success", update: "info", delete: "danger", restore: "gold" };
+const ACTIONS = [["create", "Added"], ["update", "Changed"], ["delete", "Deleted"], ["restore", "Restored"]];
+const ROLE_NAMES = { SA: "Super Admin", OA: "Org Admin", DM: "District Manager", PR: "Principal", VT: "Trainer" };
+
+function when(iso) {
+  if (!iso) return ["—", ""];
+  const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : `${iso}Z`);
+  return [d.toLocaleDateString("en-GB"), d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })];
+}
+
+function Changes({ list }) {
+  const [all, setAll] = useState(false);
+  if (!list?.length) return <span className="muted">—</span>;
+  const shown = all ? list : list.slice(0, 3);
+  return (
+    <ul className="audit-changes">
+      {shown.map((c, i) => (
+        <li key={i}>
+          <b>{c.field}:</b>{" "}
+          {c.from != null ? <><span className="audit-old">{c.from}</span> <span aria-hidden="true">→</span> </> : null}
+          <span className="audit-new">{c.to}</span>
+        </li>
+      ))}
+      {list.length > 3 && (
+        <li><button type="button" className="link-btn plain" onClick={() => setAll((a) => !a)}>
+          {all ? "Show less" : `Show ${list.length - 3} more`}
+        </button></li>
+      )}
+    </ul>
+  );
+}
 
 export default function Audit() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [action, setAction] = useState("");
-  const [expanded, setExpanded] = useState(null);
 
   const q = useQuery({
     queryKey: ["audit", page, search, action],
@@ -31,18 +62,19 @@ export default function Audit() {
         <div>
           <div className="crumb">Administration</div>
           <h1>📜 Audit Log</h1>
-          <div className="muted" style={{ fontSize: ".85rem" }}>Every create, update, delete and restore — who, when, and what changed.</div>
+          <div className="muted" style={{ fontSize: ".85rem" }}>Who added or changed what, and when.</div>
         </div>
       </div>
 
       <div className="toolbar">
         <div className="search-wrap">
           <span className="search-ico">🔍</span>
-          <input className="input search" placeholder="Search by entity or user…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+          <input className="input search" placeholder="Search by person's email or record type…" value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
         </div>
         <select className="select filter-ctl" value={action} onChange={(e) => { setAction(e.target.value); setPage(1); }}>
-          <option value="">All actions</option>
-          {["create", "update", "delete", "restore"].map((a) => <option key={a} value={a}>{optionText(a)}</option>)}
+          <option value="">What happened: All</option>
+          {ACTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
       </div>
 
@@ -50,38 +82,36 @@ export default function Audit() {
         <div className="table-wrap">
           <table className="data">
             <thead>
-              <tr><th>When</th><th>User</th><th>Action</th><th>Entity</th><th>Changes</th></tr>
+              <tr><th>When</th><th>Who</th><th>What happened</th><th>What changed</th></tr>
             </thead>
             <tbody>
               {q.isLoading
-                ? Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={5}><div className="skeleton" style={{ width: "70%" }} /></td></tr>)
-                : rows.map((r) => (
-                    <tr key={r.id}>
-                      <td className="muted mono-sm">{r.created_at?.slice(0, 19).replace("T", " ")}</td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{r.actor_email || "—"}</div>
-                        <div className="muted" style={{ fontSize: ".72rem" }}>{r.actor_role}</div>
-                      </td>
-                      <td><span className={`badge ${ACTION_BADGE[r.action] || ""}`}>{r.action}</span></td>
-                      <td className="mono-sm">{r.entity}</td>
-                      <td>
-                        <button className="btn btn-ghost btn-sm" onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
-                          {expanded === r.id ? "Hide" : "View"}
-                        </button>
-                        {expanded === r.id && (
-                          <div className="audit-diff">
-                            {r.before && <div><b>before:</b> {JSON.stringify(r.before, null, 1)}</div>}
-                            {r.after && <div><b>after:</b> {JSON.stringify(r.after, null, 1)}</div>}
-                            {r.ip && <div style={{ marginTop: 4 }}><b>ip:</b> {r.ip}</div>}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                ? Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={4}><div className="skeleton" style={{ width: "70%" }} /></td></tr>)
+                : rows.map((r) => {
+                    const [day, time] = when(r.created_at);
+                    return (
+                      <tr key={r.id}>
+                        <td>
+                          <div>{day}</div>
+                          <div className="muted" style={{ fontSize: ".75rem" }}>{time}</div>
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{r.actor_name || "—"}</div>
+                          <div className="muted" style={{ fontSize: ".75rem" }}>{ROLE_NAMES[r.actor_role] || r.actor_role}</div>
+                        </td>
+                        <td>
+                          <span className={`badge ${ACTION_BADGE[r.action] || ""}`}>{r.verb}</span>{" "}
+                          <span>{r.what}</span>
+                          {r.record && <div className="audit-record">{r.record}</div>}
+                        </td>
+                        <td><Changes list={r.changes} /></td>
+                      </tr>
+                    );
+                  })}
             </tbody>
           </table>
         </div>
-        {!q.isLoading && rows.length === 0 && <div className="empty">No audit entries.</div>}
+        {!q.isLoading && rows.length === 0 && <div className="empty">Nothing recorded yet.</div>}
       </div>
 
       <div className="pager">

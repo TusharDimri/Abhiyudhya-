@@ -61,6 +61,18 @@ class Student(BaseModel):
     left_on = db.Column(db.Date)
     left_reason = db.Column(db.Text)
 
+    # Leaving the school, in three steps: the trainer marks the student as
+    # leaving -> the principal records the TC (Transfer Certificate) -> the
+    # org admin checks the TC and confirms. enrolment_status only changes at
+    # the last step, to leaving_type.
+    leaving_stage = db.Column(db.String(20), index=True)   # requested / tc_issued / left
+    leaving_type = db.Column(db.String(20))                # Dropped Out / Transferred Out
+    leave_requested_on = db.Column(db.Date)
+    tc_url = db.Column(db.String(500))                     # photo of the TC
+    tc_number = db.Column(db.String(60))
+    tc_issued_on = db.Column(db.Date)
+    tc_verified_on = db.Column(db.DateTime)
+
     school = db.relationship("School", lazy="joined")
 
     @property

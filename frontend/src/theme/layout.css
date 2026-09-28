@@ -614,3 +614,64 @@ table.data.view-table th, table.data.view-table td { padding: .45rem .7rem; }
 .scope-empty { display: flex; flex-direction: column; align-items: center; gap: .35rem; padding: 2.2rem 1rem; text-align: center; }
 .scope-empty-ico { font-size: 1.8rem; }
 @media (max-width: 560px) { .scope-pick { min-width: 0; flex: 1 1 100%; } }
+
+/* Class 11: add earlier Class 10 students */
+.previous-note { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; justify-content: space-between; margin-bottom: .6rem; }
+
+/* the record window, in its form's sections; caller's buttons in the footer */
+.modal footer { gap: .6rem; }
+.view-section + .view-section { border-top: 1px solid var(--line); margin-top: 1rem; padding-top: .9rem; }
+.view-section-title { margin: 0 0 .7rem; font-size: .72rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--navy-700); }
+
+/* the notification bell beside the user's name, and its dropdown */
+.bell { position: relative; }
+.bell-btn { position: relative; background: none; border: 1px solid transparent; border-radius: 10px; width: 38px; height: 38px;
+  display: grid; place-items: center; font-size: 1.15rem; cursor: pointer; }
+.bell-btn:hover, .bell-btn[aria-expanded="true"] { background: var(--navy-050); border-color: var(--line); }
+.bell-count { position: absolute; top: -3px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  background: #d92d20; color: #fff; font-size: .68rem; font-weight: 800; line-height: 18px; text-align: center;
+  box-shadow: 0 0 0 2px #fff; }
+.bell-menu { position: absolute; right: 0; top: calc(100% + 8px); width: min(380px, calc(100vw - 32px)); background: #fff;
+  border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lg); z-index: 70; overflow: hidden; }
+.bell-head { display: flex; justify-content: space-between; align-items: center; padding: .7rem .9rem; border-bottom: 1px solid var(--line); }
+.bell-list { max-height: 380px; overflow-y: auto; overscroll-behavior: contain; }
+.bell-item { display: flex; gap: .65rem; align-items: flex-start; width: 100%; text-align: left; background: #fff; border: 0;
+  border-bottom: 1px solid var(--line); padding: .7rem .9rem; cursor: pointer; font: inherit; }
+.bell-item:hover { background: var(--bg-soft); }
+.bell-item.unread { background: #f3f7ff; }
+.bell-item.unread:hover { background: #e9f0ff; }
+.bell-ico { font-size: 1.05rem; line-height: 1.3; }
+.bell-text { display: flex; flex-direction: column; gap: .15rem; min-width: 0; flex: 1; }
+.bell-title { font-weight: 700; font-size: .86rem; color: var(--navy-800); }
+.bell-item.unread .bell-title { color: var(--navy-900, #0d1e38); }
+.bell-body { font-size: .8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.bell-time { font-size: .72rem; color: var(--muted); }
+.bell-dot { width: 8px; height: 8px; border-radius: 50%; background: #d92d20; margin-top: .35rem; flex: none; }
+.bell-empty { padding: 1.2rem .9rem; text-align: center; }
+.bell-all { width: 100%; background: var(--bg-soft); border: 0; padding: .65rem; font: inherit; font-weight: 700;
+  font-size: .82rem; color: var(--navy-700); cursor: pointer; }
+.bell-all:hover { background: var(--navy-050); }
+.link-btn.plain { color: var(--navy-700); font-size: .78rem; }
+.notif-list { padding: 0; overflow: hidden; }
+.notif-list .bell-item:last-child { border-bottom: 0; }
+
+.notif-seg { align-self: flex-start; }
+
+/* a student on their way out of the school */
+.leaving-note { font-size: .74rem; font-weight: 700; color: #b54708; background: #fffaeb; border: 1px solid #fedf89; border-radius: 999px; padding: .15rem .55rem; white-space: nowrap; }
+
+/* the TC in a student's history */
+.history-tc { margin-top: .5rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-soft);
+  display: flex; flex-direction: column; gap: .15rem; font-size: .86rem; }
+.history-tc-title { font-weight: 800; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--navy-700); }
+
+/* the resolve form's filled-in details */
+.known-item.wide { grid-column: 1 / -1; }
+.known-v.known-wrap { white-space: normal; overflow: visible; }
+
+/* the audit log, in plain words */
+.audit-record { font-weight: 600; color: var(--navy-800); margin-top: .2rem; }
+.audit-changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .2rem; font-size: .84rem; }
+.audit-old { color: var(--muted); text-decoration: line-through; }
+.audit-new { color: var(--navy-800); font-weight: 600; }

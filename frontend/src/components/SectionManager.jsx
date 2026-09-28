@@ -1,6 +1,7 @@
 /* Removing a section: the section's students are listed first, so each one
-   can be moved to another section of the class or taken off the lab (marked
-   as left - nothing is deleted). Once it is empty, the section can go. */
+   can be moved to another section of the class or marked as left (a student
+   is never deleted - they stay on record as having left). Once it is empty,
+   the section can go. */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
@@ -20,7 +21,9 @@ function StudentRow({ s, n, others, busy, onMove, onLeave }) {
       <td>{s.full_name}</td>
       <td>{s.admission_number || "—"}</td>
       <td>
-        {!leaving ? (
+        {s.leaving_stage ? (
+          <span className="leaving-note">{s.leaving_stage === "requested" ? "Leaving · TC pending" : "Leaving · TC issued"}</span>
+        ) : !leaving ? (
           <div className="section-student-actions">
             {others.length > 0 && (
               <select className="select select-sm" value="" disabled={busy} onChange={(e) => e.target.value && onMove(s, e.target.value)}
@@ -30,7 +33,7 @@ function StudentRow({ s, n, others, busy, onMove, onLeave }) {
               </select>
             )}
             <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => setLeaving(true)}>
-              Remove from lab
+              Mark as left
             </button>
           </div>
         ) : (
@@ -41,7 +44,7 @@ function StudentRow({ s, n, others, busy, onMove, onLeave }) {
             <input className="input input-sm" placeholder="Reason, e.g. Family moved" value={reason}
               onChange={(e) => setReason(e.target.value)} autoFocus />
             <button type="button" className="btn btn-danger btn-sm" disabled={busy || !reason.trim()}
-              onClick={() => onLeave(s, status, reason.trim())}>Remove</button>
+              onClick={() => onLeave(s, status, reason.trim())}>Mark as left</button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLeaving(false)}>Cancel</button>
           </div>
         )}
@@ -74,7 +77,7 @@ export default function SectionManager({ lab, classGrade, section, sections, onC
   const leave = useMutation({
     mutationFn: async ({ s, status, reason }) => api.post(`/promotion/students/${s.id}/status`,
       { enrolment_status: status, reason, date: todayISO() }),
-    onSuccess: (_, { s, status }) => { push(`${s.full_name} marked ${status}`, "success"); refresh(); },
+    onSuccess: (_, { s }) => { push(`${s.full_name} marked as leaving - the principal will issue the TC`, "success"); refresh(); },
     onError: (e) => push(apiError(e), "error"),
   });
   const remove = useMutation({
@@ -108,8 +111,8 @@ export default function SectionManager({ lab, classGrade, section, sections, onC
         <div className="body">
           {!empty && (
             <p className="muted" style={{ marginTop: 0 }}>
-              To remove Section {section}, first move each student to another section, or remove them from the lab.
-              Removed students are kept in the records as having left.
+              To remove Section {section}, first move each student to another section, or mark them as left
+              (the principal then records their TC and the org admin confirms). Students are never deleted.
             </p>
           )}
           {empty && <div className="prefill-note">✓ Section {section} is empty and can be removed.</div>}
@@ -131,7 +134,7 @@ export default function SectionManager({ lab, classGrade, section, sections, onC
         <footer>
           <button type="button" className="btn btn-ghost" onClick={onClose}>Close</button>
           <button type="button" className="btn btn-danger" disabled={!empty || busy} onClick={() => remove.mutate()}
-            title={empty ? "" : "Move or remove every student first"}>
+            title={empty ? "" : "Move every student or mark them as left first"}>
             {remove.isPending ? "Removing…" : `Remove Section ${section}`}
           </button>
         </footer>

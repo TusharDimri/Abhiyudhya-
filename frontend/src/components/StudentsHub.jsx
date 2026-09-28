@@ -6,11 +6,12 @@ import PromoteDialog from "./PromoteDialog";
 
 /* A trainer's Students page, in two tabs:
      View Students    the list, with the filters that matter - nothing to change
-     Manage Students  Add students (many at once) · Promote · Edit & Verify   */
+     Manage Students  Add students (many at once) · Promote · Edit
+   (Verifying students is the admin's job.)                                  */
 const MANAGE = [
   { key: "add", label: "➕ Add Students" },
   { key: "promote", label: "⬆ Promote Students" },
-  { key: "edit", label: "✎ Edit & Verify" },
+  { key: "edit", label: "✎ Edit Students" },
 ];
 
 export default function StudentsHub() {
@@ -35,7 +36,7 @@ export default function StudentsHub() {
         <button type="button" className={`tab ${tab === "manage" ? "on" : ""}`} onClick={() => go({ tab: "manage", manage: part })}>🛠 Manage Students</button>
       </nav>
 
-      {tab === "view" && <ResourcePage key="view" resourceKey="students" embedded readOnly onlyActions={["history"]} />}
+      {tab === "view" && <ResourcePage key="view" resourceKey="students" embedded readOnly onlyActions={["history", "record"]} />}
 
       {tab === "manage" && (
         <>
@@ -55,7 +56,7 @@ export default function StudentsHub() {
               }}
             />
           )}
-          {part === "edit" && <ResourcePage key="edit" resourceKey="students" embedded hideCreate onlyActions={["verify", "history"]} />}
+          {part === "edit" && <ResourcePage key="edit" resourceKey="students" embedded hideCreate onlyActions={["history", "status", "record"]} />}
         </>
       )}
     </div>

@@ -150,7 +150,7 @@ def bootstrap():
         "resources": {
             name: {
                 "label": cfg.label,
-                "can_write": user.role in cfg.write_roles,
+                "can_write": cfg.can_create(user.role),
                 "can_edit": cfg.can_edit(user.role),
                 "filters": cfg.filters,
                 "sortable": cfg.sortable,

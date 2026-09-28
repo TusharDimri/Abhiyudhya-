@@ -436,7 +436,7 @@ export const MODULES = {
       { key: "verification_status", label: "Verification", badge: true },
       // Status (studying / completed / left): switched off for trainers for now -
       // remove "VT" from hideFor to bring it back
-      { key: "enrolment_status", label: "Status", badge: true, hideFor: ["VT"] },
+      { key: "status_label", label: "Status", badge: true, hideFor: ["VT"] },
     ],
     formHint: "Students can be added in any class the lab runs; at the end of the year they move up through Promote Students.",
     // a trainer promotes from the Manage Students tab (StudentsHub) instead
@@ -501,13 +501,17 @@ export const MODULES = {
         group: "Category & enrolment",
       },
 
-      { name: "verification_status", label: "Verification status", type: "select", enumKey: "verification_status", defaultValue: "pending", group: "Verification" },
-      { name: "verification_remarks", label: "Verification remarks", type: "textarea", group: "Verification" },
+      // verification isn't edited in this form - an admin's Verify sets it
     ],
     rowActions: [
-      { action: "verify", roles: ["VT", "DM", "OA", "SA"] },
+      { action: "verify", roles: ["DM", "OA", "SA"] },   // trainers add students; an admin verifies them
       { action: "history", roles: ["VT", "PR", "DM", "OA", "SA"] },
-      { action: "status", roles: ["DM", "OA", "SA"] },
+      // leaving the school: the trainer marks -> the principal records the TC -> the org admin confirms
+      { action: "status", roles: ["VT"] },
+      { action: "tc", roles: ["PR"] },
+      { action: "leftverify", roles: ["OA", "SA"] },
+      // a student who has left: View (their record and history) is all anyone gets
+      { action: "record", roles: ["VT", "PR", "DM", "OA", "SA"] },
     ],
   },
   assessments: {
@@ -568,7 +572,8 @@ export const MODULES = {
       { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"], quiet: true,
         defaultValue: FIRST_LAB },
     ],
-    rowActions: [{ action: "view", roles: ["PR"] }, { action: "endorse", roles: ["PR", "OA", "SA"] }],
+    // only the principal verifies attendance; everyone else just sees it
+    rowActions: [{ action: "view", roles: ["PR"] }, { action: "endorse", roles: ["PR"] }],
   },
   "class-attendance": {
     label: "Class Attendance", singular: "Class Attendance", icon: "🧑‍🏫", group: "Daily Operations",
@@ -587,7 +592,8 @@ export const MODULES = {
       // where it was marked, for whoever reviews it - never shown to the trainer
       { key: "distance_from_school_m", label: "At school?", dot: "distance", hideFor: ["VT"] },
     ],
-    rowActions: [{ action: "view", roles: ["PR"] }, { action: "endorse", roles: ["PR", "OA", "SA"] }],
+    // only the principal verifies attendance; everyone else just sees it
+    rowActions: [{ action: "view", roles: ["PR"] }, { action: "endorse", roles: ["PR"] }],
     fields: [
       { name: "date", label: "Date", required: true, ...PAST_DATE, readOnlyFor: ["VT"] },
       { name: "time", label: "Time", type: "time", required: true, defaultValue: nowTime, readOnlyFor: ["VT"] },
@@ -614,13 +620,16 @@ export const MODULES = {
     defaultGroup: "Class",
   },
   "principal-issues": {
+    rowActions: [{ action: "resolve", roles: ["DM", "OA", "SA"] }],   // the admin resolves it; the principal is told
     label: "Principal Issues", singular: "Issue", icon: "📣", group: "Daily Operations",
     searchHint: "Search the issue text",
     columns: [
       { key: "reporting_date", label: "Date" },
       { key: "reporting_time", label: "Time" },
       { key: "details", label: "Issue" },
+      { key: "principal_name", label: "Raised by", hideFor: ["PR"] },
       { key: "workflow_status", label: "Status", badge: true, valueLabels: ISSUE_STATUS_LABELS },
+      { key: "resolution_note", label: "Resolution" },
     ],
     fields: [
       { name: "reporting_date", label: "Date", required: true, ...PAST_DATE },
@@ -636,7 +645,9 @@ export const MODULES = {
       { key: "reporting_date", label: "Date" },
       { key: "reporting_time", label: "Time" },
       { key: "details", label: "Issue" },
+      { key: "trainer_name", label: "Raised by", hideFor: ["VT"] },
       { key: "workflow_status", label: "Status", badge: true, valueLabels: ISSUE_STATUS_LABELS },
+      { key: "resolution_note", label: "Resolution" },
     ],
     fields: [
       { name: "reporting_date", label: "Date", required: true, ...PAST_DATE },
@@ -649,7 +660,7 @@ export const MODULES = {
         defaultValue: FIRST_LAB },
       { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", autoFor: ["VT", "PR", "DM"], quiet: true },
     ],
-    rowActions: [{ action: "transition", roles: ["DM", "OA", "SA"] }],
+    rowActions: [{ action: "resolve", roles: ["DM", "OA", "SA"] }],   // the admin resolves it; the raiser is told
   },
   "field-visits": {
     label: "Field / Industry Visits", singular: "Field Visit", icon: "🚌", group: "Daily Operations",
@@ -758,13 +769,16 @@ export const MODULES = {
     ],
   },
   "equipment-maintenance": {
+    rowActions: [{ action: "resolve", roles: ["DM", "OA", "SA"] }],   // the admin resolves it; the trainer is told
     label: "Maintenance Log", singular: "Maintenance", icon: "🔧", group: "Daily Operations",
     searchHint: "Search by issue or note",
     columns: [
       { key: "date", label: "Date" },
       { key: "equipment_name", label: "Equipment" },
       { key: "issue", label: "Issue" },
+      { key: "logged_by", label: "Logged by", hideFor: ["VT"] },
       { key: "maintenance_status", label: "Status", badge: true },
+      { key: "action", label: "Resolution" },
     ],
     fields: [
       { name: "equipment_id", label: "Lab equipment", type: "select", optionsKey: "equipment", async: true, required: true },
@@ -967,7 +981,8 @@ export const HIDDEN_SECTIONS = {
   // feedback: switched off for principals for now too
   PR: ["sectors", "modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "equipment-maintenance", "feedback"],
   // org admins: no curriculum tabs, employer lists or daily diaries; feedback off for now too
-  OA: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback"],
+  // (notifications: they have their own, from the bell - not this list of everyone's)
+  OA: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback", "notifications"],
 };
 
 export const isSectionHidden = (role, key) => !!HIDDEN_SECTIONS[role]?.includes(key);

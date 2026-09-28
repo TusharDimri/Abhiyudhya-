@@ -5,6 +5,8 @@ import { useBootstrap } from "../hooks/useBootstrap";
 import { MODULES, NAV_GROUPS, NAV_GROUP_ORDER, MASTER_GROUP, isSectionHidden, groupOf } from "../lib/modules";
 import LocationButton from "./LocationButton";
 import ScopeBadges from "./ScopeBadges";
+import NotificationBell from "./NotificationBell";
+import { NOTIFY_ROLES } from "../lib/notifications";
 
 // Roles whose login carries a profile page of their own.
 const PROFILE_ROLES = ["VT", "PR"];
@@ -13,7 +15,9 @@ const PROFILE_ROLES = ["VT", "PR"];
 const ADMIN_LINKS = [
   { to: "/app/admin/users", label: "Users & Access", icon: "👥", roles: ["SA", "OA", "DM"] },
   { to: "/app/admin/audit", label: "Audit Log", icon: "📜", roles: ["SA", "OA"] },
-  { to: "/app/admin/trash", label: "Recycle Bin", icon: "♻️", roles: ["SA", "OA", "DM"] },
+  // Recycle Bin: switched off - nothing can be deleted any more, so there's
+  // nothing to restore. Uncomment to bring it back (pages/admin/Trash.jsx).
+  // { to: "/app/admin/trash", label: "Recycle Bin", icon: "♻️", roles: ["SA", "OA", "DM"] },
 ];
 
 export default function Layout() {
@@ -78,6 +82,11 @@ export default function Layout() {
           <NavLink to="/app/dashboard" className={item} title="Dashboard">
             <span className="ico">📊</span> <span className="nav-label">Dashboard</span>
           </NavLink>
+          {NOTIFY_ROLES.includes(user?.role) && (
+            <NavLink to="/app/notifications" className={item} title="Notifications">
+              <span className="ico">🔔</span> <span className="nav-label">Notifications</span>
+            </NavLink>
+          )}
           {navGroups.map((g) =>
             grouped[g]?.length ? (
               <div key={g}>
@@ -144,6 +153,7 @@ export default function Layout() {
 
           <div className="user-chip">
             {user?.role === "VT" && <LocationButton />}
+            {NOTIFY_ROLES.includes(user?.role) && <NotificationBell />}
             <div className="user-meta">
               <span className="user-name">{user?.full_name}</span>
               <span className="role-pill">{roleLabel || user?.role}</span>

@@ -169,11 +169,106 @@ def add_students():
     db.session.flush()
     for s in made:
         audit.record(user, "create", "student", s.id, after=s.to_dict())
+    from app.services import notify
+    notify.students_to_verify(user.organisation_id, lab.school_id, len(made), user, "added")
     db.session.commit()
     return jsonify({
         "added": len(made), "class_grade": class_grade, "section": section, "academic_year": year,
         "students": [{"id": str(s.id), "full_name": s.full_name, "roll_number": s.roll_number} for s in made],
     }), 201
+
+
+# --------------------------------------------- previous students, into Class 11
+# Class 11 takes new students and also this lab's earlier Class 10 students who
+# aren't in 11-12 yet (they finished Class 10, left during it, or were never
+# moved up). Either way they are verified again, as at Class 9.
+REJOIN_FROM = ("Completed", "Dropped Out")
+
+
+def _trainer_lab(user, lab_id):
+    if user.role != Role.TRAINER.value:
+        abort(403, description="Only a trainer adds students.")
+    lab = db.session.get(Lab, lab_id) if lab_id else None
+    if lab is None or lab.id not in {l.id for l in user.labs}:
+        abort(400, description="Choose one of your labs.")
+    if not lab.job_role_11_12_id:
+        abort(400, description="Your lab doesn't run Class 11.")
+    return lab
+
+
+def _previous_students(lab, year):
+    """Earlier Class 10 students of this lab who can join Class 11 now."""
+    from sqlalchemy import and_, or_
+    return (db.session.query(Student)
+            .filter(Student.lab_id == lab.id, Student.class_grade == "10", Student.is_deleted.is_(False),
+                    or_(Student.enrolment_status.in_(REJOIN_FROM),
+                        and_(Student.enrolment_status == "Studying", Student.academic_year != year)))
+            .order_by(Student.first_name, Student.last_name).all())
+
+
+@bp.get("/previous")
+@login_required
+def previous_students():
+    user = current_user()
+    lab = _trainer_lab(user, request.args.get("lab_id"))
+    year = academic_year_for(user.organisation_id, date.today())
+    return jsonify({"data": [{
+        "id": str(s.id), "full_name": s.full_name, "admission_number": s.admission_number,
+        "section": s.section, "roll_number": s.roll_number, "academic_year": s.academic_year,
+        "enrolment_status": s.enrolment_status,
+    } for s in _previous_students(lab, year)]})
+
+
+@bp.post("/previous")
+@login_required
+def add_previous_students():
+    """Body: {lab_id, section, student_ids}. Moves them into Class 11 this
+    year: next roll numbers, pending verification, Class 10 kept in history."""
+    from app.models.student import StudentPromotion
+
+    user = current_user()
+    data = request.get_json(silent=True) or {}
+    lab = _trainer_lab(user, data.get("lab_id"))
+    section = str(data.get("section") or "").strip().upper()
+    if section not in lab.sections_for("11"):
+        abort(400, description="Choose a section of Class 11.")
+    year = academic_year_for(user.organisation_id, date.today())
+    allowed = {str(s.id): s for s in _previous_students(lab, year)}
+    wanted = [str(i) for i in (data.get("student_ids") or [])]
+    if not wanted:
+        abort(400, description="Choose at least one student.")
+    unknown = [i for i in wanted if i not in allowed]
+    if unknown:
+        abort(400, description="Some of these students can't join Class 11 from here.")
+
+    rolls, _ = _next_rolls(lab, "11", section, year, len(wanted))
+    job_role = lab.job_role_for("11")
+    added = []
+    for sid, roll in zip(wanted, rolls):
+        s = allowed[sid]
+        db.session.add(StudentPromotion(
+            organisation_id=s.organisation_id, student_id=s.id,
+            from_academic_year=s.academic_year, to_academic_year=year, from_class="10", to_class="11",
+            outcome="Joined Class 11", created_by=user.id,
+            from_roll_number=s.roll_number, from_job_role_id=s.job_role_id, from_lab_id=s.lab_id,
+            from_school_id=s.school_id, from_verification_status=s.verification_status,
+            from_enrolment_status=s.enrolment_status, snapshot=s.to_dict(), section=s.section,
+        ))
+        before = {"class_grade": s.class_grade, "academic_year": s.academic_year, "enrolment_status": s.enrolment_status}
+        s.class_grade, s.section, s.roll_number, s.academic_year = "11", section, roll, year
+        s.job_role_id = job_role
+        s.enrolment_status, s.left_on, s.left_reason = "Studying", None, None
+        s.had_vocational_9_10 = s.continuing_same_trade = True
+        s.verification_status, s.verified_by, s.verified_on = "pending", None, None
+        s.updated_by = user.id
+        audit.record(user, "update", "student", s.id, before=before,
+                     after={"class_grade": "11", "section": section, "academic_year": year, "joined": "Class 11"})
+        added.append({"id": sid, "full_name": s.full_name, "roll_number": roll})
+    from app.services import notify
+    notify.students_to_verify(user.organisation_id, lab.school_id, len(added), user, "class11")
+    db.session.commit()
+    return jsonify({"added": len(added), "class_grade": "11", "section": section,
+                    "academic_year": year, "students": added})
 
 
 # ------------------------------------------------------------------ sections

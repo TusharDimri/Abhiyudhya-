@@ -10,6 +10,9 @@ Promotion moves a class up a year, once that year has ended:
 Each student is either promoted or held back (repeats the class next year).
 Only verified students still studying are moved, and each outcome is kept in
 student_promotion - the history behind a student's current class and year.
+
+Students are verified twice: when they join Class 9 and again when they join
+Class 11 - so moving up into Class 11 sends them back to "pending".
 """
 from datetime import date
 
@@ -115,8 +118,9 @@ def preview():
         out.append({
             "id": str(s.id), "full_name": s.full_name, "roll_number": s.roll_number, "section": s.section,
             "verification_status": s.verification_status,
-            "eligible": s.verification_status == "verified",
-            "reason": None if s.verification_status == "verified" else "Verify this student first",
+            "eligible": s.verification_status == "verified" and not s.leaving_stage,
+            "reason": ("Leaving the school" if s.leaving_stage
+                       else None if s.verification_status == "verified" else "Verify this student first"),
             "to_class": to_class,
             "to_job_role": db.session.get(JobRole, new_role).name if new_role else None,
         })
@@ -157,6 +161,9 @@ def promote():
     if unknown:
         abort(400, description="Some students aren't in this class and year any more - reload and try again.")
     unverified = [candidates[i].full_name for i in up | back if candidates[i].verification_status != "verified"]
+    leaving = [candidates[i].full_name for i in up | back if candidates[i].leaving_stage]
+    if leaving:
+        abort(400, description="These students are leaving the school: " + ", ".join(sorted(leaving)))
     if unverified:
         abort(400, description="Verify these students first: " + ", ".join(sorted(unverified)))
     if not (up or back):
@@ -187,9 +194,10 @@ def promote():
             else:
                 outcome = "Promoted"
                 if to_class == "11":
-                    # carrying on with the same trade into 11-12
+                    # carrying on with the same trade into 11-12 - and verified again
                     s.had_vocational_9_10 = True
                     s.continuing_same_trade = True
+                    s.verification_status, s.verified_by, s.verified_on = "pending", None, None
                 s.class_grade = to_class
                 s.academic_year = to_year
                 if lab:
@@ -205,8 +213,31 @@ def promote():
             "class_grade": s.class_grade, "academic_year": s.academic_year,
             "enrolment_status": s.enrolment_status, "promotion": outcome,
         })
+    # students moved up into Class 11 wait for the org admin again - one note per school
+    into_11 = {}
+    for sid in up:
+        s = candidates[sid]
+        if s.class_grade == "11" and s.verification_status == "pending":
+            into_11[s.school_id] = into_11.get(s.school_id, 0) + 1
+    if into_11:
+        from app.services import notify
+        for school_id, n in into_11.items():
+            notify.students_to_verify(user.organisation_id, school_id, n, user, "class11")
     db.session.commit()
     return jsonify({"to_year": to_year, **{k.lower().replace(" ", "_"): v for k, v in counts.items()}})
+
+
+def _tc_link(path):
+    """A short-lived link to the TC photo (none when storage isn't set up)."""
+    if not path:
+        return None
+    if str(path).startswith("http"):
+        return path
+    try:
+        from app.services import storage
+        return storage.presign_download(path)
+    except Exception:
+        return None
 
 
 @bp.get("/history/<uid>")
@@ -235,6 +266,12 @@ def history(uid):
             "roll_number": s.roll_number, "job_role": name(JobRole, s.job_role_id),
             "lab": name(Lab, s.lab_id), "enrolment_status": s.enrolment_status,
             "verification_status": s.verification_status,
+            "leaving_stage": s.leaving_stage, "leaving_type": s.leaving_type, "left_reason": s.left_reason,
+            "left_on": s.left_on.isoformat() if s.left_on else None,
+            "leave_requested_on": s.leave_requested_on.isoformat() if s.leave_requested_on else None,
+            "tc_number": s.tc_number, "tc_issued_on": s.tc_issued_on.isoformat() if s.tc_issued_on else None,
+            "tc_verified_on": s.tc_verified_on.isoformat() if s.tc_verified_on else None,
+            "tc_src": _tc_link(s.tc_url), "has_tc_photo": bool(s.tc_url),
         },
         "years": [{
             "academic_year": r.from_academic_year, "class_grade": r.from_class, "section": r.section,
@@ -248,44 +285,113 @@ def history(uid):
     })
 
 
-@bp.post("/students/<uid>/status")
-@login_required
-def change_status(uid):
-    """A student leaves (dropped out / transferred out) or rejoins.
-    Body: {enrolment_status, date?, reason?}. Completing the course happens
-    through promotion only."""
-    user = _user()
+def _log_step(s, user, outcome):
+    """A leaving step in the student's history (kept like a promotion)."""
+    db.session.add(StudentPromotion(
+        organisation_id=s.organisation_id, student_id=s.id,
+        from_academic_year=s.academic_year or "-", to_academic_year=None,
+        from_class=str(s.class_grade or "-"), to_class=None, section=s.section, outcome=outcome,
+        created_by=user.id, from_roll_number=s.roll_number, from_job_role_id=s.job_role_id,
+        from_lab_id=s.lab_id, from_school_id=s.school_id, from_verification_status=s.verification_status,
+        from_enrolment_status=s.enrolment_status, snapshot=s.to_dict(),
+    ))
+
+
+def _student_for(user, uid):
     s = db.session.get(Student, uid)
     if s is None or s.is_deleted:
         abort(404)
     if not can_access_row(s, user):
         abort(403, description="Outside your scope")
+    return s
+
+
+def _past_date(value, label):
+    try:
+        when = date.fromisoformat(str(value)[:10]) if value else date.today()
+    except ValueError:
+        abort(400, description=f"Enter the {label} as a real date.")
+    if when > date.today():
+        abort(400, description=f"The {label} can't be in the future.")
+    return when
+
+
+@bp.post("/students/<uid>/status")
+@login_required
+def change_status(uid):
+    """Step 1 of leaving - the trainer marks a student as leaving.
+    Body: {enrolment_status: Dropped Out | Transferred Out, date?, reason}.
+    The principal is told, to issue the TC; the student stays on the class
+    list until the org admin confirms. (A student who has left doesn't rejoin.)"""
+    user = current_user()
+    if user.role != Role.TRAINER.value:
+        abort(403, description="Only the trainer marks a student as left.")
+    s = _student_for(user, uid)
     data = request.get_json(silent=True) or {}
-    status = data.get("enrolment_status")
-    if status not in LEAVING | {"Studying"}:
-        abort(400, description="Status must be Dropped Out, Transferred Out or Studying.")
-    before = {"enrolment_status": s.enrolment_status, "left_on": str(s.left_on or ""), "left_reason": s.left_reason}
-    if status in LEAVING:
-        if s.enrolment_status != "Studying":
-            abort(400, description=f"{s.full_name} is already marked {s.enrolment_status}.")
-        try:
-            when = date.fromisoformat(str(data.get("date"))[:10]) if data.get("date") else date.today()
-        except ValueError:
-            abort(400, description="Enter the date as a real date.")
-        if when > date.today():
-            abort(400, description="The date can't be in the future.")
-        if not (data.get("reason") or "").strip():
-            abort(400, description="Give a short reason.")
-        s.left_on, s.left_reason = when, data["reason"].strip()
-    else:
-        if s.enrolment_status not in LEAVING:
-            abort(400, description=f"{s.full_name} is {s.enrolment_status.lower()} - only a student who left can rejoin.")
-        if s.enrolment_status == "Transferred Out":
-            abort(400, description=f"{s.full_name} was transferred out to another school and can't rejoin here.")
-        s.left_on, s.left_reason = None, None
-    s.enrolment_status = status
+    kind = data.get("enrolment_status")
+    if kind not in LEAVING:
+        abort(400, description="Choose Dropped Out or Transferred Out.")
+    if s.enrolment_status != "Studying" or s.leaving_stage:
+        abort(400, description=f"{s.full_name} is already {'leaving' if s.leaving_stage else s.enrolment_status.lower()}.")
+    when = _past_date(data.get("date"), "date")
+    if not (data.get("reason") or "").strip():
+        abort(400, description="Give a short reason.")
+    s.leaving_stage, s.leaving_type, s.leave_requested_on = "requested", kind, when
+    s.left_reason = data["reason"].strip()
     s.updated_by = user.id
-    audit.record(user, "update", "student", s.id, before=before,
-                 after={"enrolment_status": status, "left_on": str(s.left_on or ""), "left_reason": s.left_reason})
+    _log_step(s, user, "Marked as leaving")
+    audit.record(user, "update", "student", s.id, after={"leaving_stage": "requested", "leaving_type": kind})
+    from app.services import notify
+    notify.student_leaving(s, user)
     db.session.commit()
-    return jsonify({"id": str(s.id), "enrolment_status": status})
+    return jsonify({"id": str(s.id), "leaving_stage": "requested", "leaving_type": kind})
+
+
+@bp.post("/students/<uid>/tc")
+@login_required
+def tc_issued(uid):
+    """Step 2 - the principal records the Transfer Certificate the student
+    was given. Body: {tc_url (photo), tc_number?, tc_date?}. The org admin is told."""
+    user = current_user()
+    if user.role != Role.PRINCIPAL.value:
+        abort(403, description="Only the principal records the TC.")
+    s = _student_for(user, uid)
+    if s.leaving_stage != "requested":
+        abort(400, description=f"{s.full_name} isn't waiting for a TC.")
+    data = request.get_json(silent=True) or {}
+    if not (data.get("tc_url") or "").strip():
+        abort(400, description="Attach a photo of the TC.")
+    s.tc_url = data["tc_url"].strip()
+    s.tc_number = (data.get("tc_number") or "").strip() or None
+    s.tc_issued_on = _past_date(data.get("tc_date"), "TC date")
+    s.leaving_stage = "tc_issued"
+    s.updated_by = user.id
+    _log_step(s, user, "TC issued")
+    audit.record(user, "update", "student", s.id, after={"leaving_stage": "tc_issued", "tc_number": s.tc_number})
+    from app.services import notify
+    notify.tc_to_verify(s, user)
+    db.session.commit()
+    return jsonify({"id": str(s.id), "leaving_stage": "tc_issued"})
+
+
+@bp.post("/students/<uid>/left")
+@login_required
+def confirm_left(uid):
+    """Step 3 - the org admin checks the TC and marks the student as left,
+    for good: Dropped Out / Transferred Out as the trainer said."""
+    user = current_user()
+    if user.role not in (Role.ORG_ADMIN.value, Role.SUPER_ADMIN.value):
+        abort(403, description="Only the org admin confirms a student has left.")
+    s = _student_for(user, uid)
+    if s.leaving_stage != "tc_issued":
+        abort(400, description=f"{s.full_name}'s TC hasn't been recorded by the principal yet.")
+    from datetime import datetime
+    before = {"enrolment_status": s.enrolment_status}
+    s.enrolment_status = s.leaving_type
+    s.left_on = s.tc_issued_on or s.leave_requested_on or date.today()
+    s.leaving_stage, s.tc_verified_on = "left", datetime.utcnow()
+    s.updated_by = user.id
+    _log_step(s, user, s.leaving_type)
+    audit.record(user, "update", "student", s.id, before=before, after={"enrolment_status": s.enrolment_status})
+    db.session.commit()
+    return jsonify({"id": str(s.id), "enrolment_status": s.enrolment_status})

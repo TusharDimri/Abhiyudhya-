@@ -60,6 +60,7 @@ function valueOf(f, data, boot) {
     return v ? <span className="muted">Photo attached (not available here)</span> : <span className="muted">No photo</span>;
   }
   if (v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length)) return EMPTY;
+  if (typeof v === "boolean") return v ? "Yes" : "No";
   if (f.type === "date" || /(^|_)date$/.test(f.name)) return toDMY(v);
   if (f.type === "time") return String(v).slice(0, 5);
   if (f.name === "class_grade") return `Class ${v}`;
@@ -68,7 +69,23 @@ function valueOf(f, data, boot) {
   return <span className="view-text">{String(v)}</span>;
 }
 
-export default function RecordView({ mod, resource, row, onClose }) {
+// the form's fields in its own sections ("Student", "Family" ...), in order
+function sectionsOf(fields) {
+  const out = [];
+  for (const f of fields) {
+    if (f.hidden) continue;
+    const name = f.group || "";
+    let sec = out.find((s) => s.name === name);
+    if (!sec) out.push((sec = { name, fields: [] }));
+    sec.fields.push(f);
+  }
+  return out;
+}
+
+/* `title` / `subtitle`: instead of "<record> · <date>" and who filled it in.
+   `footer(rec)`: buttons of the caller's own (e.g. Verify) beside Close.
+   `children(rec)`: more below the fields (a student's history, their TC). */
+export default function RecordView({ mod, resource, row, onClose, title, subtitle, footer, children }) {
   const { data: boot } = useBootstrap();
   const { data, isLoading, isError } = useQuery({
     queryKey: ["view", resource, row.id],
@@ -76,23 +93,29 @@ export default function RecordView({ mod, resource, row, onClose }) {
   });
   const rec = data || row;
   const when = rec.date || rec.reporting_date;
+  const sections = sectionsOf(mod.fields);
 
   return (
     <div className="overlay center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-label={`${mod.singular} details`}>
         <header>
           <div>
-            <h3 style={{ margin: 0 }}>{mod.singular}{when ? ` · ${toDMY(when)}` : ""}</h3>
+            <h3 style={{ margin: 0 }}>{title || `${mod.singular}${when ? ` · ${toDMY(when)}` : ""}`}</h3>
             <span className="drawer-sub">
-              {rec.trainer_name ? `Filled in by ${rec.trainer_name}` : "Filled in by the trainer"}
-              {rec.school_name ? ` · ${rec.school_name}` : ""}
+              {subtitle || <>
+                {rec.trainer_name ? `Filled in by ${rec.trainer_name}` : "Filled in by the trainer"}
+                {rec.school_name ? ` · ${rec.school_name}` : ""}
+              </>}
             </span>
           </div>
           <button type="button" className="close" onClick={onClose} aria-label="Close">×</button>
         </header>
         <div className="body">
-          {(rec.endorsement_status || rec.distance_from_school_m !== undefined) && (
+          {(rec.endorsement_status || rec.verification_status || rec.distance_from_school_m !== undefined) && (
             <div className="view-status">
+              {rec.verification_status && (
+                <span>Verification: <Badge value={rec.verification_status} label={optionText(rec.verification_status)} /></span>
+              )}
               {rec.endorsement_status && (
                 <span>Verification: <Badge value={rec.endorsement_status} label={VERIFICATION_LABELS[rec.endorsement_status]} /></span>
               )}
@@ -102,17 +125,23 @@ export default function RecordView({ mod, resource, row, onClose }) {
             </div>
           )}
           {isError && <div className="form-error">Couldn't load the full record - showing what the list has.</div>}
-          <dl className="view-grid">
-            {mod.fields.map((f) => (
-              <div key={f.name} className={`view-item ${["textarea", "studentmarks", "file"].includes(f.type) ? "wide" : ""}`}>
-                <dt>{f.label}</dt>
-                <dd>{isLoading && ["studentmarks", "file"].includes(f.type) ? <span className="muted">Loading…</span> : valueOf(f, rec, boot)}</dd>
-              </div>
-            ))}
-          </dl>
+          {sections.map((sec) => (
+            <section key={sec.name || "-"} className="view-section">
+              {sections.length > 1 && sec.name && <h4 className="view-section-title">{sec.name}</h4>}
+              <dl className="view-grid">
+                {sec.fields.map((f) => (
+                  <div key={f.name} className={`view-item ${["textarea", "studentmarks", "file"].includes(f.type) ? "wide" : ""}`}>
+                    <dt>{f.label}</dt>
+                    <dd>{isLoading && ["studentmarks", "file"].includes(f.type) ? <span className="muted">Loading…</span> : valueOf(f, rec, boot)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ))}
+          {children ? children(rec) : null}
         </div>
         <footer>
-          <button type="button" className="btn btn-primary" onClick={onClose}>Close</button>
+          {footer ? footer(rec) : <button type="button" className="btn btn-primary" onClick={onClose}>Close</button>}
         </footer>
       </div>
     </div>

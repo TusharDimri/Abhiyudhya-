@@ -374,14 +374,36 @@ NOTICES = [  # (title, body, category, link, read?)
 ]
 
 
+PR_NOTICES = [  # (title, body, category, link, read?)
+    ("Daily attendance to verify", "Your trainer marked daily attendance for today.", "attendance",
+     "/app/attendance?endorsement_status=submitted", False),
+    ("Class 9 attendance to verify", "Your trainer marked Class 9 attendance.", "attendance",
+     "/app/class-attendance?endorsement_status=submitted", False),
+    ("Guest lecture added: Careers in data entry", "Anil Deshpande · Class 9", "guest_lecture", "/app/guest-lectures", True),
+    ("Your issue has been resolved", "Sorted out by the district office.", "issue",
+     "/app/principal-issues?workflow_status=resolved", True),
+]
+VT_NOTICES = [
+    ("Attendance verified", "Your daily attendance was verified by the principal.", "attendance",
+     "/app/attendance?endorsement_status=endorsed", False),
+    ("LCD projector: Under Repair", "The projector has gone for repair.", "maintenance", "/app/equipment-maintenance", False),
+    ("Attendance verified", "Your Class 9 attendance was verified by the principal.", "attendance",
+     "/app/class-attendance?endorsement_status=endorsed", True),
+]
+
+
 def _notifications(org, today):
-    """What the admins' bell would show - some read, some not."""
-    if db.session.query(Notification).filter_by(organisation_id=org.id).first():
-        return
-    admins = db.session.query(User).filter(User.organisation_id == org.id, User.role.in_(["OA", "SA"])).all()
-    for u in admins:
-        for i, (title, body, category, link, read) in enumerate(NOTICES):
-            when = datetime.combine(today - timedelta(days=i * 3 + 1), time(10 + i))
+    """What each bell shows - admins, principals and trainers, some read and
+    some not. Anyone who already has notifications is left as they are."""
+    people = db.session.query(User).filter(User.organisation_id == org.id,
+                                           User.role.in_(["OA", "SA", "PR", "VT"])).all()
+    has = {uid for (uid,) in db.session.query(Notification.user_id).filter(Notification.organisation_id == org.id)}
+    for u in people:
+        if u.id in has:
+            continue
+        notices = PR_NOTICES if u.role == "PR" else VT_NOTICES if u.role == "VT" else NOTICES
+        for i, (title, body, category, link, read) in enumerate(notices):
+            when = datetime.combine(today - timedelta(days=i * 2 + 1), time(9 + i))
             db.session.add(Notification(organisation_id=org.id, user_id=u.id, title=title, body=body,
                                         category=category, link=link, is_read=read, created_at=when))
 
@@ -454,9 +476,21 @@ def _fill_lab(org, school, lab, sector_code, vt_low, vt_high, pr_user, size, clo
     db.session.flush()
     # one dropped out, one transferred - and Class 10 / 12 came up last year
     left_on = min(today - timedelta(days=10), clock.this_span[0] + timedelta(days=40))
-    for s, status, why in ((students["10"][-1], "Dropped Out", "Family moved away"),
-                           (students["11"][-1], "Transferred Out", "Moved to another school")):
+    for n, (s, status, why) in enumerate(((students["10"][-1], "Dropped Out", "Family moved away"),
+                                          (students["11"][-1], "Transferred Out", "Moved to another school"))):
         s.enrolment_status, s.left_on, s.left_reason = status, left_on, why
+        # their leaving went all the way: marked, TC issued, confirmed
+        s.leaving_stage, s.leaving_type, s.leave_requested_on = "left", status, left_on - timedelta(days=7)
+        s.tc_number, s.tc_issued_on = f"TC/{clock.start_year}/{R.randint(100, 999)}", left_on
+        s.tc_verified_on = datetime.combine(left_on + timedelta(days=2), time(11))
+    # and two on their way out: one waiting for the principal's TC, one for the org admin
+    waiting = students["9"][-1]
+    waiting.leaving_stage, waiting.leaving_type = "requested", "Dropped Out"
+    waiting.leave_requested_on, waiting.left_reason = today - timedelta(days=3), "Family moving to another city"
+    checking = students["12"][-1]
+    checking.leaving_stage, checking.leaving_type = "tc_issued", "Transferred Out"
+    checking.leave_requested_on, checking.left_reason = today - timedelta(days=9), "Admission at a junior college"
+    checking.tc_number, checking.tc_issued_on = f"TC/{clock.start_year}/{R.randint(100, 999)}", today - timedelta(days=2)
     for cls, prev in (("10", "9"), ("12", "11")):
         for s in students[cls]:
             db.session.add(StudentPromotion(

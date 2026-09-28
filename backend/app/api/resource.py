@@ -392,7 +392,7 @@ def _for_viewing(cfg, data):
     from app.models.student import Student
     from app.services import storage
 
-    for key in ("photo_url", "picture_url"):
+    for key in ("photo_url", "picture_url", "tc_url"):
         path = data.get(key)
         if path:
             try:
@@ -418,7 +418,7 @@ def _for_viewing(cfg, data):
 def create_resource(resource):
     cfg = _cfg(resource)
     user = current_user()
-    if user.role not in cfg.write_roles:
+    if not cfg.can_create(user.role):
         abort(403, description="You cannot create this record")
 
     payload = request.get_json(silent=True) or {}
@@ -460,6 +460,8 @@ def create_resource(resource):
         _write_children(cfg, obj, payload, user)
     if cfg.profile_role:
         _apply_profile(cfg, obj, payload, user)
+    if cfg.on_saved:
+        cfg.on_saved(obj, user, True, None)
     # a new trainer / principal gets their login now; its password goes back
     # in this one response and is never shown again
     login = _create_login(cfg, obj, user) if cfg.profile_role and not obj.user_id else None
@@ -502,6 +504,7 @@ def update_resource(resource, uid):
     for k, msg in cfg.locked_on_update.get(user.role, {}).items():
         if k in payload and str(_coerce(cfg.model, k, payload[k])) != str(getattr(obj, k)):
             abort(400, description=msg)
+    old = {k: getattr(obj, k, None) for k in cfg.writable}
     for k in cfg.writable:
         if k in payload:
             setattr(obj, k, _coerce(cfg.model, k, payload[k]))
@@ -522,6 +525,9 @@ def update_resource(resource, uid):
         _write_children(cfg, obj, payload, user)
     if cfg.profile_role:
         _apply_profile(cfg, obj, payload, user)
+    if cfg.on_saved:
+        changed = {k for k in cfg.writable if str(getattr(obj, k, None)) != str(old[k])}
+        cfg.on_saved(obj, user, False, changed)
 
     if not can_access_row(obj, user):
         db.session.rollback()

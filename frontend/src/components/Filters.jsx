@@ -12,6 +12,10 @@ const FALLBACK = {
     label: "Verification",
     options: [["submitted", "Pending verification"], ["endorsed", "Verified"]],
   },
+  leaving_stage: {
+    label: "Leaving",
+    options: [["requested", "TC pending"], ["tc_issued", "TC issued"], ["left", "Left"]],
+  },
   workflow_status: {
     label: "Status",
     options: [["open", "Open"], ["in-progress", "In progress"], ["resolved", "Resolved"]],
