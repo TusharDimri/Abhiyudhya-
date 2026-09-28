@@ -29,7 +29,7 @@ from app.rbac import current_user, login_required
 from app.rbac.curriculum import allowed_class_grades
 from app.rbac.roles import Role
 from app.services import audit
-from app.services.academic_year import academic_year_for
+from app.services.academic_year import academic_year_for, guard_closed_year
 
 bp = Blueprint("students_admin", __name__, url_prefix="/api/students")
 
@@ -328,6 +328,7 @@ def move_to_section(uid):
     s = db.session.get(Student, uid)
     if s is None or s.is_deleted:
         abort(404)
+    guard_closed_year(s, user)
     data = request.get_json(silent=True) or {}
     lab, class_grade, name = _section_target(user, {**data, "lab_id": s.lab_id, "class_grade": s.class_grade})
     if s.enrolment_status != "Studying":

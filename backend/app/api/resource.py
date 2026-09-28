@@ -21,6 +21,7 @@ from app.rbac import login_required, current_user, apply_scope, can_access_row
 from app.rbac.roles import Role
 from app.services import audit
 from app.services.cache import cached_json
+from app.services.academic_year import guard_closed_year, is_past_year
 
 bp = Blueprint("resources", __name__, url_prefix="/api")
 
@@ -40,6 +41,8 @@ def _require_view(cfg, user):
 
 def _serialise(cfg, obj):
     data = obj.to_dict()
+    # from an academic year that has ended: closed, the screens offer no changes
+    data["past_year"] = is_past_year(obj)
     if cfg.computed:
         try:
             data.update(cfg.computed(obj) or {})
@@ -444,6 +447,7 @@ def create_resource(resource):
     if cfg.manual_location:
         _set_manual_location(obj, payload)
     _missing_required(cfg, obj)
+    guard_closed_year(obj, user, creating=True)     # nothing new in a closed year
     if hasattr(obj, "created_by"):
         obj.created_by = user.id
     db.session.add(obj)
@@ -494,6 +498,7 @@ def update_resource(resource, uid):
         abort(404)
     if not can_access_row(obj, user):
         abort(403, description="Outside your scope")
+    guard_closed_year(obj, user)                    # a closed year's record stays as it is
 
     before = obj.to_dict()
     payload = request.get_json(silent=True) or {}
@@ -511,6 +516,7 @@ def update_resource(resource, uid):
     if cfg.manual_location:
         _set_manual_location(obj, payload)
     _missing_required(cfg, obj, payload)
+    guard_closed_year(obj, user, creating=True)     # nor moved into a closed year
     if hasattr(obj, "updated_by"):
         obj.updated_by = user.id
     db.session.flush()

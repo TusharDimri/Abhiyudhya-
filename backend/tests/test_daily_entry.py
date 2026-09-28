@@ -783,7 +783,9 @@ def test_issue_needs_a_location(client, world):
     ("2026-02-10", "2025-26"),
     ("2026-06-01", "2026-27"),
 ])
-def test_year_follows_the_date(client, world, on, year):
+def test_year_follows_the_date(client, world, on, year, monkeypatch):
+    # (these dates are in years that have ended - open them for this test)
+    monkeypatch.setattr("app.services.academic_year.current_year_label", lambda *a, **k: "2000-01")
     db.session.add(AcademicYear(organisation_id=world["org"].id, label="Custom 2024",
                                 start_date=date(2024, 1, 1), end_date=date(2024, 12, 31)))
     db.session.commit()
@@ -793,7 +795,9 @@ def test_year_follows_the_date(client, world, on, year):
     assert r.get_json()["academic_year"] == year
 
 
-def test_field_visit_targets_per_level(client, world):
+def test_field_visit_targets_per_level(client, world, monkeypatch):
+    # (2025-26 has ended - open it for this test)
+    monkeypatch.setattr("app.services.academic_year.current_year_label", lambda *a, **k: "2000-01")
     for cls, when in (("9", "2025-08-01"), ("9", "2025-11-12"), ("10", "2025-12-01")):
         r = _save(client, "/api/field-visits", _visit(world, class_grade=cls, reporting_date=when))
         assert r.status_code == 201, r.get_json()
@@ -938,11 +942,47 @@ def test_unverified_students_are_not_promoted(client, world):
     assert "Verify these students first" in r.get_json()["message"]
 
 
+def _this_year(world):
+    from app.services.academic_year import academic_year_for
+    return academic_year_for(world["org"].id, date.today())
+
+
 def test_trainer_cannot_change_class_by_editing(client, world):
-    a, b, c = _class_of(world)
+    a, b, c = _class_of(world, year=_this_year(world))
     r = client.patch(f"/api/students/{a}", headers=_login(client), json={"class_grade": "10"})
     assert r.status_code == 400
     assert "Promote Students" in r.get_json()["message"]
+
+
+def test_a_closed_academic_year_cannot_be_changed(client, world, principal):
+    """Records of a year that has ended are read-only for trainers,
+    principals and org admins - only the super admin may correct them."""
+    a, b, c = _class_of(world)                     # 2024-25: over
+    h = _as(client, "vt@x.com")
+    r = client.patch(f"/api/students/{a}", headers=h, json={"father_name": "Someone"})
+    assert r.status_code == 403 and "previous academic year (2024-25)" in r.get_json()["message"]
+    assert client.post(f"/api/promotion/students/{a}/status", headers=h,
+                       json={"enrolment_status": "Dropped Out", "reason": "x"}).status_code == 403
+    row = next(x for x in client.get("/api/students", headers=h).get_json()["data"] if x["id"] == a)
+    assert row["past_year"] is True
+    # nothing new dated in a closed year, either
+    _school_located(world)
+    r = _save(client, "/api/guest-lectures", _lecture(world, reporting_date="2025-01-10"))
+    assert r.status_code == 400 and "previous academic year" in r.get_json()["message"]
+    # promotion still moves them on - that's how a year closes
+    r = client.post("/api/promotion", headers=_as(client, "vt@x.com"), json={
+        "from_year": "2024-25", "class_grade": "9", "promote": [a, b, c]})
+    assert r.status_code == 200, r.get_json()
+    # the rule itself: closed for everyone but the super admin
+    from werkzeug.exceptions import Forbidden
+    from app.services.academic_year import guard_closed_year
+    old = db.session.get(Student, b)
+    old.academic_year = "2024-25"
+    guard_closed_year(old, User(role="SA"))               # no objection
+    for role in ("OA", "PR", "VT"):
+        with pytest.raises(Forbidden):
+            guard_closed_year(old, User(role=role))
+    db.session.rollback()
 
 
 def test_a_student_leaves_in_three_steps(client, world, principal, principal_record):
@@ -951,7 +991,7 @@ def test_a_student_leaves_in_three_steps(client, world, principal, principal_rec
     oa.set_password("Password@123")
     db.session.add(oa)
     db.session.commit()
-    a, b, c = _class_of(world)
+    a, b, c = _class_of(world, year=_this_year(world))
     url = f"/api/promotion/students/{a}/status"
     h = _as(client, "vt@x.com")
     assert client.post(url, headers=h, json={"enrolment_status": "Dropped Out"}).status_code == 400  # needs a reason
@@ -988,8 +1028,9 @@ def test_a_student_leaves_in_three_steps(client, world, principal, principal_rec
 
 def test_a_leaving_student_is_not_promoted(client, world):
     a, b, c = _class_of(world)
-    client.post(f"/api/promotion/students/{a}/status", headers=_login(client),
-                json={"enrolment_status": "Transferred Out", "reason": "Moving"})
+    s = db.session.get(Student, a)                # marked as leaving before the year ended
+    s.leaving_stage, s.leaving_type = "requested", "Transferred Out"
+    db.session.commit()
     rows = {r["id"]: r for r in client.get("/api/promotion/preview?from_year=2024-25&class_grade=9",
                                           headers=_login(client)).get_json()["students"]}
     assert not rows[a]["eligible"] and rows[a]["reason"] == "Leaving the school"

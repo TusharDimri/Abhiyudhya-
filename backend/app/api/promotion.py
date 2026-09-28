@@ -25,7 +25,7 @@ from app.models.student import Student, StudentPromotion
 from app.rbac import apply_scope, can_access_row, current_user, login_required
 from app.rbac.roles import Role
 from app.services import audit
-from app.services.academic_year import next_year_label, year_bounds, year_has_ended
+from app.services.academic_year import guard_closed_year, next_year_label, year_bounds, year_has_ended
 from app.services.cache import cached_json
 from app.services.cache import cached_json
 
@@ -327,6 +327,7 @@ def change_status(uid):
     if user.role != Role.TRAINER.value:
         abort(403, description="Only the trainer marks a student as left.")
     s = _student_for(user, uid)
+    guard_closed_year(s, user)   # (finishing a leaving already begun - TC, confirm - is allowed)
     data = request.get_json(silent=True) or {}
     kind = data.get("enrolment_status")
     if kind not in LEAVING:

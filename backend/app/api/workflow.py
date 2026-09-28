@@ -9,6 +9,7 @@ from app.models.student import Student
 from app.rbac import login_required, current_user, can_access_row
 from app.rbac.roles import Role
 from app.services import audit
+from app.services.academic_year import guard_closed_year
 
 bp = Blueprint("workflow", __name__, url_prefix="/api/workflow")
 
@@ -27,6 +28,7 @@ def verify_student(uid):
         abort(404)
     if not can_access_row(rec, user):
         abort(403, description="Outside your scope")
+    guard_closed_year(rec, user)
     data = request.get_json(silent=True) or {}
     status = data.get("verification_status", "verified")
     if status not in ("pending", "verified", "rejected"):
@@ -52,6 +54,7 @@ def _endorse(model, uid):
         abort(404)
     if not can_access_row(rec, user):
         abort(403, description="Outside your scope")
+    guard_closed_year(rec, user)
     data = request.get_json(silent=True) or {}
     decision = data.get("decision", "endorsed")
     if decision != "endorsed":

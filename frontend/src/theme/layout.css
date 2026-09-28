@@ -660,6 +660,8 @@ table.data.view-table th, table.data.view-table td { padding: .45rem .7rem; }
 
 /* a student on their way out of the school */
 .leaving-note { font-size: .74rem; font-weight: 700; color: #b54708; background: #fffaeb; border: 1px solid #fedf89; border-radius: 999px; padding: .15rem .55rem; white-space: nowrap; }
+/* a record from a finished academic year - read-only */
+.closed-note { font-size: .72rem; font-weight: 700; color: var(--muted); background: var(--bg-soft); border: 1px solid var(--line); border-radius: 999px; padding: .15rem .55rem; white-space: nowrap; }
 
 /* the TC in a student's history */
 .history-tc { margin-top: .5rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-soft);

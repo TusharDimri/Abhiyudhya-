@@ -64,7 +64,7 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                           {rowActions?.includes("view") && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("view", r)}>View</button>
                           )}
-                          {rowActions?.includes("endorse") && r.endorsement_status !== "endorsed" && (
+                          {rowActions?.includes("endorse") && r.endorsement_status !== "endorsed" && !r.past_year && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("endorse", r)}>Verify</button>
                           )}
                           {rowActions?.includes("transition") && (
@@ -79,11 +79,11 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                           {rowActions?.includes("history") && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("history", r)}>History</button>
                           )}
-                          {rowActions?.includes("verify") && (
+                          {rowActions?.includes("verify") && !r.past_year && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("verify", r)}>Verify</button>
                           )}
                           {/* leaving: trainer marks -> principal records the TC -> org admin confirms */}
-                          {rowActions?.includes("status") && r.enrolment_status === "Studying" && !r.leaving_stage && (
+                          {rowActions?.includes("status") && r.enrolment_status === "Studying" && !r.leaving_stage && !r.past_year && (
                             <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("status", r)}>Mark as left</button>
                           )}
                           {rowActions?.includes("tc") && r.leaving_stage === "requested" && (
@@ -96,7 +96,11 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                             && !(rowActions?.includes("leftverify") && r.leaving_stage === "tc_issued") && (
                             <span className="leaving-note">{LEAVING_NOTE[r.leaving_stage]}</span>
                           )}
-                          {canWrite && <button className="btn btn-ghost btn-sm" onClick={() => onEdit(r)}>Edit</button>}
+                          {/* a finished academic year is closed: nothing in it changes */}
+                          {r.past_year && (canWrite || rowActions?.some((a) => ["endorse", "verify", "status"].includes(a))) && (
+                            <span className="closed-note" title="From a previous academic year - it can't be changed">Closed year</span>
+                          )}
+                          {canWrite && !r.past_year && <button className="btn btn-ghost btn-sm" onClick={() => onEdit(r)}>Edit</button>}
                           {canWrite && onDelete && <button className="btn btn-danger btn-sm" onClick={() => onDelete(r)}>Delete</button>}
                         </div>
                         )}

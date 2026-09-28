@@ -36,6 +36,60 @@ def academic_year_for(organisation_id, d: date) -> str | None:
     return row[0] if row else school_year_label(d)
 
 
+def current_year_label(organisation_id, today=None):
+    """This academic year's label, worked out once per request."""
+    from flask import g, has_app_context
+    today = today or date.today()
+    key = (organisation_id, today)
+    cache = g.setdefault("_year_labels", {}) if has_app_context() else {}
+    if key not in cache:
+        cache[key] = academic_year_for(organisation_id, today)
+    return cache[key]
+
+
+def record_year(obj):
+    """The academic year a record belongs to: its own academic_year, else the
+    year of its date. None for records that aren't tied to a year (a school,
+    a lab, a person)."""
+    # a dated record belongs to its date's year (whatever year was sent with it)
+    for attr in ("date", "reporting_date", "receipt_date"):
+        d = getattr(obj, attr, None)
+        if isinstance(d, str):
+            try:
+                d = date.fromisoformat(d[:10])
+            except ValueError:
+                d = None
+        if isinstance(d, date):
+            return academic_year_for(getattr(obj, "organisation_id", None), d)
+    label = getattr(obj, "academic_year", None)
+    return label if _parse_label(label) is not None else None
+
+
+def is_past_year(obj, today=None):
+    """True for a record from an academic year that has already ended -
+    those are closed: nobody but the super admin changes them."""
+    label = record_year(obj)
+    if label is None:
+        return False
+    current = _parse_label(current_year_label(getattr(obj, "organisation_id", None), today))
+    mine = _parse_label(label)
+    return current is not None and mine is not None and mine < current
+
+
+PAST_YEAR_MESSAGE = "This record belongs to a previous academic year ({year}), which is closed - it can't be changed."
+NEW_IN_PAST_MESSAGE = "That date falls in a previous academic year ({year}), which is closed - pick a date in this year."
+
+
+def guard_closed_year(obj, user, creating=False):
+    """Stop anyone but the super admin changing (or adding to) an academic
+    year that has ended."""
+    from flask import abort
+    if getattr(user, "role", None) == "SA" or not is_past_year(obj):
+        return
+    msg = NEW_IN_PAST_MESSAGE if creating else PAST_YEAR_MESSAGE
+    abort(400 if creating else 403, description=msg.format(year=record_year(obj)))
+
+
 def _parse_label(label):
     """"2025-26" -> 2025; None for a label that isn't in that shape."""
     try:
