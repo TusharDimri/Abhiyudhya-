@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Search } 
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
-import { MODULES, groupOf, ORG_ADMIN_SCOPE } from "../lib/modules";
+import { MODULES, groupOf, labelOf, ORG_ADMIN_SCOPE } from "../lib/modules";
 import { useOrgScope } from "../lib/orgScope";
 import ScopePicker, { ScopeEmpty } from "./ScopePicker";
 import { useBootstrap } from "../hooks/useBootstrap";
@@ -65,7 +65,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
   // district, then a school; a super admin an organisation first, then the same
   const [orgScope, setOrgScope] = useOrgScope(scopeKey || resource);
   const saGate = user?.role === "SA" && resource !== "organisations";
-  const gate = user?.role === "OA" ? ORG_ADMIN_SCOPE[resource]
+  const gate = ["OA", "DM"].includes(user?.role) ? ORG_ADMIN_SCOPE[resource]
     : saGate ? { needs: "org", param: null, ...ORG_ADMIN_SCOPE[resource], withOrg: true } : null;
   const gateValue = gate && gate.needs !== "org" ? orgScope[`${gate.needs}_id`] : null;
   const gateOpen = !gate || ((!gate.withOrg || !!orgScope.organisation_id) && (gate.needs === "org" || !!gateValue));
@@ -129,20 +129,19 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     if (canWrite) setEditing({});
   }, [sp, canWrite]); // eslint-disable-line
 
-  // A notification opens its own record: `?_open=<id>&_act=resolve|verify|
-  // leftverify|view` - the window to act in, over the list it belongs to.
+  // A notification points at its record: `?focus=<id>` (older links said
+  // `_open`). The list opens on the page that holds it; the row flashes.
+  const focusId = sp.get("focus") || "";
+  const [flashId, setFlashId] = useState(null);
   useEffect(() => {
-    const id = sp.get("_open");
-    if (!id || !mod) return;
-    const action = sp.get("_act") || "view";
+    const legacy = sp.get("_open");
+    if (!legacy) return;
     const next = new URLSearchParams(sp);
     next.delete("_open");
     next.delete("_act");
+    next.set("focus", legacy);
     setSp(next, { replace: true });
-    api.get(`/${resource}/${id}`)
-      .then(({ data }) => setWorkflow({ action, row: data }))
-      .catch((e) => push(apiError(e), "error"));
-  }, [sp, resource]); // eslint-disable-line
+  }, [sp]); // eslint-disable-line
 
   // helper: patch the URL params, resetting to page 1 for anything but paging
   const patch = (changes, resetPage = true) => {
@@ -175,8 +174,9 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     if (gate?.withOrg && orgScope.organisation_id) p.set("organisation_id", orgScope.organisation_id);
     if (gate?.param && gateValue) p.set(gate.param, gateValue);
     for (const [k, v] of Object.entries(fixedParams || {})) p.set(k, v);
+    if (focusId) p.set("focus", focusId);   // the server picks the page that holds it
     return p.toString();
-  }, [page, pageSize, q, sort, order, filterValues, isSA, orgFilter, orgScoped, gate?.param, gate?.withOrg, gateValue, orgScope.organisation_id, fixedParams]); // eslint-disable-line
+  }, [page, pageSize, q, sort, order, filterValues, isSA, orgFilter, orgScoped, gate?.param, gate?.withOrg, gateValue, orgScope.organisation_id, fixedParams, focusId]); // eslint-disable-line
 
   const list = useQuery({
     queryKey: ["list", resource, apiParams],
@@ -184,6 +184,27 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     placeholderData: keepPreviousData,
     enabled: !!mod && gateOpen,
   });
+
+  // the focused record arrived: stay on its page, flash its row for 2 seconds
+  useEffect(() => {
+    const f = list.data?.focus;
+    if (!focusId || !f || f.id !== focusId) return undefined;
+    const next = new URLSearchParams(sp);
+    next.delete("focus");
+    if (f.found) {
+      next.set("page", String(f.page));
+      setFlashId(focusId);
+    } else {
+      push("That record isn't in this list any more - it may have changed since the notification.", "info");
+    }
+    setSp(next, { replace: true });
+    return undefined;
+  }, [list.data, focusId]); // eslint-disable-line
+  useEffect(() => {
+    if (!flashId) return undefined;
+    const t = setTimeout(() => setFlashId(null), 2200);
+    return () => clearTimeout(t);
+  }, [flashId]);
 
   const save = useMutation({
     mutationFn: async (payload) =>
@@ -243,7 +264,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
   // With no search box the page size sits at the end of the filters row
   // instead of alone on a row of its own.
   // org admins narrow things down with the district / school picker and filters instead
-  const showSearch = mod.searchable !== false && (perm?.search?.length ?? 0) > 0 && !["OA", "SA"].includes(user?.role);
+  const showSearch = mod.searchable !== false && (perm?.search?.length ?? 0) > 0 && !["OA", "DM", "SA"].includes(user?.role);
   const toolbarRow = showSearch || (isSA && orgScoped && !gate);
   const pageSizeBox = (
     <select className="select pagesize" value={pageSize} onChange={(e) => patch({ page_size: e.target.value })} aria-label="Rows per page">
@@ -262,7 +283,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         <div className="page-head">
           <div>
             <div className="crumb">{groupOf(mod, user?.role)}</div>
-            <h1><span className="page-ico"><Icon name={resource} size={20} /></span>{mod.label}</h1>
+            <h1><span className="page-ico"><Icon name={resource} size={20} /></span>{labelOf(mod, user?.role)}</h1>
           </div>
           <div className="page-actions">
             {!readOnly && (mod.pageActions || []).filter((a) => a.roles.includes(user?.role)).map((a) => (
@@ -278,7 +299,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
       {gate && <ScopePicker needs={gate.needs} scope={orgScope} isSA={!!gate.withOrg}
         setScope={(next) => { setOrgScope(next); patch({}); }} boot={boot} />}
 
-      {!gateOpen && <ScopeEmpty needs={gate.needs} label={mod.label} isSA={!!gate.withOrg} />}
+      {!gateOpen && <ScopeEmpty needs={gate.needs} label={labelOf(mod, user?.role)} isSA={!!gate.withOrg} />}
 
       {gateOpen && mod.yearlyTarget && (
         <TargetProgress
@@ -333,6 +354,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
       <DataTable
         columns={shownColumns}
         rows={rows}
+        flashId={flashId}
         loading={list.isLoading}
         sort={sort}
         order={order}

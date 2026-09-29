@@ -30,6 +30,26 @@ def org_admins(org_id):
     return _active(db.session.query(User).filter(User.organisation_id == org_id, User.role == OA)).all()
 
 
+def district_managers_of(school):
+    """The district managers looking after this school's district."""
+    if school is None or not school.district_id:
+        return []
+    from app.models.geography import District
+    return _active(db.session.query(User).filter(
+        User.organisation_id == school.organisation_id, User.role == "DM",
+        User.districts.any(District.id == school.district_id))).all()
+
+
+def resolvers_of(org_id, school):
+    """Who can resolve an issue or a maintenance entry at this school: the
+    org admins, and the district managers of its district."""
+    return org_admins(org_id) + district_managers_of(school)
+
+
+def super_admins():
+    return _active(db.session.query(User).filter(User.role == "SA")).all()
+
+
 def principals_of(school_id):
     if not school_id:
         return []
@@ -57,17 +77,17 @@ def _school_of_lab(lab_id):
 
 
 def _link(path, school=None, for_admin=False, record=None, act="view", **params):
-    """A page, pre-filtered, opening the record itself. An admin's lists open
-    on a school, so their links carry it (_district/_school, and _org for the
-    super admin); `record` + `act` open it (the page reads _open/_act)."""
+    """A page, pre-filtered, pointing at the record itself. An admin's lists
+    open on a school, so their links carry it (_district/_school, and _org for
+    the super admin); `focus` is the record - the page opens where it is and
+    flashes it. (`act` is kept for callers; the row's own buttons do the rest.)"""
     q = {k: v for k, v in params.items() if v not in (None, "")}
     if for_admin and school is not None:
         q["_school"] = str(school.id)
         if school.district_id:
             q["_district"] = str(school.district_id)
     if record is not None:
-        q["_open"] = str(record.id)
-        q["_act"] = act
+        q["focus"] = str(record.id)
     return f"/app/{path}" + (f"?{urlencode(q)}" if q else "")
 
 
@@ -90,21 +110,70 @@ def issue_raised(issue, actor, kind):
     """A trainer's (kind='vt') or a principal's (kind='pr') issue was added."""
     school = _school(issue.school_id) if kind == "pr" else _school_of_lab(issue.lab_id)
     who = "principal" if kind == "pr" else "trainer"
-    _send(org_admins(issue.organisation_id), actor, org_id=issue.organisation_id,
+    _send(resolvers_of(issue.organisation_id, school), actor, org_id=issue.organisation_id,
           title=f"New issue from a {who}{_where(school)}",
           body=(issue.details or "")[:300], category="issue",
           link=_link("principal-issues" if kind == "pr" else "issues", school, True, record=issue, act="resolve",
                      workflow_status="open"))
 
 
-def issue_status_changed(issue, actor, kind, status):
-    school = _school(issue.school_id) if kind == "pr" else _school_of_lab(issue.lab_id)
-    label = {"open": "Open", "in-progress": "In progress", "resolved": "Resolved"}.get(status, status)
-    path = "principal-issues" if kind == "pr" else "issues"
-    _send(org_admins(issue.organisation_id), actor, org_id=issue.organisation_id,
-          title=f"Issue{_where(school)} is now {label}",
+def _org_issue_link(issue, status):
+    """An org admin issue on the super admin's list: its organisation picked."""
+    q = {"_org": str(issue.organisation_id), "workflow_status": status, "focus": str(issue.id)}
+    return f"/app/org-issues?{urlencode(q)}"
+
+
+def org_issue_raised(issue, actor):
+    """An org admin raised one of their own issues: the super admin resolves it."""
+    from app.models.organisation import Organisation
+    org = db.session.get(Organisation, issue.organisation_id)
+    _send(super_admins(), actor, org_id=issue.organisation_id,
+          title=f"New issue from {actor.full_name if actor else 'an org admin'}" + (f" ({org.name})" if org else ""),
           body=(issue.details or "")[:300], category="issue",
-          link=_link(path, school, True, record=issue, workflow_status=status))
+          link=_org_issue_link(issue, "open"))
+
+
+def close_resolver_notices(record, actor, note=""):
+    """Resolved by one admin: every resolver's notification about it (org
+    admins', district managers', or the super admins' for an org admin's
+    own issue) now says so, opens the resolved list, and
+    no longer waits to be read - nobody is left thinking it's still open."""
+    who = actor.full_name if actor is not None else "an admin"
+    notices = (db.session.query(Notification).join(User, User.id == Notification.user_id)
+               .filter(User.role.in_(("SA", "OA", "DM")), Notification.link.like(f"%focus={record.id}%"),
+                       Notification.category.in_(("issue", "maintenance"))).all())
+    for n in notices:
+        if not n.title.startswith("Resolved"):
+            n.title = f"Resolved - {n.title}"[:200]
+        n.body = (f"Resolved by {who}" + (f": {note}" if note else "."))[:300]
+        n.link = (n.link or "").replace("workflow_status=open", "workflow_status=resolved")
+        n.is_read = True
+
+
+def issue_status_changed(issue, actor, kind, status):
+    label = {"open": "Open", "in-progress": "In progress", "resolved": "Resolved"}.get(status, status)
+    if kind == "oa":      # an org admin's own issue - the super admin resolves it
+        if status == "resolved":
+            close_resolver_notices(issue, actor, issue.resolution_note or "")
+            _send(user_by_id(issue.raised_by), actor, org_id=issue.organisation_id,
+                  title="Your issue has been resolved",
+                  body=(issue.resolution_note or issue.details or "")[:300], category="issue",
+                  link=_link("org-issues", record=issue, workflow_status="resolved"))
+        else:
+            _send(super_admins(), actor, org_id=issue.organisation_id,
+                  title=f"Org admin issue is now {label}",
+                  body=(issue.details or "")[:300], category="issue",
+                  link=_org_issue_link(issue, status))
+        return
+    school = _school(issue.school_id) if kind == "pr" else _school_of_lab(issue.lab_id)
+    path = "principal-issues" if kind == "pr" else "issues"
+    if status == "resolved":
+        close_resolver_notices(issue, actor, issue.resolution_note or "")
+    else:   # opened again: the resolvers hear it's back
+        _send(resolvers_of(issue.organisation_id, school), actor, org_id=issue.organisation_id,
+              title=f"Issue{_where(school)} is now {label}",
+              body=(issue.details or "")[:300], category="issue",
+              link=_link(path, school, True, record=issue, workflow_status=status))
     if status == "resolved":      # whoever raised it: the principal, or the trainer
         raiser = user_by_id(issue.created_by) or (trainer_user(issue.trainer_id) if kind == "vt" else [])
         _send(raiser, actor, org_id=issue.organisation_id,
@@ -117,15 +186,18 @@ def issue_status_changed(issue, actor, kind, status):
 def maintenance_logged(rec, equipment, actor):
     school = _school(equipment.school_id) if equipment else None
     name = equipment.name if equipment else "Lab equipment"
-    _send(org_admins(rec.organisation_id), actor, org_id=rec.organisation_id,
+    _send(resolvers_of(rec.organisation_id, school), actor, org_id=rec.organisation_id,
           title=f"Maintenance needed: {name}{_where(school)}",
           body=(rec.issue or "")[:300], category="maintenance",
           link=_link("equipment-maintenance", school, True, record=rec, act="resolve"))
 
 
 def maintenance_status_changed(rec, equipment, actor):
-    """The trainer who logged it hears about every status change."""
+    """The trainer who logged it hears about every status change; once it's
+    resolved, the other resolvers' notifications say so."""
     name = equipment.name if equipment else "Lab equipment"
+    if rec.maintenance_status == "Resolved":
+        close_resolver_notices(rec, actor, rec.action or "")
     _send(user_by_id(rec.created_by), actor, org_id=rec.organisation_id,
           title=f"{name}: {rec.maintenance_status}",
           body=(rec.action or rec.note or rec.issue or "")[:300], category="maintenance",
@@ -141,13 +213,14 @@ def equipment_saved(eq, actor, created):
 
 
 # --------------------------------------------- org admin: students to verify
-def students_to_verify(org_id, school_id, count, actor, why="added"):
+def students_to_verify(org_id, school_id, count, actor, why="added", first=None):
+    """`first`: one of the students - the list opens on (and flashes) them."""
     school = _school(school_id)
     reason = {"added": "added", "class11": "moved into Class 11", "edited": "changed after verification"}[why]
     _send(org_admins(org_id), actor, org_id=org_id,
           title=f"{count} student{'s' if count != 1 else ''} to verify{_where(school)}",
           body=f"{count} student{'s were' if count != 1 else ' was'} {reason} and need{'' if count != 1 else 's'} verifying.",
-          category="verification", link=_link("students", school, True, tab="verify"))
+          category="verification", link=_link("students", school, True, record=first, tab="verify"))
 
 
 # ------------------------------------------------ a student leaving the school
@@ -206,7 +279,9 @@ def org_admin_action(actor, action, entity, entity_id, before, after):
     from app.api.admin import ENTITY_NAMES, _record_name, _verb
     from app.api.registry import REGISTRY
     from app.models.organisation import Organisation
-    admins = _active(db.session.query(User).filter(User.role == "SA")).all()
+    if entity == "org_issue":     # told by org_issue_raised instead, as an issue to resolve
+        return
+    admins = super_admins()
     if not admins or actor is None:
         return
     org = db.session.get(Organisation, actor.organisation_id) if actor.organisation_id else None
@@ -234,7 +309,7 @@ def org_admin_action(actor, action, entity, entity_id, before, after):
             if school.district_id:
                 q["_district"] = str(school.district_id)
         if rec is not None:
-            q["_open"], q["_act"] = str(rec.id), "view"
+            q["focus"] = str(rec.id)
         link = f"/app/{resource}?{urlencode(q)}"
     else:
         link = "/app/admin/audit"

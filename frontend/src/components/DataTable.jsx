@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import Badge from "./Badge";
 import { Plus } from "lucide-react";
 import DistanceDot, { EndorsementDot } from "./DistanceDot";
@@ -9,8 +10,13 @@ const isGone = (r) => r.leaving_stage === "left" || ["Dropped Out", "Transferred
 const LEAVING_NOTE = { requested: "Leaving · TC pending", tc_issued: "Leaving · TC issued" };
 
 // Presentational, server-driven table with sortable headers + skeleton loader.
-export default function DataTable({ columns, rows, loading, sort, order, onSort, onEdit, onDelete, onRowAction, rowActions, canWrite, emptyHint, emptyAction, onEmptyAction }) {
+export default function DataTable({ columns, rows, loading, sort, order, onSort, onEdit, onDelete, onRowAction, rowActions, canWrite, emptyHint, emptyAction, onEmptyAction, flashId }) {
   const showActions = canWrite || (rowActions && rowActions.length);
+  // the row a notification pointed at: brought into view, then it flashes
+  const flashRow = useRef(null);
+  useEffect(() => {
+    if (flashId && flashRow.current) flashRow.current.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [flashId, rows]);
   const statusShown = columns.some((c) => c.key === "status_label");
   return (
     <div className="card">
@@ -45,7 +51,8 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                   </tr>
                 ))
               : rows.map((r) => (
-                  <tr key={r.id}>
+                  <tr key={r.id} ref={flashId && String(r.id) === String(flashId) ? flashRow : null}
+                    className={flashId && String(r.id) === String(flashId) ? "row-flash" : undefined}>
                     {columns.map((c) => (
                       <td key={c.key}>
                         {c.dot === "distance" ? <DistanceDot metres={r[c.key]} />

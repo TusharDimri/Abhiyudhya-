@@ -31,7 +31,8 @@ from app.services.cache import cached_json
 
 bp = Blueprint("promotion", __name__, url_prefix="/api/promotion")
 
-MANAGERS = {Role.TRAINER.value, Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value}   # (the super admin only reads)
+# who promotes students (the super admin and district managers don't)
+MANAGERS = {Role.TRAINER.value, Role.ORG_ADMIN.value}
 NEXT_CLASS = {"9": "10", "10": "11", "11": "12", "12": None}
 LEAVING = {"Dropped Out", "Transferred Out"}
 

@@ -4,7 +4,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, abort
 
 from app.extensions import db
-from app.models.operations import ClassAttendance, DailyAttendance, PrincipalIssue, VTIssue
+from app.models.operations import ClassAttendance, DailyAttendance, OrgIssue, PrincipalIssue, VTIssue
 from app.models.student import Student
 from app.rbac import login_required, current_user, can_access_row
 from app.rbac.roles import Role
@@ -17,12 +17,13 @@ bp = Blueprint("workflow", __name__, url_prefix="/api/workflow")
 @bp.post("/students/<uid>/verify")
 @login_required
 def verify_student(uid):
-    """An admin (org admin, district manager, super admin) verifies a student
-    the trainer added - at Class 9 and again at Class 11 (spec Part 2.7)."""
+    """The org admin verifies a student the trainer added - at Class 9 and
+    again at Class 11 (spec Part 2.7). (Not the district manager or the
+    super admin - they only read.)"""
     from datetime import datetime
     user = current_user()
-    if user.role not in (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value):   # (the super admin only reads)
-        abort(403, description="Students are verified by the admin, not by the trainer.")
+    if user.role != Role.ORG_ADMIN.value:
+        abort(403, description="Students are verified by the org admin.")
     rec = db.session.get(Student, uid)
     if rec is None or rec.is_deleted:
         abort(404)
@@ -86,18 +87,25 @@ def endorse_class_attendance(uid):
     return _endorse(ClassAttendance, uid)
 
 
-ISSUE_KINDS = {"issues": ("vt", VTIssue, "vt_issue"), "principal-issues": ("pr", PrincipalIssue, "principal_issue")}
+ISSUE_KINDS = {"issues": ("vt", VTIssue, "vt_issue"), "principal-issues": ("pr", PrincipalIssue, "principal_issue"),
+               "org-issues": ("oa", OrgIssue, "org_issue")}
+# who resolves what: a trainer's or a principal's issue - the org admin or the
+# district manager; an org admin's own issue - the super admin
+RESOLVERS = {"vt": (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value),
+             "pr": (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value),
+             "oa": (Role.SUPER_ADMIN.value,)}
 
 
-@bp.post("/<any(issues, 'principal-issues'):which>/<uid>/transition")
+@bp.post("/<any(issues, 'principal-issues', 'org-issues'):which>/<uid>/transition")
 @login_required
 def transition_issue(which, uid):
-    """DM/OA/SA move a trainer's or a principal's issue through
-    open -> in-progress -> resolved (whoever raised it is told when it's resolved)."""
+    """Move a raised issue through open -> in-progress -> resolved (whoever
+    raised it is told when it's resolved). See RESOLVERS for who may."""
     user = current_user()
-    if user.role not in (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value):   # (the super admin only reads)
-        abort(403, description="Only DM/OA/SA can action issues")
     kind, model, table = ISSUE_KINDS[which]
+    if user.role not in RESOLVERS[kind]:
+        abort(403, description="The super admin resolves org admin issues." if kind == "oa"
+              else "Only the org admin or the district manager resolves issues.")
     rec = db.session.get(model, uid)
     if rec is None or rec.is_deleted:
         abort(404)
@@ -109,6 +117,9 @@ def transition_issue(which, uid):
         abort(400, description="invalid workflow_status")
     if status == "resolved" and not (data.get("resolution_note") or "").strip():
         abort(400, description="Write how the issue was resolved.")
+    if status == "resolved" and rec.workflow_status == "resolved":
+        # two resolvers (org admin, district manager) - the first one wins
+        abort(409, description="This issue has already been resolved.")
     before = {"workflow_status": rec.workflow_status}
     rec.workflow_status = status
     if hasattr(rec, "assigned_to"):
@@ -148,6 +159,8 @@ def maintenance_status(uid):
     resolution = (data.get("resolution") or data.get("note") or "").strip()
     if status == "Resolved" and not resolution:
         abort(400, description="Write how it was resolved.")
+    if status == "Resolved" and rec.maintenance_status == "Resolved":
+        abort(409, description="This has already been resolved.")
     before = {"maintenance_status": rec.maintenance_status}
     rec.maintenance_status = status
     if resolution:

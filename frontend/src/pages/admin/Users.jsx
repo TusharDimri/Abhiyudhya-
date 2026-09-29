@@ -25,7 +25,7 @@ export default function Users() {
   const isOA = me?.role === "OA";
   // the super admin looks after org admins' logins only - resetting passwords
   const isSA = me?.role === "SA";
-  const roleChoices = isOA ? ["PR", "VT"] : isSA ? [] : Object.keys(ROLE_LABELS);
+  const roleChoices = isOA ? ["DM", "PR", "VT"] : isSA ? [] : Object.keys(ROLE_LABELS);
   const orgName = (id) => (boot?.options?.organisations || []).find((o) => String(o.value) === String(id))?.label;
   const schoolName = (id) => (boot?.options?.schools || []).find((s) => String(s.value) === String(id))?.label;
   const [search, setSearch] = useState("");

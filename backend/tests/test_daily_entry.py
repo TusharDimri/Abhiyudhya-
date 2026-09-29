@@ -365,14 +365,66 @@ def test_admin_form_needs_the_required_fields(client, world):
     # an org admin doesn't make logins in Users & Access (they come with the trainer / principal) ...
     r = client.post("/api/users", headers=h, json={"role": "VT", "full_name": "V", "email": "v@x.com", "password": "Password1"})
     assert r.status_code == 403
-    # ... a district manager may, and a trainer's login needs its school and lab
+
+
+
+def test_district_manager_reads_master_data_and_has_no_user_admin(client, world):
     dm = User(organisation_id=world["org"].id, full_name="DM", email="dm@x.com", role="DM")
     dm.set_password("Password@123")
     db.session.add(dm)
     db.session.commit()
-    r = client.post("/api/users", headers=_as(client, "dm@x.com"), json={
-        "role": "VT", "full_name": "V", "email": "v@x.com", "password": "Password1"})
-    assert r.status_code == 400 and "School" in r.get_json()["message"] and "Lab" in r.get_json()["message"]
+    h = _as(client, "dm@x.com")
+    res = client.get("/api/meta/bootstrap", headers=h).get_json()["resources"]
+    for master in ("schools", "labs", "principals", "trainers", "districts", "job-roles", "sectors"):
+        if master in res:
+            assert res[master]["can_write"] is False and res[master]["can_edit"] is False, master
+    assert client.post("/api/labs", headers=h, json={"name": "DM Lab", "school_id": str(world["school"].id)}).status_code == 403
+    assert client.patch(f"/api/schools/{world['school'].id}", headers=h, json={"phone": "020-1"}).status_code == 403
+    # no Users & Access (nor the audit log)
+    assert client.get("/api/users", headers=h).status_code == 403
+    assert client.post("/api/users", headers=h, json={"role": "VT", "full_name": "V", "email": "v@x.com",
+                                                      "password": "Password1"}).status_code == 403
+    assert client.get("/api/admin/audit-logs", headers=h).status_code == 403
+    # ... and adds nothing at all, nor promotes students
+    assert all(v["can_write"] is False for v in res.values())
+    assert client.post("/api/issues", headers=h, json={"details": "x"}).status_code == 403
+    assert client.get("/api/promotion/options", headers=h).status_code == 403
+    # ... nor verifies students (the org admin does)
+    sid = str(world["students"][0].id)
+    assert client.post(f"/api/workflow/students/{sid}/verify", headers=h,
+                       json={"verification_status": "verified"}).status_code == 403
+
+
+def test_issue_resolved_by_one_admin_is_closed_for_both(client, world, principal, principal_record):
+    from app.models.geography import District
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    dm = User(organisation_id=world["org"].id, full_name="Dev DM", email="dm@x.com", role="DM")
+    for u in (oa, dm):
+        u.set_password("Password@123")
+    dm.districts.append(db.session.get(District, world["school"].district_id))
+    db.session.add_all([oa, dm])
+    db.session.commit()
+    issue = client.post("/api/principal-issues", headers=_as(client, "pr@x.com"), json={
+        "reporting_date": date.today().isoformat(), "details": "Lab door broken"}).get_json()
+    # both the org admin and the district's manager hear of it
+    for email in ("oa@x.com", "dm@x.com"):
+        box = _mine(client, email)
+        assert box["unread"] == 1 and f"focus={issue['id']}" in box["data"][0]["link"], email
+    # the district manager resolves it
+    r = client.post(f"/api/workflow/principal-issues/{issue['id']}/transition", headers=_as(client, "dm@x.com"),
+                    json={"workflow_status": "resolved", "resolution_note": "Carpenter fixed it"})
+    assert r.status_code == 200, r.get_json()
+    # ... so the org admin's notification now says so, and waits for nobody
+    oa_box = _mine(client, "oa@x.com")
+    n = oa_box["data"][0]
+    assert oa_box["unread"] == 0 and n["title"].startswith("Resolved") and "Dev DM" in n["body"]
+    assert "workflow_status=resolved" in n["link"]
+    # the org admin can't resolve it a second time over the top
+    again = client.post(f"/api/workflow/principal-issues/{issue['id']}/transition", headers=_as(client, "oa@x.com"),
+                        json={"workflow_status": "resolved", "resolution_note": "x"})
+    assert again.status_code == 409
+    # and the principal hears it's done
+    assert any(x["title"] == "Your issue has been resolved" for x in _mine(client, "pr@x.com")["data"])
 
 
 def test_super_admin_reads_everything_and_adds_organisations(client, world, principal):
@@ -414,13 +466,96 @@ def test_super_admin_reads_everything_and_adds_organisations(client, world, prin
         "school_type": "Co-education", "address": "Main Road", "location_lat": 18.6, "location_lng": 73.9}).get_json()
     box = client.get("/api/me/notifications?page_size=50", headers=_as(client, "sa@x.com")).get_json()
     added = [n for n in box["data"] if "school" in n["title"]]
-    assert added and f"_open={school['id']}" in added[0]["link"] and f"_org={world['org'].id}" in added[0]["link"]
+    assert added and f"focus={school['id']}" in added[0]["link"] and f"_org={world['org'].id}" in added[0]["link"]
     assert not any(n["category"] == "attendance" for n in box["data"])
     log = client.get("/api/admin/audit-logs", headers=_as(client, "sa@x.com")).get_json()["data"]
     assert log and all(r["actor_role"] == "OA" or r["entity"] == "app_user" for r in log)
     # ... and the one thing they do in Users & Access: reset an org admin's password
     r = client.post(f"/api/users/{oa.id}/reset-password", headers=_as(client, "sa@x.com"), json={"new_password": "Newpass123"})
     assert r.status_code == 200
+
+
+def test_a_list_opens_on_the_page_holding_the_focused_record(client, world):
+    """A notification's `focus` - the list comes back on the page that holds it."""
+    h = _login(client)
+    ids = [r["id"] for r in client.get("/api/students?page_size=50", headers=h).get_json()["data"]]
+    last = ids[-1]
+    r = client.get(f"/api/students?page_size=1&focus={last}", headers=h).get_json()
+    assert r["focus"] == {"id": last, "found": True, "page": len(ids)}
+    assert r["data"][0]["id"] == last and r["pagination"]["page"] == len(ids)
+    # filtered out -> it says so rather than showing the wrong row
+    other = client.get(f"/api/students?page_size=1&class_grade=12&focus={last}", headers=h).get_json()
+    assert other["focus"]["found"] is False
+
+
+def test_org_admin_raises_their_own_issues(client, world, principal):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    sa = User(full_name="SA", email="sa@x.com", role="SA")
+    for u in (oa, sa):
+        u.set_password("Password@123")
+    db.session.add_all([oa, sa])
+    db.session.commit()
+    h = _as(client, "oa@x.com")
+    r = client.post("/api/org-issues", headers=h, json={
+        "reporting_date": date.today().isoformat(), "reporting_time": "10:30", "details": "Salaries delayed for two labs"})
+    assert r.status_code == 201, r.get_json()
+    issue = r.get_json()
+    assert issue["workflow_status"] == "open" and issue["raised_by_name"] == "OA"
+    assert client.patch(f"/api/org-issues/{issue['id']}", headers=h, json={"details": "x"}).status_code == 403  # locked
+    # principals and trainers don't see them; the super admin reads them (and hears of them)
+    assert client.get("/api/org-issues", headers=_as(client, "pr@x.com")).status_code == 403
+    sa_h = _as(client, "sa@x.com")
+    assert [x["id"] for x in client.get(f"/api/org-issues?organisation_id={world['org'].id}", headers=sa_h).get_json()["data"]] == [issue["id"]]
+    assert client.post("/api/org-issues", headers=sa_h, json={"reporting_date": date.today().isoformat(),
+                                                               "details": "y"}).status_code == 403
+    box = client.get("/api/me/notifications?page_size=50", headers=sa_h).get_json()["data"]
+    raised = [n for n in box if f"focus={issue['id']}" in n["link"]]
+    assert len(raised) == 1 and raised[0]["title"].startswith("New issue from OA")      # one notice, not two
+    assert f"_org={world['org'].id}" in raised[0]["link"] and "workflow_status=open" in raised[0]["link"]
+
+    # the super admin resolves it, the way an org admin resolves a trainer's issue
+    url = f"/api/workflow/org-issues/{issue['id']}/transition"
+    done = {"workflow_status": "resolved", "resolution_note": "Released on the 5th"}
+    assert client.post(url, headers=_as(client, "oa@x.com"), json=done).status_code == 403   # not their own
+    sa_h = _as(client, "sa@x.com")
+    assert client.post(url, headers=sa_h, json={"workflow_status": "resolved"}).status_code == 400   # says how
+    assert client.post(url, headers=sa_h, json=done).status_code == 200
+    assert client.post(url, headers=sa_h, json=done).status_code == 409                  # already resolved
+    # ... the super admin's notice now says so; the org admin is told
+    mine = [n for n in client.get("/api/me/notifications?page_size=50", headers=sa_h).get_json()["data"]
+            if f"focus={issue['id']}" in n["link"]]
+    assert mine[0]["title"].startswith("Resolved") and mine[0]["is_read"] and "workflow_status=resolved" in mine[0]["link"]
+    told = client.get("/api/me/notifications?page_size=50", headers=_as(client, "oa@x.com")).get_json()["data"]
+    assert any(n["title"] == "Your issue has been resolved" and f"focus={issue['id']}" in n["link"] for n in told)
+    row = client.get("/api/org-issues", headers=_as(client, "oa@x.com")).get_json()["data"][0]
+    assert row["workflow_status"] == "resolved" and row["resolution_note"] == "Released on the 5th"
+
+
+def test_org_admin_adds_district_managers(client, world):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    h = _as(client, "oa@x.com")
+    district = str(world["school"].district_id)
+    body = {"full_name": "Meera DM", "email": "meera.dm@x.com", "phone": "9876512345", "district_ids": [district]}
+    assert client.post("/api/users/district-managers", headers=h, json={**body, "district_ids": []}).status_code == 400
+    assert client.post("/api/users/district-managers", headers=h, json={**body, "phone": "123"}).status_code == 400
+    r = client.post("/api/users/district-managers", headers=h, json=body)
+    assert r.status_code == 201, r.get_json()
+    login = r.get_json()["login"]
+    assert login["username"] == "meera.dm@x.com" and login["name"] == "Meera DM"
+    assert r.get_json()["user"]["districts"][0]["id"] == district
+    listed = client.get(f"/api/users/district-managers?district_id={district}", headers=h).get_json()["data"]
+    assert [u["email"] for u in listed] == ["meera.dm@x.com"]
+    # the org admin looks after their login too: listed in Users & Access, and can be disabled
+    users = client.get("/api/users", headers=h).get_json()["data"]
+    dm = next(u for u in users if u["email"] == "meera.dm@x.com")
+    assert client.patch(f"/api/users/{dm['id']}", headers=h, json={"status": "disabled"}).status_code == 200
+    # the login works (once enabled), as a district manager for that district
+    client.patch(f"/api/users/{dm['id']}", headers=h, json={"status": "active"})
+    signed = client.post("/api/auth/login", json={"email": "meera.dm@x.com", "password": login["password"]})
+    assert signed.status_code == 200 and signed.get_json()["user"]["role"] == "DM"
 
 
 def test_org_admin_sees_and_manages_only_their_schools_staff(client, world, principal, principal_record):

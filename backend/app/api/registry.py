@@ -114,13 +114,19 @@ class ResourceConfig:
             return False
         if role == "SA" and self.name != "organisations":
             return False
+        if role == "DM":      # a district manager adds nothing - they read, resolve and verify
+            return False
         return role in self.write_roles
 
     def locked_for(self, role):
         """A saved record this role may no longer change (see LOCKED_AFTER_SAVE).
-        The super admin changes organisations only."""
+        The super admin changes organisations only; a district manager
+        changes nothing (they resolve issues and verify through their own
+        actions, not by editing)."""
         if role == "SA":
             return self.name != "organisations"
+        if role == "DM":
+            return True
         return role in LOCKED_AFTER_SAVE and self.name not in PEOPLE_DATA
 
     def can_edit(self, role):
@@ -139,9 +145,13 @@ REGISTRY = {}
 # Users & Access). The super admin can still correct anything.
 LOCKED_AFTER_SAVE = {"VT", "PR", "OA"}
 PEOPLE_DATA = {"students", "trainers", "principals"}
+# the Master Data tabs (set-up lists) - read-only for a district manager
+MASTER_DATA = {"states", "districts", "schools", "principals", "labs", "trainers", "academic-years",
+               "sectors", "job-roles", "social-categories", "modules", "units", "sessions"}
 # what an org admin may add: the Master Data tabs
 ORG_ADMIN_CREATES = {"states", "districts", "schools", "principals", "labs", "trainers", "academic-years",
-                     "sectors", "job-roles", "social-categories"}
+                     "sectors", "job-roles", "social-categories",
+                     "org-issues"}   # ... and their own issues ("My Issues")
 LOCKED_MESSAGE = "Saved records can't be edited or deleted."
 
 
@@ -711,10 +721,10 @@ def _saved_student(obj, user, created, changed):
     details a trainer has since changed."""
     from app.services import notify
     if created:
-        notify.students_to_verify(obj.organisation_id, obj.school_id, 1, user, "added")
+        notify.students_to_verify(obj.organisation_id, obj.school_id, 1, user, "added", first=obj)
     elif user.role == VT and changed and obj.verification_status == "verified":
         obj.verification_status, obj.verified_by, obj.verified_on = "pending", None, None
-        notify.students_to_verify(obj.organisation_id, obj.school_id, 1, user, "edited")
+        notify.students_to_verify(obj.organisation_id, obj.school_id, 1, user, "edited", first=obj)
 
 
 def _link_principal_to_school(instance, user, is_create=False):
@@ -983,6 +993,38 @@ register(ResourceConfig(
     sortable=["reporting_date", "created_at"], default_sort=("reporting_date", "desc"),
     validate=_validate_principal_issue,
 ))
+def _prepare_org_issue(instance, user):
+    """Raised by the org admin themselves."""
+    instance.raised_by = user.id
+    return None
+
+
+def _saved_org_issue(obj, user, created, changed):
+    from app.services import notify
+    if created:
+        notify.org_issue_raised(obj, user)
+
+
+def _org_issue_display(obj):
+    from app.extensions import db
+    by = db.session.get(M.User, obj.raised_by) if obj.raised_by else None
+    org = db.session.get(M.Organisation, obj.organisation_id) if obj.organisation_id else None
+    return {"raised_by_name": by.full_name if by else None, "organisation_name": org.name if org else None}
+
+
+register(ResourceConfig(
+    name="org-issues", model=M.OrgIssue, label="Org Admin Issue",
+    # "My Issues": an org admin's own issues; the super admin resolves them
+    # (api/workflow.py transition_issue - not an edit)
+    write_roles=[OA], edit_roles=[],
+    writable=["reporting_date", "reporting_time", "details"],
+    prepare=_prepare_org_issue,
+    on_saved=_saved_org_issue,
+    computed=_org_issue_display,
+    search=["details"], filters=["workflow_status", "academic_year"],
+    sortable=["reporting_date", "created_at"], default_sort=("reporting_date", "desc"),
+    validate=_validate_principal_issue,   # the same checks: something written, a date not in the future
+))
 register(ResourceConfig(
     name="issues", model=M.VTIssue, label="VT Issue",
     computed=_vt_issue_display,
@@ -1159,6 +1201,7 @@ VIEW_ROLES = {
     "feedback": ALL_ROLES,
     "issues": [SA, OA, DM, VT],
     "principal-issues": [SA, OA, DM, PR],
+    "org-issues": [SA, OA],
     "notifications": [SA, OA],
 }
 DATE_FIELDS = {

@@ -94,7 +94,8 @@ def _safe(v):
 # ------------------------------------------------------------ plain words
 ENTITY_NAMES = {
     "student": "student", "daily_attendance": "daily attendance", "class_attendance": "class attendance",
-    "vt_issue": "trainer's issue", "principal_issue": "principal's issue", "lab_equipment": "lab equipment",
+    "vt_issue": "trainer's issue", "principal_issue": "principal's issue", "org_issue": "org admin's issue",
+    "lab_equipment": "lab equipment",
     "equipment_maintenance": "maintenance log", "guest_lecture": "guest lecture", "field_visit": "field visit",
     "trainer": "trainer", "principal": "principal", "school": "school", "lab": "lab", "district": "district",
     "state": "state", "app_user": "login", "trainer_profile": "trainer profile",

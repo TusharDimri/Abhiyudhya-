@@ -2,6 +2,8 @@
 
 Admins and District Managers create staff logins. Students never get a login.
 """
+import re
+
 from flask import Blueprint, request, jsonify, abort
 from sqlalchemy import or_
 
@@ -24,14 +26,15 @@ CREATE_MATRIX = {
     # an org admin's principals and trainers get their logins when they are
     # added (Master Data), so Users & Access only resets and disables them
     Role.ORG_ADMIN.value: set(),
-    Role.DISTRICT_MANAGER.value: {"PR", "VT"},
 }
 
-MANAGER_ROLES = {Role.SUPER_ADMIN.value, Role.ORG_ADMIN.value,
-                 Role.DISTRICT_MANAGER.value}
-# the logins an org admin looks after: their schools' principals and trainers
-# (not other org admins, nor district managers)
+# who has Users & Access (a district manager doesn't - their org admin looks
+# after logins)
+MANAGER_ROLES = {Role.SUPER_ADMIN.value, Role.ORG_ADMIN.value}
+# the logins an org admin looks after: their district managers, and their
+# schools' principals and trainers (not other org admins)
 SCHOOL_STAFF = (Role.PRINCIPAL.value, Role.TRAINER.value)
+ORG_ADMIN_LOOKS_AFTER = (Role.DISTRICT_MANAGER.value, *SCHOOL_STAFF)
 
 # no look-alike characters (0/O, 1/l/I) - the password is read off a screen
 _PW_UPPER, _PW_LOWER, _PW_DIGIT = "ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnpqrstuvwxyz", "23456789"
@@ -90,8 +93,8 @@ def _scoped_target(actor, target):
         abort(404)
     if actor.role != Role.SUPER_ADMIN.value and target.organisation_id != actor.organisation_id:
         abort(403, description="Outside your organisation")
-    if actor.role == Role.ORG_ADMIN.value and target.role not in SCHOOL_STAFF:
-        abort(403, description="Org admins look after principals' and trainers' logins only.")
+    if actor.role == Role.ORG_ADMIN.value and target.role not in ORG_ADMIN_LOOKS_AFTER:
+        abort(403, description="Org admins look after district managers', principals' and trainers' logins only.")
     if actor.role == Role.SUPER_ADMIN.value and target.role != Role.ORG_ADMIN.value:
         abort(403, description="The super admin looks after org admins' logins only.")
 
@@ -105,8 +108,9 @@ def list_users():
     q = db.session.query(User).filter(User.is_deleted.is_(False))
     if user.role != Role.SUPER_ADMIN.value:
         q = q.filter(User.organisation_id == user.organisation_id)
-    if user.role == Role.ORG_ADMIN.value:
-        q = q.filter(User.role.in_(SCHOOL_STAFF), User.school_id.isnot(None))
+    if user.role == Role.ORG_ADMIN.value:      # their district managers, principals and trainers
+        q = q.filter(or_(User.role == Role.DISTRICT_MANAGER.value,
+                         db.and_(User.role.in_(SCHOOL_STAFF), User.school_id.isnot(None))))
     if user.role == Role.SUPER_ADMIN.value:      # their org admins, nobody below
         q = q.filter(User.role == Role.ORG_ADMIN.value)
     role = request.args.get("role")
@@ -231,3 +235,72 @@ def reset_password(uid):
     audit.record(actor, "update", "app_user", target.id, after={"password": "reset by admin"})
     db.session.commit()
     return jsonify({"reset": True})
+
+
+# ------------------------------------------ district managers (Master Data)
+# A district manager is below the org admin: the org admin adds them (with
+# the district or districts they look after) and hands over their login.
+MOBILE = re.compile(r"^[6-9]\d{9}$")
+
+
+def _dm_row(u):
+    return {
+        "id": str(u.id), "full_name": u.full_name, "email": u.email, "phone": u.phone, "status": u.status,
+        "organisation_id": str(u.organisation_id) if u.organisation_id else None,
+        "districts": [{"id": str(d.id), "name": d.name} for d in sorted(u.districts, key=lambda d: d.name)],
+        "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+    }
+
+
+@bp.get("/district-managers")
+@login_required
+def list_district_managers():
+    """An org admin's district managers (the super admin reads them too,
+    for the organisation they pick). ?district_id= narrows it."""
+    actor = current_user()
+    if actor.role not in (Role.ORG_ADMIN.value, Role.SUPER_ADMIN.value):
+        abort(403, description="Only admins see district managers.")
+    org_id = actor.organisation_id if actor.role == Role.ORG_ADMIN.value else request.args.get("organisation_id")
+    if not org_id:
+        return jsonify({"data": []})
+    q = db.session.query(User).filter(User.role == Role.DISTRICT_MANAGER.value, User.is_deleted.is_(False),
+                                      User.organisation_id == org_id)
+    if request.args.get("district_id"):
+        q = q.filter(User.districts.any(District.id == request.args["district_id"]))
+    return jsonify({"data": [_dm_row(u) for u in q.order_by(User.full_name).all()]})
+
+
+@bp.post("/district-managers")
+@login_required
+def create_district_manager():
+    """Body: {full_name, email, phone, district_ids}. Makes their login and
+    returns it - the only time the password is shown."""
+    from types import SimpleNamespace
+    actor = current_user()
+    if actor.role != Role.ORG_ADMIN.value:
+        abort(403, description="Only the org admin adds district managers.")
+    data = request.get_json(silent=True) or {}
+    name = (data.get("full_name") or "").strip()
+    phone = (data.get("phone") or "").strip()
+    ids = [str(i) for i in (data.get("district_ids") or []) if i]
+    missing = [label for label, v in (("Full name", name), ("Email", (data.get("email") or "").strip()),
+                                       ("Mobile", phone), ("District", ids)) if not v]
+    if missing:
+        abort(400, description="Please fill in: " + ", ".join(missing) + ".")
+    if not MOBILE.match(phone):
+        abort(400, description="Mobile number must be 10 digits starting 6-9.")
+    districts = db.session.query(District).filter(District.id.in_(ids), District.organisation_id == actor.organisation_id,
+                                                  District.is_deleted.is_(False)).all()
+    if len(districts) != len(set(ids)):
+        abort(400, description="Choose districts of your own organisation.")
+    person = SimpleNamespace(organisation_id=actor.organisation_id, full_name=name, email=data.get("email"),
+                             phone=phone, user_id=None)
+    try:
+        login = create_login_for(Role.DISTRICT_MANAGER.value, person, actor)
+    except LoginError as exc:
+        abort(400, description=str(exc))
+    u = db.session.get(User, person.user_id)
+    u.districts = districts
+    audit.record(actor, "update", "app_user", u.id, after={"districts": [d.name for d in districts]})
+    db.session.commit()
+    return jsonify({"user": _dm_row(u), "login": {**login, "name": name}}), 201

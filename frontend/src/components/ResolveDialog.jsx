@@ -1,5 +1,6 @@
-/* The org admin resolves what was raised: a trainer's or a principal's
-   issue, or a maintenance log entry. What was raised is shown (filled in,
+/* An admin resolves what was raised: the org admin (or district manager) a
+   trainer's or a principal's issue, or a maintenance log entry; the super
+   admin an org admin's own issue. What was raised is shown (filled in,
    nothing to type); they write the resolution and set Open / Resolved.
    Resolving it tells whoever raised it. */
 import { useState } from "react";
@@ -17,6 +18,10 @@ const KNOWN = {
   ],
   "principal-issues": (r) => [
     ["Raised by (Principal)", r.principal_name], ["School", r.school_name],
+    ["Date", toDMY(r.reporting_date)], ["Issue", r.details],
+  ],
+  "org-issues": (r) => [
+    ["Raised by (Org Admin)", r.raised_by_name], ["Organisation", r.organisation_name],
     ["Date", toDMY(r.reporting_date)], ["Issue", r.details],
   ],
   "equipment-maintenance": (r) => [

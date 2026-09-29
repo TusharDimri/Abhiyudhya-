@@ -2,9 +2,9 @@
    emoji: each module and each kind of notification has its own. */
 import {
   Bell, BookMarked, BookOpen, Briefcase, BriefcaseBusiness, Building, Building2, Bus, CalendarCheck,
-  CalendarRange, ClipboardCheck, ClipboardList, Database, Factory, FileText, FlaskConical, GraduationCap,
+  CalendarRange, ClipboardCheck, ClipboardList, Database, Factory, FileText, Flag, FlaskConical, GraduationCap,
   LayoutDashboard, Link2, Map, MapPin, MessageSquare, MessageSquareWarning, Mic, Monitor, NotebookPen,
-  NotebookText, Presentation, School, ScrollText, Tags, Trash2, TriangleAlert, UserCheck, UserRound, Users,
+  NotebookText, Presentation, School, ScrollText, Tags, Trash2, TriangleAlert, UserCheck, UserCog, UserRound, Users,
   UsersRound, Wrench, CircleDot,
 } from "lucide-react";
 
@@ -14,14 +14,14 @@ const ICONS = {
   dashboard: LayoutDashboard, notifications: Bell, master: Database, profile: UserRound,
   users: UsersRound, audit: ScrollText, trash: Trash2,
   // master data
-  organisations: Building2, states: Map, districts: MapPin, schools: School, principals: GraduationCap,
+  organisations: Building2, states: Map, districts: MapPin, "district-managers": UserCog, schools: School, principals: GraduationCap,
   trainers: Presentation, labs: FlaskConical, "academic-years": CalendarRange, sectors: Factory,
   "job-roles": BriefcaseBusiness, "social-categories": Tags, modules: BookOpen, units: BookMarked, sessions: NotebookText,
   // people
   students: Users, assessments: ClipboardCheck,
   // daily operations
   attendance: CalendarCheck, "class-attendance": ClipboardList, "principal-issues": MessageSquareWarning,
-  issues: TriangleAlert, "field-visits": Bus, "guest-lectures": Mic, equipment: Monitor,
+  issues: TriangleAlert, "org-issues": Flag, "field-visits": Bus, "guest-lectures": Mic, equipment: Monitor,
   "equipment-maintenance": Wrench,
   // internship
   employers: Building, "employer-student-maps": Link2, diaries: NotebookPen, "ojt-placements": Briefcase,

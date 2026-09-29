@@ -4,7 +4,7 @@ import { ChevronsLeft, ChevronsRight, Globe, LogOut, Menu } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useBootstrap } from "../hooks/useBootstrap";
-import { MODULES, NAV_GROUPS, NAV_GROUP_ORDER, MASTER_GROUP, isSectionHidden, groupOf } from "../lib/modules";
+import { MODULES, NAV_GROUPS, NAV_GROUP_ORDER, MASTER_GROUP, isSectionHidden, groupOf, labelOf } from "../lib/modules";
 import LocationButton from "./LocationButton";
 import ScopeBadges from "./ScopeBadges";
 import NotificationBell from "./NotificationBell";
@@ -15,7 +15,7 @@ const PROFILE_ROLES = ["VT", "PR"];
 
 // Special admin pages (not resource modules) with the roles allowed to see them.
 const ADMIN_LINKS = [
-  { to: "/app/admin/users", label: "Users & Access", icon: "users", roles: ["SA", "OA", "DM"] },
+  { to: "/app/admin/users", label: "Users & Access", icon: "users", roles: ["SA", "OA"] },
   { to: "/app/admin/audit", label: "Audit Log", icon: "audit", roles: ["SA", "OA"] },
   // Recycle Bin: switched off - nothing can be deleted any more, so there's
   // nothing to restore. Uncomment to bring it back (pages/admin/Trash.jsx).
@@ -55,7 +55,7 @@ export default function Layout() {
     ? (ADMIN_LINKS.find((l) => loc.pathname.startsWith(l.to))?.label || "Administration")
     : seg === "master" ? MASTER_GROUP
     : seg === "profile" ? "My Profile"
-    : (MODULES[seg]?.label || (loc.pathname.includes("dashboard") ? "Dashboard" : "Abhiyudhya"));
+    : (labelOf(MODULES[seg], user?.role) || (loc.pathname.includes("dashboard") ? "Dashboard" : "Abhiyudhya"));
 
   const item = ({ isActive }) => `nav-item ${isActive ? "active" : ""}`;
 
@@ -99,8 +99,8 @@ export default function Layout() {
                     <span className="ico"><Icon name="master" /></span> <span className="nav-label">{MASTER_GROUP}</span>
                   </NavLink>
                 ) : grouped[g].map((m) => (
-                  <NavLink key={m.key} to={`/app/${m.key}`} className={item} title={m.label}>
-                    <span className="ico"><Icon name={m.key} /></span> <span className="nav-label">{m.label}</span>
+                  <NavLink key={m.key} to={`/app/${m.key}`} className={item} title={labelOf(m, user?.role)}>
+                    <span className="ico"><Icon name={m.key} /></span> <span className="nav-label">{labelOf(m, user?.role)}</span>
                   </NavLink>
                 ))}
               </div>

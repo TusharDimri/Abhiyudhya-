@@ -38,6 +38,12 @@ function Protected({ children }) {
   return children;
 }
 
+// An admin page this role doesn't have is not reachable by URL either.
+function OnlyFor({ roles, children }) {
+  const { user } = useAuth();
+  return roles.includes(user?.role) ? children : <Navigate to="/app/dashboard" replace />;
+}
+
 // A section hidden from this role (lib/modules.js) is not reachable by URL either.
 function SectionRoute() {
   const { resource } = useParams();
@@ -63,8 +69,8 @@ export default function App() {
       <Route path="/app" element={<Protected><Layout /></Protected>}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<Suspense fallback={<PageFallback />}><Dashboard /></Suspense>} />
-        <Route path="admin/users" element={<Suspense fallback={<PageFallback />}><AdminUsers /></Suspense>} />
-        <Route path="admin/audit" element={<Suspense fallback={<PageFallback />}><AdminAudit /></Suspense>} />
+        <Route path="admin/users" element={<OnlyFor roles={["SA", "OA"]}><Suspense fallback={<PageFallback />}><AdminUsers /></Suspense></OnlyFor>} />
+        <Route path="admin/audit" element={<OnlyFor roles={["SA", "OA"]}><Suspense fallback={<PageFallback />}><AdminAudit /></Suspense></OnlyFor>} />
         {/* Recycle Bin: switched off - nothing can be deleted, so nothing to restore */}
         {/* <Route path="admin/trash" element={<Suspense fallback={<PageFallback />}><AdminTrash /></Suspense>} /> */}
         <Route path="profile" element={<Suspense fallback={<PageFallback />}><Profile /></Suspense>} />

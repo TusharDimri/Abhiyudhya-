@@ -446,7 +446,7 @@ export const MODULES = {
     ],
     formHint: "Students can be added in any class the lab runs; at the end of the year they move up through Promote Students.",
     // a trainer promotes from the Manage Students tab (StudentsHub) instead
-    pageActions: [{ key: "promote", label: "⬆ Promote Students", roles: ["DM", "OA"] }],
+    pageActions: [{ key: "promote", label: "⬆ Promote Students", roles: ["OA"] }],   // (not district managers)
     // the filters a trainer actually uses, all dropdowns
     // (a "enrolment_status" filter goes back in here with the Status column)
     filtersFor: { VT: ["class_grade", "section", "academic_year", "verification_status"] },
@@ -510,7 +510,7 @@ export const MODULES = {
       // verification isn't edited in this form - an admin's Verify sets it
     ],
     rowActions: [
-      { action: "verify", roles: ["DM", "OA"] },   // trainers add students; an admin verifies them
+      { action: "verify", roles: ["OA"] },   // trainers add students; the org admin verifies them
       { action: "history", roles: ["VT", "PR", "DM", "OA", "SA"] },
       // leaving the school: the trainer marks -> the principal records the TC -> the org admin confirms
       { action: "status", roles: ["VT"] },
@@ -667,6 +667,26 @@ export const MODULES = {
       { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", autoFor: ["VT", "PR", "DM"], quiet: true },
     ],
     rowActions: [{ action: "resolve", roles: ["DM", "OA"] }],   // the admin resolves it; the raiser is told
+  },
+  // an org admin's own issue log (the super admin reads it as "Org Admin Issues")
+  "org-issues": {
+    label: "My Issues", labelFor: { SA: "Org Admin Issues" }, singular: "Issue", icon: "", group: "Daily Operations",
+    columns: [
+      { key: "reporting_date", label: "Date" },
+      { key: "reporting_time", label: "Time" },
+      { key: "details", label: "Issue" },
+      { key: "raised_by_name", label: "Raised by", hideFor: ["OA"] },
+      { key: "organisation_name", label: "Organisation", hideFor: ["OA"] },
+      { key: "workflow_status", label: "Status", badge: true, valueLabels: ISSUE_STATUS_LABELS },
+      { key: "resolution_note", label: "Resolution" },
+    ],
+    fields: [
+      { name: "reporting_date", label: "Date", required: true, ...PAST_DATE },
+      { name: "reporting_time", label: "Time", type: "time", required: true, defaultValue: nowTime },
+      { name: "details", label: "Issue", type: "textarea", rows: 4, required: true, placeholder: "What is the issue?" },
+    ],
+    // the org admin reads their own; the super admin resolves them (the org admin is told)
+    rowActions: [{ action: "view", roles: ["OA"] }, { action: "resolve", roles: ["SA"] }],
   },
   "field-visits": {
     label: "Field / Industry Visits", singular: "Field Visit", icon: "🚌", group: "Daily Operations",
@@ -969,6 +989,7 @@ const ORG_ADMIN_FILTERS = {
   attendance: ["trainer_id", "lab_id", "date", "endorsement_status"],
   "class-attendance": ["trainer_id", "lab_id", "class_grade", "section", "date", "endorsement_status"],
   "principal-issues": ["workflow_status", "academic_year"],
+  "org-issues": ["workflow_status", "academic_year"],
   issues: ["trainer_id", "lab_id", "workflow_status", "academic_year"],
   "field-visits": ["lab_id", "academic_year", "class_grade", "section"],
   "guest-lectures": ["lab_id", "academic_year", "class_grade", "section"],
@@ -978,7 +999,8 @@ const ORG_ADMIN_FILTERS = {
   notifications: ["category", "is_read"],
 };
 for (const [key, cols] of Object.entries(ORG_ADMIN_FILTERS)) {
-  if (MODULES[key]) MODULES[key].filtersFor = { ...(MODULES[key].filtersFor || {}), OA: cols };
+  // district managers work the same lists the same way
+  if (MODULES[key]) MODULES[key].filtersFor = { ...(MODULES[key].filtersFor || {}), OA: cols, DM: cols };
 }
 
 export const HIDDEN_SECTIONS = {
@@ -989,6 +1011,8 @@ export const HIDDEN_SECTIONS = {
   // org admins: no curriculum tabs, employer lists or daily diaries; feedback off for now too
   // (notifications: they have their own, from the bell - not this list of everyone's)
   OA: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback", "notifications"],
+  // district managers: the same (feedback off for now too); notifications are their own, from the bell
+  DM: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback", "notifications"],
   // the super admin reads everything else; notifications are their own, from the bell
   SA: ["modules", "units", "sessions", "diaries", "feedback", "notifications", "employers", "employer-student-maps"],
 };
@@ -998,6 +1022,8 @@ export const isSectionHidden = (role, key) => !!HIDDEN_SECTIONS[role]?.includes(
 // the sidebar group a module sits in for this role (`groupFor` moves it,
 // e.g. Trainers into Master Data beside Labs for org admins)
 export const groupOf = (mod, role) => mod?.groupFor?.[role] || mod?.group;
+// a module's name for this role (`labelFor`: e.g. "My Issues" is "Org Admin Issues" to the super admin)
+export const labelOf = (mod, role) => mod?.labelFor?.[role] || mod?.label;
 
 // the modules this user can open, in catalog order: [[key, module], ...]
 export const visibleModules = (boot, role) =>

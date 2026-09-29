@@ -170,7 +170,7 @@ def add_students():
     for s in made:
         audit.record(user, "create", "student", s.id, after=s.to_dict())
     from app.services import notify
-    notify.students_to_verify(user.organisation_id, lab.school_id, len(made), user, "added")
+    notify.students_to_verify(user.organisation_id, lab.school_id, len(made), user, "added", first=made[0] if made else None)
     db.session.commit()
     return jsonify({
         "added": len(made), "class_grade": class_grade, "section": section, "academic_year": year,
@@ -265,7 +265,8 @@ def add_previous_students():
                      after={"class_grade": "11", "section": section, "academic_year": year, "joined": "Class 11"})
         added.append({"id": sid, "full_name": s.full_name, "roll_number": roll})
     from app.services import notify
-    notify.students_to_verify(user.organisation_id, lab.school_id, len(added), user, "class11")
+    notify.students_to_verify(user.organisation_id, lab.school_id, len(added), user, "class11",
+                              first=allowed.get(added[0]["id"]) if added else None)
     db.session.commit()
     return jsonify({"added": len(added), "class_grade": "11", "section": section,
                     "academic_year": year, "students": added})

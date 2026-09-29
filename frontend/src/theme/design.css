@@ -289,3 +289,14 @@ select.filter-ctl.on { background-color: var(--navy-050); }
 select[multiple].select, select[multiple].input { background-image: none; padding-right: .7rem; }
 /* the small selects inside tables and windows */
 .select.select-sm { padding-right: 2.1rem; background-position: right .6rem center; background-size: 14px; }
+
+/* the row a notification pointed at: a soft blue blink for 2 seconds */
+@keyframes rowFlash {
+  0%, 50%, 100% { background: transparent; }
+  25%, 75% { background: #dbeafe; }
+}
+table.data tbody tr.row-flash > td { animation: rowFlash 1s ease-in-out 2; }
+table.data tbody tr.row-flash > td:first-child { box-shadow: inset 3px 0 0 #3b82f6; }
+@media (prefers-reduced-motion: reduce) {
+  table.data tbody tr.row-flash > td { animation: none; background: #dbeafe; }
+}

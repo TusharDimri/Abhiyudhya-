@@ -38,7 +38,7 @@ from app.models.masters import AcademicYear, JobRole, Sector, SocialCategory
 from app.models.misc import AuditLog, Feedback, Notification
 from app.models.operations import (
     ClassAttendance, ClassAttendanceStudentMark, DailyAttendance, EquipmentMaintenance, FieldVisit,
-    FieldVisitStudentMark, GuestLecture, GuestLectureStudentMark, LabEquipment, PrincipalIssue, VTIssue,
+    FieldVisitStudentMark, GuestLecture, GuestLectureStudentMark, LabEquipment, OrgIssue, PrincipalIssue, VTIssue,
 )
 from app.models.organisation import Organisation
 from app.models.student import Assessment, Student, StudentPromotion
@@ -112,6 +112,11 @@ PR_ISSUES = [("Lab room roof leaks during rain", "open"), ("Need a second traine
              ("Boundary wall near the lab is damaged", "in-progress"),
              ("Lab furniture delivered short by 5 benches", "resolved"),
              ("Trainer salary for last month is pending", "resolved")]
+# an org admin's own issues ("My Issues") - the super admin resolves them
+OA_ISSUES = [("Funds for the second-term lab consumables have not been released", "open", None),
+             ("Need approval to add two schools in the new district", "open", None),
+             ("Board exam fee portal is not accepting our trainers' logins", "resolved",
+              "Portal access restored with the board; trainers can log in again")]
 EQUIPMENT = {
     "IT": [("Desktop computers (1-10)", "10 desktops with keyboards and mice"), ("Desktop computers (11-20)", "10 desktops"),
            ("LCD projector", "Ceiling mounted, with screen"), ("Laser printer", "Mono, A4"), ("UPS 5 kVA", "Whole-lab backup"),
@@ -359,71 +364,170 @@ def _principal_issues(org, school, pr_user, today):
     return len(picked)
 
 
-NOTICES = [  # an org admin's (no attendance - that's the principal's): (title, body, category, link, read?)
-    ("New issue from a trainer", "Projector cable is missing in the lab.", "issue", "/app/issues?workflow_status=open", False),
-    ("New issue from a principal", "Roof of the lab leaks during rain.", "issue",
-     "/app/principal-issues?workflow_status=open", False),
-    ("Maintenance needed: LCD projector", "No display since Monday.", "maintenance", "/app/equipment-maintenance", False),
-    ("Lab equipment added: Laser printer", "Mono, A4", "equipment", "/app/equipment", True),
-    ("3 students to verify", "3 students were added and need verifying.", "verification", "/app/students?tab=verify", False),
-    ("Issue resolved", "Roof repaired by the PWD.", "issue", "/app/principal-issues?workflow_status=resolved", True),
-]
-SA_NOTICES = [  # a super admin hears what org admins do
-    ("Org Admin added a school", "{org}: a new school was added.", "admin", "/app/master/schools", False),
-    ("Org Admin added a trainer", "{org}: a new trainer and their login were added.", "admin", "/app/master/trainers", False),
-    ("Org Admin resolved an issue", "{org}: an issue was marked resolved.", "admin", "/app/principal-issues", True),
-]
-
-
-PR_NOTICES = [  # (title, body, category, link, read?)
-    ("Daily attendance to verify", "Your trainer marked daily attendance for today.", "attendance",
-     "/app/attendance?endorsement_status=submitted", False),
-    ("Class 9 attendance to verify", "Your trainer marked Class 9 attendance.", "attendance",
-     "/app/class-attendance?endorsement_status=submitted", False),
-    ("Guest lecture added: Careers in data entry", "Anil Deshpande · Class 9", "guest_lecture", "/app/guest-lectures", True),
-    ("Your issue has been resolved", "Sorted out by the district office.", "issue",
-     "/app/principal-issues?workflow_status=resolved", True),
-]
-VT_NOTICES = [
-    ("Attendance verified", "Your daily attendance was verified by the principal.", "attendance",
-     "/app/attendance?endorsement_status=endorsed", False),
-    ("LCD projector: Under Repair", "The projector has gone for repair.", "maintenance", "/app/equipment-maintenance", False),
-    ("Attendance verified", "Your Class 9 attendance was verified by the principal.", "attendance",
-     "/app/class-attendance?endorsement_status=endorsed", True),
-]
+def _org_issues(org, today):
+    """A few issues the org admin raised for the super admin - two open, one
+    resolved - each with the notices the app would have sent (the super
+    admin: raised / resolved; the org admin: resolved). Idempotent."""
+    from urllib.parse import urlencode
+    from app.services.notify import _link
+    oa = db.session.query(User).filter_by(organisation_id=org.id, role="OA", is_deleted=False).order_by(User.created_at).first()
+    if oa is None or db.session.query(OrgIssue.id).filter_by(organisation_id=org.id).first():
+        return 0
+    sas = db.session.query(User).filter(User.role == "SA", User.is_deleted.is_(False)).all()
+    for i, (text, status, note) in enumerate(OA_ISSUES):
+        day = today - timedelta(days=3 + i * 4)
+        rec = OrgIssue(organisation_id=org.id, raised_by=oa.id, created_by=oa.id,
+                       academic_year=academic_year_for(org.id, day), reporting_date=day,
+                       reporting_time=time(11 + i, 15), details=text, workflow_status=status, resolution_note=note,
+                       resolved_on=datetime.combine(day + timedelta(days=2), time(16)) if note else None)
+        db.session.add(rec)
+        db.session.flush()
+        q = {"_org": str(org.id), "workflow_status": "open", "focus": str(rec.id)}
+        when = datetime.combine(day, time(11 + i, 20))
+        for sa in sas:
+            title = f"New issue from {oa.full_name} ({org.name})"
+            if note:
+                q["workflow_status"] = "resolved"
+            db.session.add(Notification(
+                organisation_id=org.id, user_id=sa.id, category="issue", created_at=when, is_read=bool(note),
+                title=(f"Resolved - {title}" if note else title)[:200],
+                body=(f"Resolved by {sa.full_name}: {note}" if note else text)[:300],
+                link=f"/app/org-issues?{urlencode(q)}"))
+        if note:
+            db.session.add(Notification(
+                organisation_id=org.id, user_id=oa.id, category="issue", is_read=False,
+                created_at=datetime.combine(day + timedelta(days=2), time(16, 5)),
+                title="Your issue has been resolved", body=note[:300],
+                link=_link("org-issues", record=rec, workflow_status="resolved")))
+    return len(OA_ISSUES)
 
 
 def _notifications(org, today):
-    """What each bell shows - org admins, principals and trainers (and the
-    super admin, about org admins), some read and some not. Anyone who already
-    has notifications is left as they are."""
+    """What each bell shows - org admins, principals, trainers, and the super
+    admin (about org admins) - some read, some not. Each one points at a real
+    record, built the way the app builds its own (services/notify.py), so a
+    click opens that record's list, filtered, with the row flashing. Anyone
+    who already has notifications is left as they are."""
     from urllib.parse import urlencode
-    school = db.session.query(School).filter_by(organisation_id=org.id).order_by(School.name).first()
+    from app.services.notify import _link
 
-    def admin_link(link, with_org=False):
-        """an admin's lists open on a school - their links carry it"""
-        q = {"_school": str(school.id), "_district": str(school.district_id or "")} if school else {}
-        if with_org:
-            q["_org"] = str(org.id)
-        return link + ("&" if "?" in link else "?") + urlencode(q) if q else link
+    schools = db.session.query(School).filter_by(organisation_id=org.id).order_by(School.name).all()
+    if not schools:
+        return
+    first = schools[0]
+    lab_ids = lambda school: [l.id for l in db.session.query(Lab).filter_by(school_id=school.id)]  # noqa: E731
 
-    people = db.session.query(User).filter(User.organisation_id == org.id, User.role.in_(["OA", "PR", "VT"])).all()
+    def one(model, *conds, order=None):
+        q = db.session.query(model).filter(model.organisation_id == org.id, model.is_deleted.is_(False), *conds)
+        return q.order_by(order if order is not None else model.created_at.desc()).first()
+
+    def oa_notices(school):
+        labs = lab_ids(school)
+        vt_issue = one(VTIssue, VTIssue.lab_id.in_(labs), VTIssue.workflow_status == "open")
+        pr_issue = one(PrincipalIssue, PrincipalIssue.school_id == school.id, PrincipalIssue.workflow_status == "open")
+        pr_done = one(PrincipalIssue, PrincipalIssue.school_id == school.id, PrincipalIssue.workflow_status == "resolved")
+        eq = one(LabEquipment, LabEquipment.school_id == school.id)
+        maint = one(EquipmentMaintenance, EquipmentMaintenance.equipment_id.in_(
+            [e.id for e in db.session.query(LabEquipment.id).filter(LabEquipment.school_id == school.id)]),
+            EquipmentMaintenance.maintenance_status != "Resolved")
+        pending = one(Student, Student.school_id == school.id, Student.verification_status == "pending")
+        tc = one(Student, Student.school_id == school.id, Student.leaving_stage == "tc_issued")
+        at = f" at {school.name}"
+        return [x for x in (
+            vt_issue and ("New issue from a trainer" + at, vt_issue.details, "issue",
+                          _link("issues", school, True, record=vt_issue, workflow_status="open"), False),
+            pr_issue and ("New issue from a principal" + at, pr_issue.details, "issue",
+                          _link("principal-issues", school, True, record=pr_issue, workflow_status="open"), False),
+            maint and (f"Maintenance needed{at}", maint.issue, "maintenance",
+                       _link("equipment-maintenance", school, True, record=maint), False),
+            pending and ("A student to verify" + at, f"{pending.full_name} was added and needs verifying.", "verification",
+                         _link("students", school, True, record=pending, tab="verify"), False),
+            tc and ("TC to verify: " + tc.full_name + at, f"{tc.leaving_type} · TC {tc.tc_number or ''}", "leaving",
+                    _link("students", school, True, record=tc, tab="leaving"), False),
+            eq and (f"Lab equipment added: {eq.name}{at}", eq.details or "", "equipment",
+                    _link("equipment", school, True, record=eq), True),
+            pr_done and ("Issue" + at + " is now Resolved", pr_done.details, "issue",
+                         _link("principal-issues", school, True, record=pr_done, workflow_status="resolved"), True),
+        ) if x]
+
+    def pr_notices(u):
+        school = db.session.get(School, u.school_id) if u.school_id else None
+        if school is None:
+            return []
+        daily = one(DailyAttendance, DailyAttendance.school_id == school.id, DailyAttendance.endorsement_status == "submitted",
+                    order=DailyAttendance.date.desc())
+        cls = one(ClassAttendance, ClassAttendance.school_id == school.id, ClassAttendance.endorsement_status == "submitted",
+                  order=ClassAttendance.date.desc())
+        lecture = one(GuestLecture, GuestLecture.school_id == school.id, order=GuestLecture.reporting_date.desc())
+        leaving = one(Student, Student.school_id == school.id, Student.leaving_stage == "requested")
+        done = one(PrincipalIssue, PrincipalIssue.school_id == school.id, PrincipalIssue.workflow_status == "resolved")
+        return [x for x in (
+            daily and ("Daily attendance to verify", f"Marked for {daily.date:%d/%m/%Y}.", "attendance",
+                       _link("attendance", record=daily, endorsement_status="submitted"), False),
+            cls and (f"Class {cls.class_grade} attendance to verify", f"Marked for {cls.date:%d/%m/%Y}.", "attendance",
+                     _link("class-attendance", record=cls, endorsement_status="submitted"), False),
+            leaving and (f"{leaving.full_name} is leaving - TC needed", leaving.left_reason or "", "leaving",
+                         _link("students", record=leaving, leaving_stage="requested"), False),
+            lecture and (f"Guest lecture added: {lecture.topic}", lecture.lecturer_name or "", "guest_lecture",
+                         _link("guest-lectures", record=lecture), True),
+            done and ("Your issue has been resolved", done.resolution_note or done.details, "issue",
+                      _link("principal-issues", record=done, workflow_status="resolved"), True),
+        ) if x]
+
+    def vt_notices(u):
+        daily = one(DailyAttendance, DailyAttendance.created_by == u.id, DailyAttendance.endorsement_status == "endorsed",
+                    order=DailyAttendance.date.desc())
+        cls = one(ClassAttendance, ClassAttendance.created_by == u.id, ClassAttendance.endorsement_status == "endorsed",
+                  order=ClassAttendance.date.desc())
+        maint = one(EquipmentMaintenance, EquipmentMaintenance.created_by == u.id)
+        return [x for x in (
+            daily and ("Attendance verified", f"Your daily attendance for {daily.date:%d/%m/%Y} was verified.", "attendance",
+                       _link("attendance", record=daily, endorsement_status="endorsed"), False),
+            maint and (f"Maintenance: {maint.maintenance_status}", maint.issue or "", "maintenance",
+                       _link("equipment-maintenance", record=maint), False),
+            cls and ("Attendance verified", f"Your Class {cls.class_grade} attendance for {cls.date:%d/%m/%Y} was verified.",
+                     "attendance", _link("class-attendance", record=cls, endorsement_status="endorsed"), True),
+        ) if x]
+
+    def sa_notices():
+        """what org admins did - opening in their organisation"""
+        def link(path, school, rec):
+            q = {"_org": str(org.id), "_school": str(school.id), "focus": str(rec.id)}
+            if school.district_id:
+                q["_district"] = str(school.district_id)
+            return f"/app/{path}?{urlencode(q)}"
+        trainer = db.session.query(Trainer).filter_by(organisation_id=org.id, school_id=first.id).first()
+        pr_issue = one(PrincipalIssue, PrincipalIssue.school_id == first.id)
+        return [x for x in (
+            ("Org Admin added a school: " + first.name, f"Org Admin at {org.name}", "admin", link("schools", first, first), False),
+            trainer and ("Org Admin added a trainer: " + trainer.full_name, f"Org Admin at {org.name}", "admin",
+                         link("trainers", first, trainer), False),
+            pr_issue and ("Org Admin changed a principal's issue", f"Org Admin at {org.name}", "admin",
+                          link("principal-issues", first, pr_issue), True),
+        ) if x]
+
+    def add(u, notices, hour):
+        for i, (title, body, category, link, read) in enumerate(notices):
+            when = datetime.combine(today - timedelta(days=i * 2 + 1), time(hour + i))
+            db.session.add(Notification(organisation_id=org.id, user_id=u.id, title=title[:200], body=(body or "")[:300],
+                                        category=category, link=link, is_read=read, created_at=when))
+
     has = {uid for (uid,) in db.session.query(Notification.user_id).filter(Notification.organisation_id == org.id)}
-    for u in people:
+    def dm_notices(u):
+        """a district manager: issues and maintenance, at a school in their districts"""
+        mine = {d.id for d in u.districts}
+        school = next((s for s in schools if s.district_id in mine), None)
+        return [x for x in oa_notices(school) if x[2] in ("issue", "maintenance")] if school else []
+
+    for u in db.session.query(User).filter(User.organisation_id == org.id, User.role.in_(["OA", "DM", "PR", "VT"])):
         if u.id in has:
             continue
-        notices = PR_NOTICES if u.role == "PR" else VT_NOTICES if u.role == "VT" else NOTICES
-        for i, (title, body, category, link, read) in enumerate(notices):
-            when = datetime.combine(today - timedelta(days=i * 2 + 1), time(9 + i))
-            db.session.add(Notification(organisation_id=org.id, user_id=u.id, title=title, body=body, category=category,
-                                        link=admin_link(link) if u.role == "OA" else link, is_read=read, created_at=when))
+        notices = (oa_notices(first) if u.role == "OA" else dm_notices(u) if u.role == "DM"
+                   else pr_notices(u) if u.role == "PR" else vt_notices(u))
+        add(u, notices, 9)
     for sa in db.session.query(User).filter(User.role == "SA", User.is_deleted.is_(False)):
-        if db.session.query(Notification.id).filter_by(user_id=sa.id, organisation_id=org.id).first():
-            continue
-        for i, (title, body, category, link, read) in enumerate(SA_NOTICES):
-            when = datetime.combine(today - timedelta(days=i * 2 + 1), time(11 + i))
-            db.session.add(Notification(organisation_id=org.id, user_id=sa.id, title=title, body=body.format(org=org.name),
-                                        category=category, link=admin_link(link, with_org=True), is_read=read, created_at=when))
+        if not db.session.query(Notification.id).filter_by(user_id=sa.id, organisation_id=org.id).first():
+            add(sa, sa_notices(), 11)
 
 
 def _audit_trail(org):
@@ -856,6 +960,8 @@ def run_full_seed(today=None, quiet=False):
         _principal_profile(pr[1])
     for o in (org, org2):
         _notifications(o, clock.today)
+        if _org_issues(o, clock.today):
+            say(f"  {o.name:<30} + org admin issues")
     db.session.flush()
     for o in (org, org2):
         _audit_trail(o)

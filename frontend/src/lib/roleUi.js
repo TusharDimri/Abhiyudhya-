@@ -68,7 +68,7 @@ export const QUICK_ACTIONS = {
   ],
   DM: [
     { label: "Issues needing action", icon: "issues", to: "/app/issues?workflow_status=open" },
-    { label: "Students awaiting verification", icon: "students", to: "/app/students?verification_status=pending" },
+    { label: "Maintenance needing action", icon: "equipment-maintenance", to: "/app/equipment-maintenance?maintenance_status=Reported" },
     { label: "Schools in my district", icon: "schools", to: "/app/schools" },
   ],
   PR: [

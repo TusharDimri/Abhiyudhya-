@@ -159,6 +159,21 @@ class PrincipalIssue(BaseModel):
     resolved_on = db.Column(db.DateTime)
 
 
+class OrgIssue(BaseModel):
+    """An issue an org admin raises ("My Issues") - about their organisation,
+    not one school. The super admin sees them."""
+    __tablename__ = "org_issue"
+    organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
+    raised_by = db.Column(GUID(), db.ForeignKey("app_user.id", name="fk_org_issue_raised_by_app_user"), index=True)
+    academic_year = db.Column(db.String(20), index=True)
+    reporting_date = db.Column(db.Date, nullable=False)
+    reporting_time = db.Column(db.Time)
+    details = db.Column(db.Text, nullable=False)
+    workflow_status = db.Column(db.String(20), default="open", server_default="open", index=True)
+    resolution_note = db.Column(db.Text)
+    resolved_on = db.Column(db.DateTime)
+
+
 class VTIssue(CapturesLocation, BaseModel):
     """VT Issue Reporting with workflow - spec Part 3.12. Records where it was logged."""
     __tablename__ = "vt_issue"

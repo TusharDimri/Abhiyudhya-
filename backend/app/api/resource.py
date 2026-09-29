@@ -276,6 +276,7 @@ def list_resource(resource):
     if hasattr(model, sort_col):
         col = getattr(model, sort_col)
         q = q.order_by(asc(col) if sort_dir == "asc" else desc(col))
+    q = q.order_by(model.id)   # a fixed order for ties, so a row stays on the same page
 
     # --- pagination ---
     try:
@@ -289,6 +290,17 @@ def list_resource(resource):
         page_size = current_app.config["DEFAULT_PAGE_SIZE"]
     page_size = max(1, min(page_size, max_size))
 
+    # ?focus=<id> (a notification's record): open on the page that holds it,
+    # under these same filters and this order - and say whether it's there
+    focus = None
+    if request.args.get("focus"):
+        wanted = str(request.args["focus"])
+        ids = [str(i) for (i,) in q.with_entities(model.id).all()]
+        found = wanted in ids
+        if found:
+            page = ids.index(wanted) // page_size + 1
+        focus = {"id": wanted, "found": found, "page": page}
+
     total = q.count()
     rows = q.limit(page_size).offset((page - 1) * page_size).all()
 
@@ -298,6 +310,7 @@ def list_resource(resource):
             "page": page, "page_size": page_size, "total": total,
             "pages": (total + page_size - 1) // page_size,
         },
+        **({"focus": focus} if focus else {}),
     })
 
 
