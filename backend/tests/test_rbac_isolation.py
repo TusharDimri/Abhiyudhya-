@@ -85,5 +85,23 @@ def test_org_admin_cannot_see_other_org_schools(client, app):
     assert r.status_code == 403
 
 
+def test_org_admin_sees_only_their_own_organisation(client, app):
+    """The organisation table has no organisation_id (each row is one), so it's
+    scoped by id - an org admin never sees another organisation."""
+    with app.app_context():
+        orgA, _ = _org_with_school("Org A", "A")
+        orgB, _ = _org_with_school("Org B", "B")
+        _mk_oa(orgA, "a@a.com")
+        db.session.commit()
+        org_a_id, org_b_id = str(orgA.id), str(orgB.id)
+
+    hdr = {"Authorization": f"Bearer {_login(client, 'a@a.com')}"}
+    r = client.get("/api/organisations", headers=hdr)
+    assert r.status_code == 200
+    assert [row["id"] for row in r.get_json()["data"]] == [org_a_id]
+    assert client.get(f"/api/organisations/{org_a_id}", headers=hdr).status_code == 200
+    assert client.get(f"/api/organisations/{org_b_id}", headers=hdr).status_code == 403   # guessed id
+
+
 def test_unauthenticated_is_rejected(client):
     assert client.get("/api/schools").status_code == 401

@@ -74,7 +74,11 @@ def apply_scope(query, model, user):
     if role == Role.SUPER_ADMIN.value:
         return query
 
-    # Everyone else is locked to their organisation.
+    # Everyone else is locked to their organisation. (The organisation table
+    # itself has no organisation_id - its row *is* one - so it's matched by id:
+    # an org admin sees their own organisation, never the others.)
+    if model.__tablename__ == "organisation":
+        return query.filter(model.id == user.organisation_id)
     if _has(model, "organisation_id"):
         query = query.filter(model.organisation_id == user.organisation_id)
 

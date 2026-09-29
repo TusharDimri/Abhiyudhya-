@@ -13,6 +13,9 @@ import { NOTIFY_ROLES } from "../lib/notifications";
 // Roles whose login carries a profile page of their own.
 const PROFILE_ROLES = ["VT", "PR"];
 
+// the nav group the admin pages below join (Organisations sits in it too)
+const ADMIN_GROUP = "Administration";
+
 // Special admin pages (not resource modules) with the roles allowed to see them.
 const ADMIN_LINKS = [
   { to: "/app/admin/users", label: "Users & Access", icon: "users", roles: ["SA", "OA"] },
@@ -90,7 +93,7 @@ export default function Layout() {
             </NavLink>
           )}
           {navGroups.map((g) =>
-            grouped[g]?.length ? (
+            grouped[g]?.length || (g === ADMIN_GROUP && adminLinks.length) ? (
               <div key={g}>
                 <div className="nav-group-label">{g}</div>
                 {g === MASTER_GROUP ? (
@@ -98,9 +101,15 @@ export default function Layout() {
                   <NavLink to="/app/master" className={item} title={MASTER_GROUP}>
                     <span className="ico"><Icon name="master" /></span> <span className="nav-label">{MASTER_GROUP}</span>
                   </NavLink>
-                ) : grouped[g].map((m) => (
+                ) : (grouped[g] || []).map((m) => (
                   <NavLink key={m.key} to={`/app/${m.key}`} className={item} title={labelOf(m, user?.role)}>
                     <span className="ico"><Icon name={m.key} /></span> <span className="nav-label">{labelOf(m, user?.role)}</span>
+                  </NavLink>
+                ))}
+                {/* Users & Access, Audit Log: under the same heading, not a second "Administration" */}
+                {g === ADMIN_GROUP && adminLinks.map((l) => (
+                  <NavLink key={l.to} to={l.to} className={item} title={l.label}>
+                    <span className="ico"><Icon name={l.icon} /></span> <span className="nav-label">{l.label}</span>
                   </NavLink>
                 ))}
               </div>
@@ -112,16 +121,6 @@ export default function Layout() {
               <NavLink to="/app/profile" className={item} title="My Profile">
                 <span className="ico"><Icon name="profile" /></span> <span className="nav-label">My Profile</span>
               </NavLink>
-            </div>
-          )}
-          {adminLinks.length > 0 && (
-            <div>
-              <div className="nav-group-label">Administration</div>
-              {adminLinks.map((l) => (
-                <NavLink key={l.to} to={l.to} className={item} title={l.label}>
-                  <span className="ico"><Icon name={l.icon} /></span> <span className="nav-label">{l.label}</span>
-                </NavLink>
-              ))}
             </div>
           )}
         </nav>
