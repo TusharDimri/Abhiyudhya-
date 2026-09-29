@@ -579,7 +579,7 @@ export const MODULES = {
         defaultValue: FIRST_LAB },
     ],
     // only the principal verifies attendance; everyone else just sees it
-    rowActions: [{ action: "view", roles: ["PR", "VT"] }, { action: "endorse", roles: ["PR"] }],
+    rowActions: [{ action: "view", roles: ["VT", "PR", "DM", "OA", "SA"] }, { action: "endorse", roles: ["PR"] }],
   },
   "class-attendance": {
     label: "Class Attendance", singular: "Class Attendance", icon: "🧑‍🏫", group: "Daily Operations",
@@ -599,7 +599,7 @@ export const MODULES = {
       { key: "distance_from_school_m", label: "At school?", dot: "distance", hideFor: ["VT"] },
     ],
     // only the principal verifies attendance; everyone else just sees it
-    rowActions: [{ action: "view", roles: ["PR", "VT"] }, { action: "endorse", roles: ["PR"] }],
+    rowActions: [{ action: "view", roles: ["VT", "PR", "DM", "OA", "SA"] }, { action: "endorse", roles: ["PR"] }],
     fields: [
       { name: "date", label: "Date", required: true, ...PAST_DATE, readOnlyFor: ["VT"] },
       { name: "time", label: "Time", type: "time", required: true, defaultValue: nowTime, readOnlyFor: ["VT"] },
@@ -990,7 +990,7 @@ export const HIDDEN_SECTIONS = {
   // (notifications: they have their own, from the bell - not this list of everyone's)
   OA: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback", "notifications"],
   // the super admin reads everything else; notifications are their own, from the bell
-  SA: ["modules", "units", "sessions", "diaries", "feedback", "notifications"],
+  SA: ["modules", "units", "sessions", "diaries", "feedback", "notifications", "employers", "employer-student-maps"],
 };
 
 export const isSectionHidden = (role, key) => !!HIDDEN_SECTIONS[role]?.includes(key);
