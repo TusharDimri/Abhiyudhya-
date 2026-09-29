@@ -3,6 +3,7 @@
    and the admin's "New Trainer" / "New Principal" form both use these, so the
    two always ask for the same things. */
 import DateInput from "./DateInput";
+import { Plus, X } from "lucide-react";
 import { todayISO } from "../lib/dates";
 import { optionText } from "../lib/fieldOptions";
 
@@ -191,7 +192,7 @@ export function RowsInput({ table, value, onChange, boot }) {
                 ))}
                 <td>
                   <button type="button" className="btn btn-ghost btn-sm" title="Remove this row"
-                    onClick={() => onChange(rows.filter((_, j) => j !== i))}>✕</button>
+                    onClick={() => onChange(rows.filter((_, j) => j !== i))}><X size={15} /></button>
                 </td>
               </tr>
             ))}
@@ -201,7 +202,7 @@ export function RowsInput({ table, value, onChange, boot }) {
           </tbody>
         </table>
       </div>
-      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange([...rows, blank()])}>＋ Add row</button>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange([...rows, blank()])}><Plus size={15} /> Add row</button>
     </div>
   );
 }

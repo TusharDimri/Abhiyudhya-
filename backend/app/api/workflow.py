@@ -21,7 +21,7 @@ def verify_student(uid):
     the trainer added - at Class 9 and again at Class 11 (spec Part 2.7)."""
     from datetime import datetime
     user = current_user()
-    if user.role not in (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value, Role.SUPER_ADMIN.value):
+    if user.role not in (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value):   # (the super admin only reads)
         abort(403, description="Students are verified by the admin, not by the trainer.")
     rec = db.session.get(Student, uid)
     if rec is None or rec.is_deleted:
@@ -95,7 +95,7 @@ def transition_issue(which, uid):
     """DM/OA/SA move a trainer's or a principal's issue through
     open -> in-progress -> resolved (whoever raised it is told when it's resolved)."""
     user = current_user()
-    if user.role not in (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value, Role.SUPER_ADMIN.value):
+    if user.role not in (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value):   # (the super admin only reads)
         abort(403, description="Only DM/OA/SA can action issues")
     kind, model, table = ISSUE_KINDS[which]
     rec = db.session.get(model, uid)
@@ -132,7 +132,7 @@ def maintenance_status(uid):
     from app.api import enums
     from app.models.operations import EquipmentMaintenance, LabEquipment
     user = current_user()
-    if user.role not in (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value, Role.SUPER_ADMIN.value):
+    if user.role not in (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value):   # (the super admin only reads)
         abort(403, description="Only an admin updates maintenance status")
     rec = db.session.get(EquipmentMaintenance, uid)
     if rec is None or rec.is_deleted:

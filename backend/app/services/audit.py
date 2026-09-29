@@ -32,3 +32,7 @@ def record(user, action, entity, entity_id, before=None, after=None):
         ip=request.remote_addr if request else None,
     )
     db.session.add(log)
+    # the super admin hears what org admins do
+    if getattr(user, "role", None) == "OA":
+        from app.services import notify
+        notify.org_admin_action(user, action, entity, entity_id, before, after)

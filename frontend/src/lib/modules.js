@@ -190,6 +190,7 @@ export const MODULES = {
       { key: "primary_contact_email", label: "Contact" },
       { key: "status", label: "Status", badge: true },
     ],
+    formHint: "A new organisation comes with its Org Admin's login - you'll see the username and password after saving.",
     fields: [
       { name: "name", label: "Organisation name", required: true, group: "Identity" },
       { name: "legal_name", label: "Legal name", group: "Identity" },
@@ -201,6 +202,11 @@ export const MODULES = {
       { name: "registered_address", label: "Registered address", type: "textarea", group: "Contact" },
       { name: "affiliation_cert_number", label: "Affiliation cert #", group: "Affiliation" },
       { name: "affiliation_valid_till", label: "Affiliation valid till", type: "date", group: "Affiliation" },
+      // the organisation's first org admin: their login is made when it's saved
+      { name: "admin_full_name", label: "Org Admin's name", required: true, createOnly: true, group: "Org Admin" },
+      { name: "admin_email", label: "Org Admin's email", type: "email", required: true, createOnly: true, group: "Org Admin",
+        hint: "Their username for logging in - the login is made when you save." },
+      { name: "admin_phone", label: "Org Admin's mobile", type: "tel", placeholder: "10 digits", createOnly: true, group: "Org Admin" },
     ],
   },
   states: {
@@ -440,7 +446,7 @@ export const MODULES = {
     ],
     formHint: "Students can be added in any class the lab runs; at the end of the year they move up through Promote Students.",
     // a trainer promotes from the Manage Students tab (StudentsHub) instead
-    pageActions: [{ key: "promote", label: "⬆ Promote Students", roles: ["DM", "OA", "SA"] }],
+    pageActions: [{ key: "promote", label: "⬆ Promote Students", roles: ["DM", "OA"] }],
     // the filters a trainer actually uses, all dropdowns
     // (a "enrolment_status" filter goes back in here with the Status column)
     filtersFor: { VT: ["class_grade", "section", "academic_year", "verification_status"] },
@@ -504,12 +510,12 @@ export const MODULES = {
       // verification isn't edited in this form - an admin's Verify sets it
     ],
     rowActions: [
-      { action: "verify", roles: ["DM", "OA", "SA"] },   // trainers add students; an admin verifies them
+      { action: "verify", roles: ["DM", "OA"] },   // trainers add students; an admin verifies them
       { action: "history", roles: ["VT", "PR", "DM", "OA", "SA"] },
       // leaving the school: the trainer marks -> the principal records the TC -> the org admin confirms
       { action: "status", roles: ["VT"] },
       { action: "tc", roles: ["PR"] },
-      { action: "leftverify", roles: ["OA", "SA"] },
+      { action: "leftverify", roles: ["OA"] },
       // a student who has left: View (their record and history) is all anyone gets
       { action: "record", roles: ["VT", "PR", "DM", "OA", "SA"] },
     ],
@@ -573,7 +579,7 @@ export const MODULES = {
         defaultValue: FIRST_LAB },
     ],
     // only the principal verifies attendance; everyone else just sees it
-    rowActions: [{ action: "view", roles: ["PR"] }, { action: "endorse", roles: ["PR"] }],
+    rowActions: [{ action: "view", roles: ["PR", "VT"] }, { action: "endorse", roles: ["PR"] }],
   },
   "class-attendance": {
     label: "Class Attendance", singular: "Class Attendance", icon: "🧑‍🏫", group: "Daily Operations",
@@ -593,7 +599,7 @@ export const MODULES = {
       { key: "distance_from_school_m", label: "At school?", dot: "distance", hideFor: ["VT"] },
     ],
     // only the principal verifies attendance; everyone else just sees it
-    rowActions: [{ action: "view", roles: ["PR"] }, { action: "endorse", roles: ["PR"] }],
+    rowActions: [{ action: "view", roles: ["PR", "VT"] }, { action: "endorse", roles: ["PR"] }],
     fields: [
       { name: "date", label: "Date", required: true, ...PAST_DATE, readOnlyFor: ["VT"] },
       { name: "time", label: "Time", type: "time", required: true, defaultValue: nowTime, readOnlyFor: ["VT"] },
@@ -620,7 +626,7 @@ export const MODULES = {
     defaultGroup: "Class",
   },
   "principal-issues": {
-    rowActions: [{ action: "resolve", roles: ["DM", "OA", "SA"] }],   // the admin resolves it; the principal is told
+    rowActions: [{ action: "resolve", roles: ["DM", "OA"] }],   // the admin resolves it; the principal is told
     label: "Principal Issues", singular: "Issue", icon: "📣", group: "Daily Operations",
     searchHint: "Search the issue text",
     columns: [
@@ -660,7 +666,7 @@ export const MODULES = {
         defaultValue: FIRST_LAB },
       { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", autoFor: ["VT", "PR", "DM"], quiet: true },
     ],
-    rowActions: [{ action: "resolve", roles: ["DM", "OA", "SA"] }],   // the admin resolves it; the raiser is told
+    rowActions: [{ action: "resolve", roles: ["DM", "OA"] }],   // the admin resolves it; the raiser is told
   },
   "field-visits": {
     label: "Field / Industry Visits", singular: "Field Visit", icon: "🚌", group: "Daily Operations",
@@ -769,7 +775,7 @@ export const MODULES = {
     ],
   },
   "equipment-maintenance": {
-    rowActions: [{ action: "resolve", roles: ["DM", "OA", "SA"] }],   // the admin resolves it; the trainer is told
+    rowActions: [{ action: "resolve", roles: ["DM", "OA"] }],   // the admin resolves it; the trainer is told
     label: "Maintenance Log", singular: "Maintenance", icon: "🔧", group: "Daily Operations",
     searchHint: "Search by issue or note",
     columns: [
@@ -983,6 +989,8 @@ export const HIDDEN_SECTIONS = {
   // org admins: no curriculum tabs, employer lists or daily diaries; feedback off for now too
   // (notifications: they have their own, from the bell - not this list of everyone's)
   OA: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback", "notifications"],
+  // the super admin reads everything else; notifications are their own, from the bell
+  SA: ["modules", "units", "sessions", "diaries", "feedback", "notifications"],
 };
 
 export const isSectionHidden = (role, key) => !!HIDDEN_SECTIONS[role]?.includes(key);

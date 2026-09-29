@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
+import Icon from "./Icon";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Search } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
@@ -59,11 +61,14 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
   const [pageAction, setPageAction] = useState(null);
   const [searchInput, setSearchInput] = useState(sp.get("q") || "");
 
-  // an org admin picks a district, then a school, before anything is listed
+  // nothing is listed until an admin picks where to look: an org admin a
+  // district, then a school; a super admin an organisation first, then the same
   const [orgScope, setOrgScope] = useOrgScope(scopeKey || resource);
-  const gate = user?.role === "OA" ? ORG_ADMIN_SCOPE[resource] : null;
-  const gateValue = gate ? orgScope[`${gate.needs}_id`] : null;
-  const gateOpen = !gate || !!gateValue;
+  const saGate = user?.role === "SA" && resource !== "organisations";
+  const gate = user?.role === "OA" ? ORG_ADMIN_SCOPE[resource]
+    : saGate ? { needs: "org", param: null, ...ORG_ADMIN_SCOPE[resource], withOrg: true } : null;
+  const gateValue = gate && gate.needs !== "org" ? orgScope[`${gate.needs}_id`] : null;
+  const gateOpen = !gate || ((!gate.withOrg || !!orgScope.organisation_id) && (gate.needs === "org" || !!gateValue));
 
   const perm = boot?.resources?.[resource];
   const canWrite = perm?.can_write && !readOnly;            // may add
@@ -124,6 +129,21 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     if (canWrite) setEditing({});
   }, [sp, canWrite]); // eslint-disable-line
 
+  // A notification opens its own record: `?_open=<id>&_act=resolve|verify|
+  // leftverify|view` - the window to act in, over the list it belongs to.
+  useEffect(() => {
+    const id = sp.get("_open");
+    if (!id || !mod) return;
+    const action = sp.get("_act") || "view";
+    const next = new URLSearchParams(sp);
+    next.delete("_open");
+    next.delete("_act");
+    setSp(next, { replace: true });
+    api.get(`/${resource}/${id}`)
+      .then(({ data }) => setWorkflow({ action, row: data }))
+      .catch((e) => push(apiError(e), "error"));
+  }, [sp, resource]); // eslint-disable-line
+
   // helper: patch the URL params, resetting to page 1 for anything but paging
   const patch = (changes, resetPage = true) => {
     const next = new URLSearchParams(sp);
@@ -151,11 +171,12 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     if (q) p.set("search", q);
     if (sort) { p.set("sort", sort); p.set("order", order); }
     for (const [k, v] of Object.entries(filterValues)) if (v !== "" && k !== "new") p.set(k, v);
-    if (isSA && orgFilter && orgScoped) p.set("organisation_id", orgFilter);
-    if (gate && gateValue) p.set(gate.param, gateValue);
+    if (isSA && orgFilter && orgScoped && !gate) p.set("organisation_id", orgFilter);
+    if (gate?.withOrg && orgScope.organisation_id) p.set("organisation_id", orgScope.organisation_id);
+    if (gate?.param && gateValue) p.set(gate.param, gateValue);
     for (const [k, v] of Object.entries(fixedParams || {})) p.set(k, v);
     return p.toString();
-  }, [page, pageSize, q, sort, order, filterValues, isSA, orgFilter, orgScoped, gate, gateValue, fixedParams]);
+  }, [page, pageSize, q, sort, order, filterValues, isSA, orgFilter, orgScoped, gate?.param, gate?.withOrg, gateValue, orgScope.organisation_id, fixedParams]); // eslint-disable-line
 
   const list = useQuery({
     queryKey: ["list", resource, apiParams],
@@ -171,7 +192,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         : (await api.post(`/${resource}`, payload)).data,
     onSuccess: (saved) => {
       push(editing?.id ? "Saved changes" : `${mod.singular} created`, "success");
-      if (saved?.login) setNewLogin({ name: saved.full_name, ...saved.login });
+      if (saved?.login) setNewLogin({ name: saved.full_name, ...saved.login });   // (login.name wins when sent)
       setEditing(null);
       qc.invalidateQueries({ queryKey: ["list", resource] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
@@ -222,8 +243,8 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
   // With no search box the page size sits at the end of the filters row
   // instead of alone on a row of its own.
   // org admins narrow things down with the district / school picker and filters instead
-  const showSearch = mod.searchable !== false && (perm?.search?.length ?? 0) > 0 && user?.role !== "OA";
-  const toolbarRow = showSearch || (isSA && orgScoped);
+  const showSearch = mod.searchable !== false && (perm?.search?.length ?? 0) > 0 && !["OA", "SA"].includes(user?.role);
+  const toolbarRow = showSearch || (isSA && orgScoped && !gate);
   const pageSizeBox = (
     <select className="select pagesize" value={pageSize} onChange={(e) => patch({ page_size: e.target.value })} aria-label="Rows per page">
       {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} / page</option>)}
@@ -241,22 +262,23 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         <div className="page-head">
           <div>
             <div className="crumb">{groupOf(mod, user?.role)}</div>
-            <h1>{mod.icon} {mod.label}</h1>
+            <h1><span className="page-ico"><Icon name={resource} size={20} /></span>{mod.label}</h1>
           </div>
           <div className="page-actions">
             {!readOnly && (mod.pageActions || []).filter((a) => a.roles.includes(user?.role)).map((a) => (
               <button key={a.key} className="btn btn-ghost" onClick={() => setPageAction(a.key)}>{a.label}</button>
             ))}
             {canWrite && !hideCreate && (
-              <button className="btn btn-accent" onClick={() => setEditing({})}>＋ New {mod.singular}</button>
+              <button className="btn btn-accent" onClick={() => setEditing({})}><Plus size={16} /> New {mod.singular}</button>
             )}
           </div>
         </div>
       )}
 
-      {gate && <ScopePicker needs={gate.needs} scope={orgScope} setScope={(next) => { setOrgScope(next); patch({}); }} boot={boot} />}
+      {gate && <ScopePicker needs={gate.needs} scope={orgScope} isSA={!!gate.withOrg}
+        setScope={(next) => { setOrgScope(next); patch({}); }} boot={boot} />}
 
-      {!gateOpen && <ScopeEmpty needs={gate.needs} label={mod.label} />}
+      {!gateOpen && <ScopeEmpty needs={gate.needs} label={mod.label} isSA={!!gate.withOrg} />}
 
       {gateOpen && mod.yearlyTarget && (
         <TargetProgress
@@ -273,7 +295,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
       <div className="toolbar">
         {showSearch && (
           <div className="search-wrap">
-            <span className="search-ico">🔍</span>
+            <span className="search-ico"><Search size={15} /></span>
             <input
               className="input search"
               placeholder={`${mod.searchHint || `Search ${mod.label.toLowerCase()}`}…`}
@@ -284,9 +306,9 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
           </div>
         )}
         <div className="grow" />
-        {isSA && orgScoped && (
+        {isSA && orgScoped && !gate && (
           <select className={`select filter-ctl ${orgFilter ? "on" : ""}`} value={orgFilter} onChange={(e) => patch({ organisation_id: e.target.value })}>
-            <option value="">🏢 All organisations</option>
+            <option value="">All organisations</option>
             {orgOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         )}
@@ -328,11 +350,11 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         <span className="info">
           {list.isFetching ? "Loading…" : `Showing ${from}–${to} of ${pg.total}`}
         </span>
-        <button className="btn btn-ghost btn-sm" disabled={pg.page <= 1} onClick={() => patch({ page: 1 }, false)}>« First</button>
-        <button className="btn btn-ghost btn-sm" disabled={pg.page <= 1} onClick={() => patch({ page: pg.page - 1 }, false)}>‹ Prev</button>
+        <button className="btn btn-ghost btn-sm" disabled={pg.page <= 1} onClick={() => patch({ page: 1 }, false)}><ChevronsLeft size={15} /> First</button>
+        <button className="btn btn-ghost btn-sm" disabled={pg.page <= 1} onClick={() => patch({ page: pg.page - 1 }, false)}><ChevronLeft size={15} /> Prev</button>
         <span className="page-num">Page {pg.page} / {pg.pages || 1}</span>
-        <button className="btn btn-ghost btn-sm" disabled={pg.page >= (pg.pages || 1)} onClick={() => patch({ page: pg.page + 1 }, false)}>Next ›</button>
-        <button className="btn btn-ghost btn-sm" disabled={pg.page >= (pg.pages || 1)} onClick={() => patch({ page: pg.pages }, false)}>Last »</button>
+        <button className="btn btn-ghost btn-sm" disabled={pg.page >= (pg.pages || 1)} onClick={() => patch({ page: pg.page + 1 }, false)}>Next <ChevronRight size={15} /></button>
+        <button className="btn btn-ghost btn-sm" disabled={pg.page >= (pg.pages || 1)} onClick={() => patch({ page: pg.pages }, false)}>Last <ChevronsRight size={15} /></button>
       </div>
       </>)}
 
@@ -389,7 +411,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
               <button type="button" className="btn btn-primary"
                 disabled={verifyStudent.isPending || rec.verification_status === "verified"}
                 onClick={() => verifyStudent.mutate(rec.id)}>
-                {verifyStudent.isPending ? "Verifying…" : rec.verification_status === "verified" ? "✓ Verified" : "✔ Verify student"}
+                {verifyStudent.isPending ? "Verifying…" : rec.verification_status === "verified" ? "Verified" : "Verify student"}
               </button>
             </>
           )}

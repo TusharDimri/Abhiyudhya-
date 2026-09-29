@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import Icon from "../../components/Icon";
+import { Plus, Search, X } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
@@ -21,7 +23,10 @@ export default function Users() {
   const { user: me } = useAuth();
   // an org admin looks after their schools' principals and trainers only
   const isOA = me?.role === "OA";
-  const roleChoices = isOA ? ["PR", "VT"] : Object.keys(ROLE_LABELS);
+  // the super admin looks after org admins' logins only - resetting passwords
+  const isSA = me?.role === "SA";
+  const roleChoices = isOA ? ["PR", "VT"] : isSA ? [] : Object.keys(ROLE_LABELS);
+  const orgName = (id) => (boot?.options?.organisations || []).find((o) => String(o.value) === String(id))?.label;
   const schoolName = (id) => (boot?.options?.schools || []).find((s) => String(s.value) === String(id))?.label;
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
@@ -52,45 +57,48 @@ export default function Users() {
       <div className="page-head">
         <div>
           <div className="crumb">Administration</div>
-          <h1>👥 Users & Access</h1>
+          <h1><span className="page-ico"><Icon name="users" size={20} /></span>Users & Access</h1>
         </div>
-        {canCreate.length > 0 && <button className="btn btn-accent" onClick={() => setCreating(true)}>＋ New User</button>}
+        {canCreate.length > 0 && <button className="btn btn-accent" onClick={() => setCreating(true)}><Plus size={16} /> New User</button>}
       </div>
 
       <div className="toolbar">
         <div className="search-wrap">
-          <span className="search-ico">🔍</span>
+          <span className="search-ico"><Search size={15} /></span>
           <input className="input search" placeholder="Search users…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <select className="select filter-ctl" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
-          <option value="">All roles</option>
-          {roleChoices.map((k) => <option key={k} value={k}>{ROLE_LABELS[k]}</option>)}
-        </select>
+        {roleChoices.length > 0 && (
+          <select className="select filter-ctl" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
+            <option value="">All roles</option>
+            {roleChoices.map((k) => <option key={k} value={k}>{ROLE_LABELS[k]}</option>)}
+          </select>
+        )}
       </div>
 
       <div className="card">
         <div className="table-wrap">
           <table className="data">
             <thead>
-              <tr><th>Name</th><th>Email</th><th>Role</th>{isOA && <th>School</th>}<th>Status</th><th>Last login</th><th>Actions</th></tr>
+              <tr><th>Name</th><th>Email</th><th>Role</th>{isOA && <th>School</th>}{isSA && <th>Organisation</th>}<th>Status</th><th>Last login</th><th>Actions</th></tr>
             </thead>
             <tbody>
               {list.isLoading
-                ? Array.from({ length: 5 }).map((_, i) => <tr key={i}><td colSpan={isOA ? 7 : 6}><div className="skeleton" style={{ width: "60%" }} /></td></tr>)
+                ? Array.from({ length: 5 }).map((_, i) => <tr key={i}><td colSpan={isOA || isSA ? 7 : 6}><div className="skeleton" style={{ width: "60%" }} /></td></tr>)
                 : users.map((u) => (
                     <tr key={u.id}>
                       <td>{u.full_name}</td>
                       <td className="mono-sm">{u.email}</td>
                       <td><span className="badge info">{u.role_label || ROLE_LABELS[u.role]}</span></td>
                       {isOA && <td>{schoolName(u.school_id) || "—"}</td>}
+                      {isSA && <td>{orgName(u.organisation_id) || "—"}</td>}
                       <td><span className={`badge ${u.status === "active" ? "success" : "danger"}`}>{optionText(u.status)}</span></td>
                       <td className="muted">{u.last_login_at ? toDMY(u.last_login_at) : "—"}</td>
                       <td>
                         <div className="cell-actions">
                           <button className="btn btn-ghost btn-sm" onClick={() => setResetFor(u)}>Reset PW</button>
-                          <button className="btn btn-ghost btn-sm" onClick={() => toggleStatus.mutate(u)}>
+                          {!isSA && <button className="btn btn-ghost btn-sm" onClick={() => toggleStatus.mutate(u)}>
                             {u.status === "active" ? "Disable" : "Enable"}
-                          </button>
+                          </button>}
                         </div>
                       </td>
                     </tr>
@@ -152,7 +160,7 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="drawer" style={{ width: "min(480px,100%)" }} ref={drawerRef}>
-        <header><h3 style={{ margin: 0 }}>New User</h3><button className="close" onClick={onClose}>×</button></header>
+        <header><h3 style={{ margin: 0 }}>New User</h3><button className="close" onClick={onClose} aria-label="Close"><X size={18} strokeWidth={2} /></button></header>
         <div className="body">
           <ReviewNotice gate={review} />
           <div className="field"><label>Role <span className="req">*</span></label>
@@ -222,7 +230,7 @@ function ResetPassword({ user, onClose }) {
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="drawer" style={{ width: "min(400px,100%)" }}>
-        <header><h3 style={{ margin: 0 }}>Reset password</h3><button className="close" onClick={onClose}>×</button></header>
+        <header><h3 style={{ margin: 0 }}>Reset password</h3><button className="close" onClick={onClose} aria-label="Close"><X size={18} strokeWidth={2} /></button></header>
         <div className="body">
           <p className="muted" style={{ marginTop: 0 }}>Set a temporary password for <b>{user.full_name}</b>. They'll be asked to change it on next login.</p>
           <div className="field"><label>New password</label>

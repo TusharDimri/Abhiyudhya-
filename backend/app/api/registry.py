@@ -94,6 +94,8 @@ class ResourceConfig:
     # after a create / edit, inside the same transaction: (obj, user, created,
     # changed) - changed = the writable fields an edit really changed
     on_saved: Optional[Callable] = None
+    # a login made with the record: (obj, payload, user) -> {username, password}
+    creates_login: Optional[Callable] = None
     # fills in what a new record needs before it is first saved (e.g. whose
     # school it belongs to): (instance, user) -> error message or None
     prepare: Optional[Callable] = None
@@ -106,13 +108,19 @@ class ResourceConfig:
 
     def can_create(self, role):
         """An org admin adds set-up records (the Master Data tabs) only; the
-        rest - attendance, visits, issues, equipment ... - they just view."""
+        rest - attendance, visits, issues, equipment ... - they just view.
+        The super admin adds organisations only; everything else they read."""
         if role == "OA" and self.name not in ORG_ADMIN_CREATES:
+            return False
+        if role == "SA" and self.name != "organisations":
             return False
         return role in self.write_roles
 
     def locked_for(self, role):
-        """A saved record this role may no longer change (see LOCKED_AFTER_SAVE)."""
+        """A saved record this role may no longer change (see LOCKED_AFTER_SAVE).
+        The super admin changes organisations only."""
+        if role == "SA":
+            return self.name != "organisations"
         return role in LOCKED_AFTER_SAVE and self.name not in PEOPLE_DATA
 
     def can_edit(self, role):
@@ -596,8 +604,22 @@ def _validate_lab(instance, user, is_create=False):
 # =========================================================================
 #  PART 1 - CORE / MASTER DATA
 # =========================================================================
+def _org_admin_login(org, payload, user):
+    """A new organisation comes with its org admin's login (the super admin
+    hands the username and password over)."""
+    from types import SimpleNamespace
+    from app.api.users import LoginError, create_login_for
+    name = (payload.get("admin_full_name") or "").strip()
+    if not name:
+        raise LoginError("Enter the org admin's name.")
+    person = SimpleNamespace(organisation_id=org.id, full_name=name, email=payload.get("admin_email"),
+                             phone=payload.get("admin_phone"), user_id=None)
+    return {**create_login_for("OA", person, user), "name": name}
+
+
 register(ResourceConfig(
     name="organisations", model=M.Organisation, label="Organisation",
+    creates_login=_org_admin_login,
     write_roles=[SA],
     writable=["name", "legal_name", "org_code", "logo_url", "primary_contact_name",
               "primary_contact_email", "primary_contact_phone", "registered_address",

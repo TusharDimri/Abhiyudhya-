@@ -1,4 +1,6 @@
 import { useSearchParams } from "react-router-dom";
+import Icon from "./Icon";
+import { Eye, FileCheck2, UserCheck } from "lucide-react";
 import ResourcePage from "./ResourcePage";
 
 /* An org admin's Students page, in two tabs:
@@ -10,7 +12,7 @@ import ResourcePage from "./ResourcePage";
    Both open on the district / school picked above the list.              */
 const PENDING = { verification_status: "pending" };
 const TC_TO_VERIFY = { leaving_stage: "tc_issued" };
-const TABS = [["view", "👀 View Students"], ["verify", "✔ Verify Students"], ["leaving", "📄 TC to verify"]];
+const TABS = [["view", "View Students", Eye], ["verify", "Verify Students", UserCheck], ["leaving", "TC to verify", FileCheck2]];
 
 export default function OrgStudents() {
   const [sp, setSp] = useSearchParams();
@@ -23,13 +25,13 @@ export default function OrgStudents() {
       <div className="page-head">
         <div>
           <div className="crumb">People &amp; Students</div>
-          <h1>🧑‍🎓 Students</h1>
+          <h1><span className="page-ico"><Icon name="students" size={20} /></span>Students</h1>
         </div>
       </div>
 
       <nav className="tabs" aria-label="Students">
-        {TABS.map(([k, label]) => (
-          <button key={k} type="button" className={`tab ${tab === k ? "on" : ""}`} onClick={() => go({ tab: k })}>{label}</button>
+        {TABS.map(([k, label, TabIcon]) => (
+          <button key={k} type="button" className={`tab ${tab === k ? "on" : ""}`} onClick={() => go({ tab: k })}><TabIcon size={16} /> {label}</button>
         ))}
       </nav>
 

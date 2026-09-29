@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
 import { useToast } from "../lib/toast";
@@ -75,7 +76,7 @@ export default function PromoteDialog({ onClose, onDone, inline }) {
             <h3 style={{ margin: 0 }}>Promote Students</h3>
             <span className="drawer-sub">At the end of the year, move a class up - or hold students back to repeat it.</span>
           </div>
-          {!inline && <button className="close" onClick={onClose}>×</button>}
+          {!inline && <button className="close" onClick={onClose}><X size={18} strokeWidth={2} /></button>}
         </header>
         <div className="body">
           {opts.isLoading ? <div className="skeleton" style={{ height: 80 }} /> : groups.length === 0 ? (

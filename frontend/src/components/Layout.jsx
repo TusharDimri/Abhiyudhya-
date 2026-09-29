@@ -1,4 +1,6 @@
 import { useState } from "react";
+import Icon from "./Icon";
+import { ChevronsLeft, ChevronsRight, Globe, LogOut, Menu } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useBootstrap } from "../hooks/useBootstrap";
@@ -13,8 +15,8 @@ const PROFILE_ROLES = ["VT", "PR"];
 
 // Special admin pages (not resource modules) with the roles allowed to see them.
 const ADMIN_LINKS = [
-  { to: "/app/admin/users", label: "Users & Access", icon: "👥", roles: ["SA", "OA", "DM"] },
-  { to: "/app/admin/audit", label: "Audit Log", icon: "📜", roles: ["SA", "OA"] },
+  { to: "/app/admin/users", label: "Users & Access", icon: "users", roles: ["SA", "OA", "DM"] },
+  { to: "/app/admin/audit", label: "Audit Log", icon: "audit", roles: ["SA", "OA"] },
   // Recycle Bin: switched off - nothing can be deleted any more, so there's
   // nothing to restore. Uncomment to bring it back (pages/admin/Trash.jsx).
   // { to: "/app/admin/trash", label: "Recycle Bin", icon: "♻️", roles: ["SA", "OA", "DM"] },
@@ -68,7 +70,7 @@ export default function Layout() {
             <img src={org.logo_url} alt="" className="brand-logo" />
           ) : (
             <div className="brand-icon">
-              {boot?.is_platform_admin ? "🌐" : (org?.name || "Abhiyudhya").slice(0, 1).toUpperCase()}
+              {boot?.is_platform_admin ? <Globe size={18} /> : (org?.name || "Abhiyudhya").slice(0, 1).toUpperCase()}
             </div>
           )}
           <span className="brand-text">
@@ -80,11 +82,11 @@ export default function Layout() {
         </div>
         <nav className="nav-scroll" onClick={() => setOpen(false)}>
           <NavLink to="/app/dashboard" className={item} title="Dashboard">
-            <span className="ico">📊</span> <span className="nav-label">Dashboard</span>
+            <span className="ico"><Icon name="dashboard" /></span> <span className="nav-label">Dashboard</span>
           </NavLink>
           {NOTIFY_ROLES.includes(user?.role) && (
             <NavLink to="/app/notifications" className={item} title="Notifications">
-              <span className="ico">🔔</span> <span className="nav-label">Notifications</span>
+              <span className="ico"><Icon name="notifications" /></span> <span className="nav-label">Notifications</span>
             </NavLink>
           )}
           {navGroups.map((g) =>
@@ -94,11 +96,11 @@ export default function Layout() {
                 {g === MASTER_GROUP ? (
                   // one entry: the lists are tabs on the Master Data page
                   <NavLink to="/app/master" className={item} title={MASTER_GROUP}>
-                    <span className="ico">🗂️</span> <span className="nav-label">{MASTER_GROUP}</span>
+                    <span className="ico"><Icon name="master" /></span> <span className="nav-label">{MASTER_GROUP}</span>
                   </NavLink>
                 ) : grouped[g].map((m) => (
                   <NavLink key={m.key} to={`/app/${m.key}`} className={item} title={m.label}>
-                    <span className="ico">{m.icon}</span> <span className="nav-label">{m.label}</span>
+                    <span className="ico"><Icon name={m.key} /></span> <span className="nav-label">{m.label}</span>
                   </NavLink>
                 ))}
               </div>
@@ -108,7 +110,7 @@ export default function Layout() {
             <div>
               <div className="nav-group-label">Profile</div>
               <NavLink to="/app/profile" className={item} title="My Profile">
-                <span className="ico">👤</span> <span className="nav-label">My Profile</span>
+                <span className="ico"><Icon name="profile" /></span> <span className="nav-label">My Profile</span>
               </NavLink>
             </div>
           )}
@@ -117,7 +119,7 @@ export default function Layout() {
               <div className="nav-group-label">Administration</div>
               {adminLinks.map((l) => (
                 <NavLink key={l.to} to={l.to} className={item} title={l.label}>
-                  <span className="ico">{l.icon}</span> <span className="nav-label">{l.label}</span>
+                  <span className="ico"><Icon name={l.icon} /></span> <span className="nav-label">{l.label}</span>
                 </NavLink>
               ))}
             </div>
@@ -125,7 +127,7 @@ export default function Layout() {
         </nav>
         <button type="button" className="collapse-btn" onClick={toggleCollapsed}
           title={collapsed ? "Expand the sidebar" : "Collapse the sidebar"} aria-expanded={!collapsed}>
-          <span aria-hidden="true">{collapsed ? "»" : "«"}</span>
+          <span aria-hidden="true">{collapsed ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}</span>
           <span className="nav-label">Collapse</span>
         </button>
       </aside>
@@ -134,7 +136,7 @@ export default function Layout() {
 
       <div className="main">
         <header className="topbar">
-          <button className="hamburger" onClick={() => setOpen((o) => !o)}>☰</button>
+          <button className="hamburger" onClick={() => setOpen((o) => !o)} aria-label="Menu"><Menu size={22} /></button>
           <span className="page-title">{title}</span>
 
           {org ? (
@@ -146,7 +148,7 @@ export default function Layout() {
             </div>
           ) : boot?.is_platform_admin ? (
             <div className="org-brand platform" title="Platform administrator — all organisations">
-              <div className="org-logo-fallback">🌐</div>
+              <div className="org-logo-fallback"><Globe size={16} /></div>
               <span className="org-name">All Organisations</span>
             </div>
           ) : null}
@@ -161,7 +163,7 @@ export default function Layout() {
             <div className="avatar" aria-hidden="true">{initials}</div>
             <span className="topbar-divider" aria-hidden="true" />
             <button className="btn btn-ghost btn-sm logout-btn" onClick={logout} title="Log out">
-              <span aria-hidden="true">⎋</span> Logout
+              <LogOut size={16} aria-hidden="true" /> <span className="logout-label">Logout</span>
             </button>
           </div>
         </header>

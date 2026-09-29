@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { CalendarDays } from "lucide-react";
 import { toDMY, fromDMY } from "../lib/dates";
 
 /* A date field that reads and types as DD/MM/YYYY.
@@ -44,7 +45,7 @@ export default function DateInput({ value, onChange, min, max, className = "", p
         // half-typed or impossible dates snap back to the last good one
         onBlur={() => setText(toDMY(value) || "")}
       />
-      <button type="button" className="date-btn" onClick={openPicker} aria-label="Open calendar" title="Open calendar">📅</button>
+      <button type="button" className="date-btn" onClick={openPicker} aria-label="Open calendar" title="Open calendar"><CalendarDays size={16} /></button>
       <input
         ref={picker}
         type="date"

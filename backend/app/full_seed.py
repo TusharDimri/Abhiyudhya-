@@ -359,18 +359,19 @@ def _principal_issues(org, school, pr_user, today):
     return len(picked)
 
 
-NOTICES = [  # (title, body, category, link, read?)
-    ("Attendance waiting for verification", "Several daily attendance records are still waiting for the Principal.",
-     "verification", "/app/attendance?endorsement_status=submitted", False),
-    ("New issue raised by a trainer", "A trainer has reported a problem in the lab.", "issue",
-     "/app/issues?workflow_status=open", False),
-    ("New issue raised by a principal", "A principal has reported a problem at their school.", "issue",
+NOTICES = [  # an org admin's (no attendance - that's the principal's): (title, body, category, link, read?)
+    ("New issue from a trainer", "Projector cable is missing in the lab.", "issue", "/app/issues?workflow_status=open", False),
+    ("New issue from a principal", "Roof of the lab leaks during rain.", "issue",
      "/app/principal-issues?workflow_status=open", False),
-    ("Issue open for more than 7 days", "An issue has been open for over a week without an update.", "sla",
-     "/app/issues?workflow_status=open", False),
-    ("Class attendance verified", "The Principal verified this week's class attendance.", "endorsement",
-     "/app/class-attendance?endorsement_status=endorsed", True),
-    ("Issue resolved", "An issue was marked resolved.", "issue", "/app/issues?workflow_status=resolved", True),
+    ("Maintenance needed: LCD projector", "No display since Monday.", "maintenance", "/app/equipment-maintenance", False),
+    ("Lab equipment added: Laser printer", "Mono, A4", "equipment", "/app/equipment", True),
+    ("3 students to verify", "3 students were added and need verifying.", "verification", "/app/students?tab=verify", False),
+    ("Issue resolved", "Roof repaired by the PWD.", "issue", "/app/principal-issues?workflow_status=resolved", True),
+]
+SA_NOTICES = [  # a super admin hears what org admins do
+    ("Org Admin added a school", "{org}: a new school was added.", "admin", "/app/master/schools", False),
+    ("Org Admin added a trainer", "{org}: a new trainer and their login were added.", "admin", "/app/master/trainers", False),
+    ("Org Admin resolved an issue", "{org}: an issue was marked resolved.", "admin", "/app/principal-issues", True),
 ]
 
 
@@ -393,10 +394,20 @@ VT_NOTICES = [
 
 
 def _notifications(org, today):
-    """What each bell shows - admins, principals and trainers, some read and
-    some not. Anyone who already has notifications is left as they are."""
-    people = db.session.query(User).filter(User.organisation_id == org.id,
-                                           User.role.in_(["OA", "SA", "PR", "VT"])).all()
+    """What each bell shows - org admins, principals and trainers (and the
+    super admin, about org admins), some read and some not. Anyone who already
+    has notifications is left as they are."""
+    from urllib.parse import urlencode
+    school = db.session.query(School).filter_by(organisation_id=org.id).order_by(School.name).first()
+
+    def admin_link(link, with_org=False):
+        """an admin's lists open on a school - their links carry it"""
+        q = {"_school": str(school.id), "_district": str(school.district_id or "")} if school else {}
+        if with_org:
+            q["_org"] = str(org.id)
+        return link + ("&" if "?" in link else "?") + urlencode(q) if q else link
+
+    people = db.session.query(User).filter(User.organisation_id == org.id, User.role.in_(["OA", "PR", "VT"])).all()
     has = {uid for (uid,) in db.session.query(Notification.user_id).filter(Notification.organisation_id == org.id)}
     for u in people:
         if u.id in has:
@@ -404,8 +415,15 @@ def _notifications(org, today):
         notices = PR_NOTICES if u.role == "PR" else VT_NOTICES if u.role == "VT" else NOTICES
         for i, (title, body, category, link, read) in enumerate(notices):
             when = datetime.combine(today - timedelta(days=i * 2 + 1), time(9 + i))
-            db.session.add(Notification(organisation_id=org.id, user_id=u.id, title=title, body=body,
-                                        category=category, link=link, is_read=read, created_at=when))
+            db.session.add(Notification(organisation_id=org.id, user_id=u.id, title=title, body=body, category=category,
+                                        link=admin_link(link) if u.role == "OA" else link, is_read=read, created_at=when))
+    for sa in db.session.query(User).filter(User.role == "SA", User.is_deleted.is_(False)):
+        if db.session.query(Notification.id).filter_by(user_id=sa.id, organisation_id=org.id).first():
+            continue
+        for i, (title, body, category, link, read) in enumerate(SA_NOTICES):
+            when = datetime.combine(today - timedelta(days=i * 2 + 1), time(11 + i))
+            db.session.add(Notification(organisation_id=org.id, user_id=sa.id, title=title, body=body.format(org=org.name),
+                                        category=category, link=admin_link(link, with_org=True), is_read=read, created_at=when))
 
 
 def _audit_trail(org):

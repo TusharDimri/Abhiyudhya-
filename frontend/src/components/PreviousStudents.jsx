@@ -3,6 +3,7 @@
    the chosen Class 11 section with new roll numbers and are verified again
    (students are verified at Class 9 and again at Class 11). */
 import { useState } from "react";
+import { X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
 import { useToast } from "../lib/toast";
@@ -43,7 +44,7 @@ export default function PreviousStudents({ lab, section, onClose }) {
             <h3 style={{ margin: 0 }}>Add previous students · Class 11 {section}</h3>
             <span className="drawer-sub">This lab's earlier Class 10 students. They'll be verified again, as at Class 9.</span>
           </div>
-          <button type="button" className="close" onClick={onClose} aria-label="Close">×</button>
+          <button type="button" className="close" onClick={onClose} aria-label="Close"><X size={18} strokeWidth={2} /></button>
         </header>
         <div className="body">
           <ReviewNotice gate={review} />

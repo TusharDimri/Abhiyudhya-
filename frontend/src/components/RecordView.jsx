@@ -2,6 +2,7 @@
    a field visit, a guest lecture), read-only, in a window over the list.
    The fields come from the module's own form, so it always matches it. */
 import { useQuery } from "@tanstack/react-query";
+import { X } from "lucide-react";
 import api from "../lib/api";
 import { useBootstrap } from "../hooks/useBootstrap";
 import { toDMY } from "../lib/dates";
@@ -108,7 +109,7 @@ export default function RecordView({ mod, resource, row, onClose, title, subtitl
               </>}
             </span>
           </div>
-          <button type="button" className="close" onClick={onClose} aria-label="Close">×</button>
+          <button type="button" className="close" onClick={onClose} aria-label="Close"><X size={18} strokeWidth={2} /></button>
         </header>
         <div className="body">
           {(rec.endorsement_status || rec.verification_status || rec.distance_from_school_m !== undefined) && (

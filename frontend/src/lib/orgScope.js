@@ -1,34 +1,30 @@
-/* The state / district / school an org admin has picked on a list. Each
-   list (tab) keeps its own pick - choosing a school on Guest Lectures doesn't
-   change Field Visits - remembered for the session and forgotten at logout. */
+/* The organisation / state / district / school an admin has picked on a
+   list. Each list (tab) keeps its own pick - choosing a school on Guest
+   Lectures doesn't change Field Visits. Kept in memory only: a refresh (or
+   logging out) starts every list afresh. */
 import { useEffect, useState } from "react";
 
-const KEY = "rnaf.orgScope";
 const EVENT = "rnaf-org-scope";
-
-function readAll() {
-  try {
-    const all = JSON.parse(sessionStorage.getItem(KEY) || "{}");
-    return all && typeof all === "object" ? all : {};
-  } catch {
-    return {};
-  }
-}
+let picks = {};   // { listKey: { organisation_id, state_id, district_id, school_id } }
 
 // set one list's pick from outside it (e.g. a notification that opens a school)
 export function setOrgScopeFor(key, next) {
-  const all = readAll();
-  all[key] = next;
-  try { sessionStorage.setItem(KEY, JSON.stringify(all)); } catch { /* kept in this page only */ }
+  picks = { ...picks, [key]: next };
+  window.dispatchEvent(new Event(EVENT));
+}
+
+// forget every pick (at logout)
+export function clearOrgScopes() {
+  picks = {};
   window.dispatchEvent(new Event(EVENT));
 }
 
 // `key`: which list - its resource, plus the sub-tab where a page has several
 export function useOrgScope(key = "default") {
-  const [scope, setLocal] = useState(() => readAll()[key] || {});
+  const [scope, setLocal] = useState(() => picks[key] || {});
   useEffect(() => {
-    setLocal(readAll()[key] || {});
-    const sync = () => setLocal(readAll()[key] || {});
+    setLocal(picks[key] || {});
+    const sync = () => setLocal(picks[key] || {});
     window.addEventListener(EVENT, sync);
     return () => window.removeEventListener(EVENT, sync);
   }, [key]);

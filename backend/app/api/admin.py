@@ -30,6 +30,13 @@ def audit_logs():
     q = db.session.query(AuditLog)
     if user.role != Role.SUPER_ADMIN.value:
         q = q.filter(AuditLog.organisation_id == user.organisation_id)
+    else:
+        # the super admin: what org admins did, and what was done to an org admin
+        from sqlalchemy import and_
+        from app.models.user import User as U
+        org_admins = [u for (u,) in db.session.query(U.id).filter(U.role == Role.ORG_ADMIN.value)]
+        q = q.filter(or_(AuditLog.actor_role == Role.ORG_ADMIN.value,
+                         and_(AuditLog.entity == "app_user", AuditLog.entity_id.in_(org_admins or [None]))))
 
     for col in ("entity", "action", "actor_email"):
         val = request.args.get(col)

@@ -1,4 +1,6 @@
 import { useState } from "react";
+import Icon from "../../components/Icon";
+import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import api from "../../lib/api";
 
@@ -61,14 +63,14 @@ export default function Audit() {
       <div className="page-head">
         <div>
           <div className="crumb">Administration</div>
-          <h1>📜 Audit Log</h1>
+          <h1><span className="page-ico"><Icon name="audit" size={20} /></span>Audit Log</h1>
           <div className="muted" style={{ fontSize: ".85rem" }}>Who added or changed what, and when.</div>
         </div>
       </div>
 
       <div className="toolbar">
         <div className="search-wrap">
-          <span className="search-ico">🔍</span>
+          <span className="search-ico"><Search size={15} /></span>
           <input className="input search" placeholder="Search by person's email or record type…" value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
         </div>
@@ -116,9 +118,9 @@ export default function Audit() {
 
       <div className="pager">
         <span className="info">{pg.total} entries</span>
-        <button className="btn btn-ghost btn-sm" disabled={pg.page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Prev</button>
+        <button className="btn btn-ghost btn-sm" disabled={pg.page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft size={15} /> Prev</button>
         <span className="page-num">Page {pg.page} / {pg.pages || 1}</span>
-        <button className="btn btn-ghost btn-sm" disabled={pg.page >= (pg.pages || 1)} onClick={() => setPage((p) => p + 1)}>Next ›</button>
+        <button className="btn btn-ghost btn-sm" disabled={pg.page >= (pg.pages || 1)} onClick={() => setPage((p) => p + 1)}>Next <ChevronRight size={15} /></button>
       </div>
     </div>
   );

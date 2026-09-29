@@ -62,7 +62,7 @@ export default function TargetProgress({ resource, onPick, picked, schoolId }) {
 
       {rows.length === 0 ? (
         <div className="empty" style={{ padding: "1rem 0" }}>
-          {status === "met" ? "No level has met its target yet." : status === "not_met" ? "Every level has met its target. 🎉" : "No levels to show."}
+          {status === "met" ? "No level has met its target yet." : status === "not_met" ? "Every level has met its target." : "No levels to show."}
         </div>
       ) : (
         <>

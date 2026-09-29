@@ -2,6 +2,7 @@
    principal or user): the username and password to hand over, each with a
    copy button. The password is never shown again. */
 import { useState } from "react";
+import { Check, Copy } from "lucide-react";
 
 function CopyField({ label, value }) {
   const [copied, setCopied] = useState(false);
@@ -26,7 +27,7 @@ function CopyField({ label, value }) {
       <div className="copy-row">
         <input className="input copy-value" value={value} readOnly onFocus={(e) => e.target.select()} />
         <button type="button" className="btn btn-ghost btn-sm" onClick={copy} aria-label={`Copy ${label.toLowerCase()}`}>
-          {copied ? "✓ Copied" : "📋 Copy"}
+          {copied ? <><Check size={15} /> Copied</> : <><Copy size={15} /> Copy</>}
         </button>
       </div>
     </div>
@@ -44,7 +45,7 @@ export default function LoginCreated({ name, username, password, onDone }) {
           </div>
         </header>
         <div className="body">
-          <div className="prefill-note">✓ Saved. Copy the username and password and share them with {name || "them"}.</div>
+          <div className="prefill-note">Saved. Copy the username and password and share them with {name || "them"}.</div>
           <CopyField label="Username" value={username} />
           <CopyField label="Password" value={password} />
           <p className="muted" style={{ fontSize: ".82rem" }}>

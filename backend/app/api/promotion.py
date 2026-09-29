@@ -31,7 +31,7 @@ from app.services.cache import cached_json
 
 bp = Blueprint("promotion", __name__, url_prefix="/api/promotion")
 
-MANAGERS = {Role.TRAINER.value, Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value, Role.SUPER_ADMIN.value}
+MANAGERS = {Role.TRAINER.value, Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value}   # (the super admin only reads)
 NEXT_CLASS = {"9": "10", "10": "11", "11": "12", "12": None}
 LEAVING = {"Dropped Out", "Transferred Out"}
 
@@ -381,7 +381,7 @@ def confirm_left(uid):
     """Step 3 - the org admin checks the TC and marks the student as left,
     for good: Dropped Out / Transferred Out as the trainer said."""
     user = current_user()
-    if user.role not in (Role.ORG_ADMIN.value, Role.SUPER_ADMIN.value):
+    if user.role != Role.ORG_ADMIN.value:
         abort(403, description="Only the org admin confirms a student has left.")
     s = _student_for(user, uid)
     if s.leaving_stage != "tc_issued":

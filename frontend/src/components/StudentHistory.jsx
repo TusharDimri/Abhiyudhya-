@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { FileText, X } from "lucide-react";
 import api, { apiError } from "../lib/api";
 import { toDMY } from "../lib/dates";
 
@@ -56,7 +57,7 @@ export function HistoryList({ studentId }) {
         {now.left_reason && now.leaving_stage && <div className="muted">Reason: {now.left_reason}</div>}
         {(now.tc_number || now.tc_issued_on || now.has_tc_photo) && (
           <div className="history-tc">
-            <div className="history-tc-title">📄 Transfer Certificate</div>
+            <div className="history-tc-title"><FileText size={14} /> Transfer Certificate</div>
             <div>
               {now.tc_number ? `TC ${now.tc_number}` : "TC"}
               {now.tc_issued_on ? ` · dated ${toDMY(now.tc_issued_on)}` : ""}
@@ -98,7 +99,7 @@ export default function StudentHistory({ row, onClose }) {
             <h3 style={{ margin: 0 }}>{row.full_name || "Student"}</h3>
             <span className="drawer-sub">Year-by-year record - earlier years are kept as they were</span>
           </div>
-          <button className="close" onClick={onClose}>×</button>
+          <button className="close" onClick={onClose}><X size={18} strokeWidth={2} /></button>
         </header>
         <div className="body">
           <HistoryList studentId={row.id} />

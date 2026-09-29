@@ -1,4 +1,5 @@
 import Badge from "./Badge";
+import { Plus } from "lucide-react";
 import DistanceDot, { EndorsementDot } from "./DistanceDot";
 import { isISODate, toDMY } from "../lib/dates";
 
@@ -118,7 +119,7 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
           <div className="empty-text">{emptyHint || "No records found."}</div>
           {emptyAction && (
             <button type="button" className="btn btn-accent btn-sm" onClick={onEmptyAction}>
-              ＋ {emptyAction}
+              <Plus size={15} /> {emptyAction}
             </button>
           )}
         </div>

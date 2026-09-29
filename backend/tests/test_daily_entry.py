@@ -210,9 +210,12 @@ def test_attendance_once_a_day_and_only_for_today(client, world):
     again = _save(client, "/api/attendance", _day(world))
     assert again.status_code == 400
     assert "already marked" in again.get_json()["message"]
-    old = _save(client, "/api/attendance", _day(world, date="2026-01-05"))
-    assert old.status_code == 400
-    assert "only be marked for today" in old.get_json()["message"]
+    # (a day either side is allowed - the server runs on UTC)
+    earlier = _save(client, "/api/attendance", _day(world, date=(date.today() - timedelta(days=3)).isoformat()))
+    assert earlier.status_code == 400
+    assert "only be marked for today" in earlier.get_json()["message"]
+    # and a day in a year that has ended is refused as well
+    assert _save(client, "/api/attendance", _day(world, date="2026-01-05")).status_code == 400
 
 
 def test_attendance_needs_a_location(client, world):
@@ -282,16 +285,10 @@ def test_admin_sets_a_schools_location(client, world):
     assert (made.get_json()["location_lat"], made.get_json()["location_lng"]) == (18.6, 73.9)
     locked = client.patch(f"/api/schools/{made.get_json()['id']}", headers=oa_h, json={"phone": "020-1"})
     assert locked.status_code == 403 and "can't be edited" in locked.get_json()["message"]
-    # the super admin can still correct it
+    # the super admin only reads: they don't change it either
     h = _as(client, "sa@x.com")
     url = f"/api/schools/{world['school'].id}"
-    r = client.patch(url, headers=h, json={"location_lat": 18.5204, "location_lng": 73.8567})
-    assert r.status_code == 200, r.get_json()
-    assert (r.get_json()["location_lat"], r.get_json()["location_lng"]) == (18.5204, 73.8567)
-    assert client.patch(url, headers=h, json={"location_lat": 123, "location_lng": 73}).status_code == 400
-    # an edit that doesn't mention the location leaves it alone
-    r = client.patch(url, headers=h, json={"phone": "020-1234"})
-    assert r.get_json()["location_lat"] == 18.5204
+    assert client.patch(url, headers=h, json={"location_lat": 18.5204, "location_lng": 73.8567}).status_code == 403
 
 
 # ------------------------------------------------------------- students etc.
@@ -368,14 +365,62 @@ def test_admin_form_needs_the_required_fields(client, world):
     # an org admin doesn't make logins in Users & Access (they come with the trainer / principal) ...
     r = client.post("/api/users", headers=h, json={"role": "VT", "full_name": "V", "email": "v@x.com", "password": "Password1"})
     assert r.status_code == 403
-    # ... the super admin does, and a trainer's login needs its school and lab
-    sa = User(full_name="SA", email="sa@x.com", role="SA")
-    sa.set_password("Password@123")
-    db.session.add(sa)
+    # ... a district manager may, and a trainer's login needs its school and lab
+    dm = User(organisation_id=world["org"].id, full_name="DM", email="dm@x.com", role="DM")
+    dm.set_password("Password@123")
+    db.session.add(dm)
     db.session.commit()
-    r = client.post("/api/users", headers=_as(client, "sa@x.com"), json={
-        "role": "VT", "full_name": "V", "email": "v@x.com", "password": "Password1", "organisation_id": str(world["org"].id)})
+    r = client.post("/api/users", headers=_as(client, "dm@x.com"), json={
+        "role": "VT", "full_name": "V", "email": "v@x.com", "password": "Password1"})
     assert r.status_code == 400 and "School" in r.get_json()["message"] and "Lab" in r.get_json()["message"]
+
+
+def test_super_admin_reads_everything_and_adds_organisations(client, world, principal):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    sa = User(full_name="SA", email="sa@x.com", role="SA")
+    for u in (oa, sa):
+        u.set_password("Password@123")
+    db.session.add_all([oa, sa])
+    db.session.commit()
+    h = _as(client, "sa@x.com")
+    res = client.get("/api/meta/bootstrap", headers=h).get_json()["resources"]
+    assert res["organisations"]["can_write"] is True
+    assert not any(v["can_write"] for k, v in res.items() if k != "organisations")      # everything else: read only
+    assert client.post("/api/equipment", headers=h, json=_equipment(world)).status_code == 403
+
+    # a new organisation comes with its org admin's login (after the review, on screen)
+    r = client.post("/api/organisations", headers=h, json={"name": "New Org", "org_code": "NEW-1",
+                                                           "admin_full_name": "Asha Rao", "admin_email": "asha@new.org"})
+    assert r.status_code == 201, r.get_json()
+    login = r.get_json()["login"]
+    assert login["username"] == "asha@new.org" and login["name"] == "Asha Rao"
+    assert client.post("/api/auth/login", json={"email": "asha@new.org", "password": login["password"]}).status_code == 200
+    assert client.post("/api/organisations", headers=_as(client, "sa@x.com"),
+                       json={"name": "No Admin", "org_code": "NEW-2"}).status_code == 400
+
+    # Users & Access: org admins only, and only their passwords reset
+    h = _as(client, "sa@x.com")
+    listed = client.get("/api/users", headers=h).get_json()
+    assert {u["role"] for u in listed["data"]} == {"OA"} and listed["can_create"] == []
+    assert client.patch(f"/api/users/{oa.id}", headers=h, json={"status": "disabled"}).status_code == 403
+    vt = db.session.query(User).filter_by(email="vt@x.com").one()
+    assert client.post(f"/api/users/{vt.id}/reset-password", headers=h, json={"new_password": "Newpass123"}).status_code == 403
+
+    # what org admins do reaches the super admin's bell and audit log - not what others do
+    _as(client, "vt@x.com")
+    _endorsable(client, world, "daily")                                   # a trainer's work: not for them
+    school = client.post("/api/schools", headers=_as(client, "oa@x.com"), json={
+        "name": "Org Admin's School", "udise_code": "27111111111", "district_id": str(world["school"].district_id),
+        "school_type": "Co-education", "address": "Main Road", "location_lat": 18.6, "location_lng": 73.9}).get_json()
+    box = client.get("/api/me/notifications?page_size=50", headers=_as(client, "sa@x.com")).get_json()
+    added = [n for n in box["data"] if "school" in n["title"]]
+    assert added and f"_open={school['id']}" in added[0]["link"] and f"_org={world['org'].id}" in added[0]["link"]
+    assert not any(n["category"] == "attendance" for n in box["data"])
+    log = client.get("/api/admin/audit-logs", headers=_as(client, "sa@x.com")).get_json()["data"]
+    assert log and all(r["actor_role"] == "OA" or r["entity"] == "app_user" for r in log)
+    # ... and the one thing they do in Users & Access: reset an org admin's password
+    r = client.post(f"/api/users/{oa.id}/reset-password", headers=_as(client, "sa@x.com"), json={"new_password": "Newpass123"})
+    assert r.status_code == 200
 
 
 def test_org_admin_sees_and_manages_only_their_schools_staff(client, world, principal, principal_record):

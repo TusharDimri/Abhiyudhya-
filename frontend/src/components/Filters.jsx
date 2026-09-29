@@ -2,6 +2,7 @@
    whitelist via bootstrap); controls are derived from the module's own field
    config so we never duplicate option lists. */
 import { useQueries } from "@tanstack/react-query";
+import { X } from "lucide-react";
 import api from "../lib/api";
 import DateInput from "./DateInput";
 import { staticOptionsFor, optionText } from "../lib/fieldOptions";
@@ -204,7 +205,7 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
             return (
               <span className="chip" key={col}>
                 <b>{filterLabel(ctl.label)}:</b> {optionText(String(label))}
-                <button onClick={() => onChange(col, "")} aria-label="remove">×</button>
+                <button onClick={() => onChange(col, "")} aria-label="remove"><X size={12} strokeWidth={2.5} /></button>
               </span>
             );
           })}

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { Check, Crosshair, MapPin, X } from "lucide-react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useAuth } from "../lib/auth";
 import api from "../lib/api";
@@ -231,7 +232,8 @@ export default function ResourceForm({
     setFilledFrom(String(past[f.name]));
   };
 
-  const visible = (f) => (f.showIf ? !!f.showIf(values, role) : true);
+  // createOnly: asked when adding a record, not when editing it (e.g. an org's first admin)
+  const visible = (f) => (f.createOnly && !isNew ? false : f.showIf ? !!f.showIf(values, role) : true);
 
   const optionsFor = (f) => {
     if (f.dynamicOptions) {
@@ -484,7 +486,7 @@ export default function ResourceForm({
         <>
           <input type="file" className="input" accept={f.accept || "image/*,application/pdf"} onChange={(e) => upload(f, e.target.files[0])} />
           {uploading === f.name && <span className="hint">Uploading…</span>}
-          {uploading !== f.name && val && !/^https?:/.test(val) && <span className="hint">✓ Uploaded</span>}
+          {uploading !== f.name && val && !/^https?:/.test(val) && <span className="hint">Uploaded</span>}
           <input className="input" placeholder="…or paste file URL" value={val ?? ""} onChange={(e) => set(f.name, e.target.value)} style={{ marginTop: 4 }} />
         </>
       );
@@ -499,7 +501,7 @@ export default function ResourceForm({
             {[...pastByName.values()].map((r) => <option key={r.id} value={r[f.name]} />)}
           </datalist>
           {filledFrom && filledFrom.toLowerCase() === String(val ?? "").trim().toLowerCase() && (
-            <span className="hint">✓ Details filled in from an earlier entry - check they're still right.</span>
+            <span className="hint">Details filled in from an earlier entry - check they're still right.</span>
           )}
         </>
       );
@@ -526,17 +528,17 @@ export default function ResourceForm({
             <h3 style={{ margin: 0 }}>{initial ? "Edit" : "New"} {mod.singular}</h3>
             {mod.formHint && <span className="drawer-sub">{mod.formHint}</span>}
           </div>
-          <button type="button" className="close" onClick={onClose}>×</button>
+          <button type="button" className="close" onClick={onClose} aria-label="Close"><X size={18} strokeWidth={2} /></button>
         </header>
         <div className="body">
           <ReviewNotice gate={review} locked={boot?.resources?.[resource]?.can_edit === false} />
           {isSA && orgScoped && (
-            <div className="prefill-note">🏢 Select the organisation first — dependent lists load for that organisation.</div>
+            <div className="prefill-note">Select the organisation first — dependent lists load for that organisation.</div>
           )}
 
           {autoFields.length > 0 && (
             <div className="known-panel">
-              <div className="known-title">✓ Already filled in — you don't need to enter these</div>
+              <div className="known-title"><Check size={14} /> Already filled in — you don't need to enter these</div>
               <div className="known-grid">
                 {autoFields.map((f) => (
                   <div className="known-item" key={f.name}>
@@ -558,7 +560,7 @@ export default function ResourceForm({
                     {isDerived(f) ? (
                       <>
                         <div className="input derived-value" aria-readonly="true">{knownLabel(f)}</div>
-                        {f.deriveNote && <span className="hint">✓ {f.deriveNote}</span>}
+                        {f.deriveNote && <span className="hint">{f.deriveNote}</span>}
                       </>
                     ) : renderControl(f)}
                     {f.hint && !isDerived(f) && <span className="hint">{f.hint}</span>}
@@ -569,7 +571,7 @@ export default function ResourceForm({
             </fieldset>
           ))}
         </div>
-        {formError && <div className="form-error" role="alert">📍 {formError}</div>}
+        {formError && <div className="form-error" role="alert"><MapPin size={15} /> {formError}</div>}
         <footer>
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn btn-primary" disabled={saving || locating || (review.reviewing && !review.ready)}>
@@ -614,7 +616,7 @@ function GeoPointInput({ f, values, setValues }) {
           onChange={(e) => put({ [f.lngField]: e.target.value })} aria-label="Longitude" />
       </div>
       <button type="button" className="btn btn-ghost btn-sm" onClick={useHere} disabled={busy}>
-        {busy ? "Getting location…" : "📍 Use my current location"}
+        {busy ? "Getting location…" : <><Crosshair size={15} /> Use my current location</>}
       </button>
       {err && <span className="field-error">{err}</span>}
     </div>

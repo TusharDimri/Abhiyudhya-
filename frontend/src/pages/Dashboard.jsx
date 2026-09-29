@@ -1,4 +1,6 @@
 import { useState, useMemo } from "react";
+import Icon from "../components/Icon";
+import { ArrowRight, CircleCheck, Clock3, Timer } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import api from "../lib/api";
@@ -9,12 +11,20 @@ import DateRange from "../components/DateRange";
 import { isoDaysAgo } from "../lib/dates";
 import { cardHref, QUICK_ACTIONS, DASHBOARD_SUBTITLE, VERIFICATION_LABELS } from "../lib/roleUi";
 
+// each headline number's icon: a module's (Icon.jsx), or one of its own
 const ICONS = {
-  schools: "🏫", labs: "🧪", trainers: "👨‍🏫", students: "🧑‍🎓", attendance: "🗓️",
-  guest_lectures: "🎤", field_visits: "🚌", open_issues: "⚠️", endorsed: "✅",
-  placements: "💼", pending_verification: "🕓", pending_endorsement: "🕓", class_pending_endorsement: "🕓", my_open_issues: "📣", diaries: "📔",
-  ojt_hours: "⏱️", my_employer: "💼", assessments: "🎯",
-  pending_issues_action: "⚠️", issues_resolved: "✅",
+  schools: "schools", labs: "labs", trainers: "trainers", students: "students", attendance: "attendance",
+  guest_lectures: "guest-lectures", field_visits: "field-visits", open_issues: "issues",
+  placements: "ojt-placements", my_open_issues: "principal-issues", diaries: "diaries",
+  my_employer: "ojt-placements", assessments: "assessments", pending_issues_action: "issues",
+};
+const OWN_ICONS = {
+  endorsed: CircleCheck, issues_resolved: CircleCheck, ojt_hours: Timer,
+  pending_verification: Clock3, pending_endorsement: Clock3, class_pending_endorsement: Clock3,
+};
+const KpiIcon = ({ k }) => {
+  const Own = OWN_ICONS[k];
+  return Own ? <Own size={19} strokeWidth={1.8} /> : <Icon name={ICONS[k]} size={19} />;
 };
 const ACCENT = {
   open_issues: "warn", pending_verification: "warn", pending_endorsement: "warn", class_pending_endorsement: "warn",
@@ -70,7 +80,7 @@ export default function Dashboard() {
       <div className="page-head">
         <div>
           <div className="crumb">Overview</div>
-          <h1>Welcome, {user?.full_name?.split(" ")[0]} 👋</h1>
+          <h1>Welcome, {user?.full_name?.split(" ")[0]}</h1>
           <div className="muted" style={{ fontSize: ".88rem" }}>
             {roleLabel} · {isSA
               ? (org ? orgOptions.find((o) => o.value === org)?.label : "all organisations")
@@ -80,7 +90,7 @@ export default function Dashboard() {
         <div className="dash-controls">
           {isSA && (
             <select className={`select filter-ctl ${org ? "on" : ""}`} value={org} onChange={(e) => setOrg(e.target.value)}>
-              <option value="">🏢 All organisations</option>
+              <option value="">All organisations</option>
               {orgOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           )}
@@ -101,10 +111,10 @@ export default function Dashboard() {
               const href = cardHref(c.key);
               const body = (
                 <>
-                  <div className="ico">{ICONS[c.key] || "•"}</div>
+                  <div className="ico"><KpiIcon k={c.key} /></div>
                   <div className="val">{c.value?.toLocaleString?.() ?? c.value}</div>
                   <div className="lbl">{c.label}</div>
-                  {href && <span className="stat-go">View →</span>}
+                  {href && <span className="stat-go">View <ArrowRight size={13} /></span>}
                 </>
               );
               const cls = `card stat-card ${ACCENT[c.key] || ""}`;
@@ -123,7 +133,7 @@ export default function Dashboard() {
           <span className="quick-label">Jump to</span>
           {actions.map((a) => (
             <Link key={a.to} to={a.to} className="quick-action">
-              <span className="qa-ico">{a.icon}</span> {a.label}
+              <span className="qa-ico"><Icon name={a.icon} size={17} /></span> {a.label}
             </Link>
           ))}
         </div>

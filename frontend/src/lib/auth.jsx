@@ -1,14 +1,16 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import api, { tokens, setUnauthorizedHandler } from "./api";
+import { clearOrgScopes } from "./orgScope";
 
 // Everything the previous user loaded - their permissions, lists, their
-// location fix - must be gone before the next one sees a single screen.
+// location fix, the schools they picked - must be gone before the next one
+// sees a single screen.
 function forgetSession(queryClient) {
   queryClient.clear();
+  clearOrgScopes();
   try {
     sessionStorage.removeItem("rnaf.location");
-    sessionStorage.removeItem("rnaf.orgScope");   // the district / school an org admin had picked
   } catch { /* nothing kept */ }
 }
 

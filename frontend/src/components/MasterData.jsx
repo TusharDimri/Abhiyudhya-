@@ -1,4 +1,5 @@
 import { NavLink, Navigate, useLocation, useParams } from "react-router-dom";
+import Icon from "./Icon";
 import { useAuth } from "../lib/auth";
 import { useBootstrap } from "../hooks/useBootstrap";
 import { MASTER_GROUP, visibleModules, groupOf } from "../lib/modules";
@@ -24,7 +25,7 @@ export default function MasterData() {
       <nav className="tabs" aria-label="Master data">
         {tabs.map(([key, m]) => (
           <NavLink key={key} to={`/app/master/${key}`} className={({ isActive }) => `tab ${isActive ? "on" : ""}`}>
-            <span aria-hidden="true">{m.icon}</span> {m.label}
+            <Icon name={key} size={16} /> {m.label}
           </NavLink>
         ))}
       </nav>

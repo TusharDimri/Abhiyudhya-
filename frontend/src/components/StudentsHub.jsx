@@ -1,4 +1,6 @@
 import { useSearchParams } from "react-router-dom";
+import Icon from "./Icon";
+import { ArrowUpCircle, Eye, PencilLine, Plus, Settings2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import ResourcePage from "./ResourcePage";
 import AddStudents from "./AddStudents";
@@ -9,9 +11,9 @@ import PromoteDialog from "./PromoteDialog";
      Manage Students  Add students (many at once) · Promote · Edit
    (Verifying students is the admin's job.)                                  */
 const MANAGE = [
-  { key: "add", label: "➕ Add Students" },
-  { key: "promote", label: "⬆ Promote Students" },
-  { key: "edit", label: "✎ Edit Students" },
+  { key: "add", label: "Add Students", icon: Plus },
+  { key: "promote", label: "Promote Students", icon: ArrowUpCircle },
+  { key: "edit", label: "Edit Students", icon: PencilLine },
 ];
 
 export default function StudentsHub() {
@@ -27,13 +29,13 @@ export default function StudentsHub() {
       <div className="page-head">
         <div>
           <div className="crumb">People &amp; Students</div>
-          <h1>🧑‍🎓 Students</h1>
+          <h1><span className="page-ico"><Icon name="students" size={20} /></span>Students</h1>
         </div>
       </div>
 
       <nav className="tabs" aria-label="Students">
-        <button type="button" className={`tab ${tab === "view" ? "on" : ""}`} onClick={() => go({ tab: "view" })}>👀 View Students</button>
-        <button type="button" className={`tab ${tab === "manage" ? "on" : ""}`} onClick={() => go({ tab: "manage", manage: part })}>🛠 Manage Students</button>
+        <button type="button" className={`tab ${tab === "view" ? "on" : ""}`} onClick={() => go({ tab: "view" })}><Eye size={16} /> View Students</button>
+        <button type="button" className={`tab ${tab === "manage" ? "on" : ""}`} onClick={() => go({ tab: "manage", manage: part })}><Settings2 size={16} /> Manage Students</button>
       </nav>
 
       {tab === "view" && <ResourcePage key="view" resourceKey="students" embedded readOnly onlyActions={["history", "record"]} />}
@@ -43,7 +45,7 @@ export default function StudentsHub() {
           <div className="seg manage-seg" role="group" aria-label="Manage">
             {MANAGE.map((m) => (
               <button key={m.key} type="button" className={part === m.key ? "on" : ""} onClick={() => go({ tab: "manage", manage: m.key })}>
-                {m.label}
+                <m.icon size={15} /> {m.label}
               </button>
             ))}
           </div>

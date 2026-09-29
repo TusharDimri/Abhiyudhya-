@@ -3,6 +3,7 @@
    is never deleted - they stay on record as having left). Once it is empty,
    the section can go. */
 import { useState } from "react";
+import { X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
 import { useToast } from "../lib/toast";
@@ -106,7 +107,7 @@ export default function SectionManager({ lab, classGrade, section, sections, onC
               {list.isLoading ? "Loading students…" : `${students.length} student${students.length === 1 ? "" : "s"} in this section`}
             </span>
           </div>
-          <button type="button" className="close" onClick={onClose} aria-label="Close">×</button>
+          <button type="button" className="close" onClick={onClose} aria-label="Close"><X size={18} strokeWidth={2} /></button>
         </header>
         <div className="body">
           {!empty && (
@@ -115,7 +116,7 @@ export default function SectionManager({ lab, classGrade, section, sections, onC
               (the principal then records their TC and the org admin confirms). Students are never deleted.
             </p>
           )}
-          {empty && <div className="prefill-note">✓ Section {section} is empty and can be removed.</div>}
+          {empty && <div className="prefill-note">Section {section} is empty and can be removed.</div>}
           {students.length > 0 && (
             <div className="table-wrap view-table-wrap">
               <table className="data view-table">

@@ -1,8 +1,10 @@
 /* The Notifications page: every notification this user has had, newest
    first. Clicking one marks it read and opens the page to act on. */
 import { useState } from "react";
+import Icon, { CategoryIcon } from "./Icon";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { CATEGORY_ICON, openLink, timeAgo, useMarkRead, useMyNotifications } from "../lib/notifications";
+import { openLink, timeAgo, useMarkRead, useMyNotifications } from "../lib/notifications";
 
 export default function MyNotifications() {
   const [page, setPage] = useState(1);
@@ -23,7 +25,7 @@ export default function MyNotifications() {
       <div className="page-head">
         <div>
           <div className="crumb">Updates</div>
-          <h1>🔔 Notifications</h1>
+          <h1><span className="page-ico"><Icon name="notifications" size={20} /></span>Notifications</h1>
         </div>
         <div className="page-actions">
           {(q.data?.unread || 0) > 0 && (
@@ -46,7 +48,7 @@ export default function MyNotifications() {
         )}
         {items.map((n) => (
           <button type="button" key={n.id} className={`bell-item ${n.is_read ? "" : "unread"}`} onClick={() => pick(n)}>
-            <span className="bell-ico" aria-hidden="true">{CATEGORY_ICON[n.category] || "🔔"}</span>
+            <span className="bell-ico"><CategoryIcon category={n.category} /></span>
             <span className="bell-text">
               <span className="bell-title">{n.title}</span>
               {n.body && <span className="bell-body">{n.body}</span>}
@@ -59,9 +61,9 @@ export default function MyNotifications() {
 
       <div className="pager">
         <span className="info">{pg.total} notification{pg.total === 1 ? "" : "s"}</span>
-        <button className="btn btn-ghost btn-sm" disabled={pg.page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Prev</button>
+        <button className="btn btn-ghost btn-sm" disabled={pg.page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft size={15} /> Prev</button>
         <span className="page-num">Page {pg.page} / {pg.pages || 1}</span>
-        <button className="btn btn-ghost btn-sm" disabled={pg.page >= (pg.pages || 1)} onClick={() => setPage((p) => p + 1)}>Next ›</button>
+        <button className="btn btn-ghost btn-sm" disabled={pg.page >= (pg.pages || 1)} onClick={() => setPage((p) => p + 1)}>Next <ChevronRight size={15} /></button>
       </div>
     </div>
   );

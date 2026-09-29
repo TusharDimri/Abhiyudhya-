@@ -1,4 +1,6 @@
 import { useState } from "react";
+import Icon from "../components/Icon";
+import { Camera, Lock, PencilLine, Plus } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
 import { useToast } from "../lib/toast";
@@ -38,7 +40,7 @@ function InfoSection({ title, fields, data, section, boot, save, saving, note })
     <section className="card profile-card">
       <div className="profile-card-head">
         <h3>{title}</h3>
-        {section && !editing && <button className="btn btn-ghost btn-sm" onClick={start}>✎ Edit</button>}
+        {section && !editing && <button className="btn btn-ghost btn-sm" onClick={start}><PencilLine size={14} /> Edit</button>}
       </div>
       {note && <p className="muted profile-note">{note}</p>}
       <dl className="profile-grid">
@@ -51,7 +53,7 @@ function InfoSection({ title, fields, data, section, boot, save, saving, note })
               ) : (
                 <>
                   {display(f)}
-                  {editing && locked.has(f.name) && <span className="lock-note" title="On record - ask your admin to change it"> 🔒</span>}
+                  {editing && locked.has(f.name) && <span className="lock-note" title="On record - ask your admin to change it"> <Lock size={13} /></span>}
                 </>
               )}
               {editing && f.sensitive && !locked.has(f.name) && data[f.name] && (
@@ -64,7 +66,7 @@ function InfoSection({ title, fields, data, section, boot, save, saving, note })
       {editing && (
         <div className="profile-actions">
           {locked.size > 0 && fields.some((f) => locked.has(f.name)) && (
-            <span className="muted">🔒 On record - ask your admin to change these.</span>
+            <span className="muted"><Lock size={13} /> On record - ask your admin to change these.</span>
           )}
           <button className="btn btn-ghost" onClick={() => setDraft(null)} disabled={saving}>Cancel</button>
           <button className="btn btn-primary" onClick={submit} disabled={saving}>{saving ? "Saving…" : "Save"}</button>
@@ -121,7 +123,7 @@ function TableSection({ listKey, tables = TABLES, data, boot, save, saving }) {
       </div>
       {editing && (
         <div className="profile-actions">
-          <button className="btn btn-ghost btn-sm" onClick={() => setDraft((d) => [...d, blank()])}>＋ Add row</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setDraft((d) => [...d, blank()])}><Plus size={15} /> Add row</button>
           <span className="grow" />
           <button className="btn btn-ghost" onClick={() => setDraft(null)} disabled={saving}>Cancel</button>
           <button className="btn btn-primary" disabled={saving}
@@ -163,7 +165,7 @@ function Hero({ d, subtitle, chips, save }) {
       <div className="profile-photo">
         {d.photo_src ? <img src={d.photo_src} alt="" /> : <span>{initials}</span>}
         <label className="profile-photo-edit" title="Change photo">
-          📷<input type="file" accept="image/*" hidden onChange={async (e) => {
+          <Camera size={16} /><input type="file" accept="image/*" hidden onChange={async (e) => {
             const f = e.target.files[0]; if (!f) return;
             try { save({ photo_url: await uploadFile(f) }); } catch (err) { push(err.message || "Upload failed", "error"); }
           }} />
@@ -173,7 +175,7 @@ function Hero({ d, subtitle, chips, save }) {
         <h1 style={{ margin: 0 }}>{d.full_name}</h1>
         <div className="muted">{subtitle}</div>
         <div className="profile-chips">
-          {chips.filter((c) => c.text).map((c) => <span key={c.icon} className="scope-chip">{c.icon} {c.text}</span>)}
+          {chips.filter((c) => c.text).map((c) => <span key={c.key} className="scope-chip">{c.icon} {c.text}</span>)}
         </div>
       </div>
     </section>
@@ -201,7 +203,7 @@ function TrainerProfile({ d, common }) {
   return (
     <>
       <Hero d={d} save={common.save} subtitle={`Vocational Trainer${d.vtp_name ? ` · ${d.vtp_name}` : ""}`}
-        chips={[{ icon: "🏫", text: p.school_name }, { icon: "🧪", text: p.lab_name }, { icon: "🎯", text: p.job_role }]} />
+        chips={[{ icon: <Icon name="schools" size={14} />, key: "s", text: p.school_name }, { icon: <Icon name="labs" size={14} />, key: "l", text: p.lab_name }, { icon: <Icon name="job-roles" size={14} />, key: "j", text: p.job_role }]} />
       <InfoSection title="General Information" section="general" fields={GENERAL} {...common} />
       <InfoSection title="Address Details" section="address" fields={ADDRESS} {...common} />
       <InfoSection
@@ -235,7 +237,7 @@ function PrincipalProfile({ d, common }) {
   return (
     <>
       <Hero d={d} save={common.save} subtitle={[d.designation || "Principal", d.employee_id && `Employee ID ${d.employee_id}`].filter(Boolean).join(" · ")}
-        chips={[{ icon: "🏫", text: p.school_name }, { icon: "📍", text: withBlock(p) }]} />
+        chips={[{ icon: <Icon name="schools" size={14} />, key: "s", text: p.school_name }, { icon: <Icon name="districts" size={14} />, key: "d", text: withBlock(p) }]} />
       <InfoSection title="General Information" section="general" fields={PR_GENERAL} {...common} />
       <InfoSection title="Service Details" section="service" fields={PR_SERVICE} {...common} />
       <InfoSection title="Address Details" section="address" fields={ADDRESS} {...common} />

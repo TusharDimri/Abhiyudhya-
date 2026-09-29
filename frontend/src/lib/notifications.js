@@ -5,11 +5,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "./api";
 import { setOrgScopeFor } from "./orgScope";
 
-export const NOTIFY_ROLES = ["OA", "PR", "VT"];
+export const NOTIFY_ROLES = ["SA", "OA", "PR", "VT"];
 
 export const CATEGORY_ICON = {
   issue: "⚠️", maintenance: "🔧", equipment: "🖥️", verification: "🧑‍🎓",
-  attendance: "🗓️", guest_lecture: "🎤", leaving: "📄",
+  attendance: "🗓️", guest_lecture: "🎤", leaving: "📄", admin: "🏢",
 };
 
 export function useMyNotifications({ page = 1, pageSize = 8, unread = false, enabled = true, poll = false } = {}) {
@@ -32,20 +32,25 @@ export function useMarkRead() {
   };
 }
 
-/* Go where the notification points. School params become the org admin's
-   District -> School pick on that one list, so it opens on that school. */
+/* Go where the notification points. Its organisation / district / school
+   become that one list's pick, so it opens there; `_open` (the record) and
+   `_act` stay on for the list to open that record itself. */
 export function openLink(link, navigate) {
   if (!link) return;
   const url = new URL(link, window.location.origin);
-  const school = url.searchParams.get("_school");
-  const district = url.searchParams.get("_district");
-  if (school) {
-    const resource = url.pathname.split("/")[2];
+  const pick = {
+    organisation_id: url.searchParams.get("_org") || "",
+    district_id: url.searchParams.get("_district") || "",
+    school_id: url.searchParams.get("_school") || "",
+  };
+  if (pick.organisation_id || pick.school_id) {
+    // /app/<resource> or /app/master/<resource>
+    const parts = url.pathname.split("/");
+    const resource = parts[2] === "master" ? parts[3] : parts[2];
     const tab = url.searchParams.get("tab");
-    setOrgScopeFor(tab && tab !== "view" ? `${resource}:${tab}` : resource, { district_id: district || "", school_id: school });
+    setOrgScopeFor(tab && tab !== "view" ? `${resource}:${tab}` : resource, pick);
   }
-  url.searchParams.delete("_school");
-  url.searchParams.delete("_district");
+  for (const k of ["_org", "_school", "_district"]) url.searchParams.delete(k);
   navigate(`${url.pathname}${url.search}`);
 }
 

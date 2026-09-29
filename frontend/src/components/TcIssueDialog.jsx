@@ -2,6 +2,7 @@
    student is already chosen; attach a photo of the TC (and its number and
    date). The org admin then checks it and confirms the student has left. */
 import { useRef, useState } from "react";
+import { Check, X } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
 import { useToast } from "../lib/toast";
@@ -49,12 +50,12 @@ export default function TcIssueDialog({ row, onClose, onDone }) {
             <h3 style={{ margin: 0 }}>TC Issued</h3>
             <span className="drawer-sub">Record the Transfer Certificate this student was given.</span>
           </div>
-          <button type="button" className="close" onClick={onClose}>×</button>
+          <button type="button" className="close" onClick={onClose}><X size={18} strokeWidth={2} /></button>
         </header>
         <div className="body">
           <ReviewNotice gate={review} locked />
           <div className="known-panel">
-            <div className="known-title">✓ Student</div>
+            <div className="known-title"><Check size={14} /> Student</div>
             <div className="known-grid">
               <div className="known-item"><span className="known-k">Name</span><span className="known-v">{row.full_name}</span></div>
               <div className="known-item"><span className="known-k">Class</span><span className="known-v">{row.class_grade} {row.section || ""}</span></div>

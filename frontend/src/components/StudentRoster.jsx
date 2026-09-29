@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { Check, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import api from "../lib/api";
 import { splitList } from "../lib/fieldOptions";
@@ -117,7 +118,7 @@ export default function StudentRoster({ field, values, value, onChange }) {
                   onClick={() => toggle(s.id)}
                   title={attended ? "Click to undo" : "Mark as attended"}
                 >
-                  {attended ? "✓ Attended" : "Attend"}
+                  {attended ? <><Check size={14} /> Attended</> : "Attend"}
                 </button>
               </li>
             );
@@ -149,7 +150,7 @@ export default function StudentRoster({ field, values, value, onChange }) {
                 className={`roster-row ${present ? "present" : "absent"}`}
                 onClick={() => toggle(s.id)}
               >
-                <span className="roster-mark">{present ? "✓" : "✕"}</span>
+                <span className="roster-mark">{present ? <Check size={13} strokeWidth={3} /> : <X size={13} strokeWidth={3} />}</span>
                 <span className="roster-name">{s.full_name}</span>
                 <span className="roster-meta">
                   {[s.roll_number, s.section && `Sec ${s.section}`].filter(Boolean).join(" · ")}

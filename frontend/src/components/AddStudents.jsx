@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useRef, useState } from "react";
+import { Plus, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
 import { useToast } from "../lib/toast";
@@ -153,7 +154,7 @@ export default function AddStudents() {
           <span>Section <b className="req">*</b></span>
           <select className="select" value={section} onChange={(e) => pickSection(e.target.value)}>
             {sections.map((s) => <option key={s} value={s}>Section {s}</option>)}
-            <option value="__add">＋ Add a section…</option>
+            <option value="__add">+ Add a section…</option>
             {section && sections.length > 1 && <option value="__remove">－ Remove Section {section}…</option>}
           </select>
           {newSection !== null ? (
@@ -179,7 +180,7 @@ export default function AddStudents() {
       {classGrade === "11" && section && (
         <div className="prefill-note previous-note">
           <span>Class 11 can also take this lab's earlier Class 10 students. They're verified again, as at Class 9.</span>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPrevious(true)}>＋ Add previous students</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPrevious(true)}><Plus size={15} /> Add previous students</button>
         </div>
       )}
       <p className="muted add-students-hint">
@@ -224,7 +225,7 @@ export default function AddStudents() {
                 <td><input className="input" value="Auto" disabled title="Given automatically when the students are saved" /></td>
                 <td>
                   <button type="button" className="btn btn-ghost btn-sm" title="Remove this row"
-                    onClick={() => setRows((rs) => (rs.length > 1 ? rs.filter((_, j) => j !== i) : [blank()]))}>✕</button>
+                    onClick={() => setRows((rs) => (rs.length > 1 ? rs.filter((_, j) => j !== i) : [blank()]))}><X size={15} /></button>
                 </td>
               </tr>
               {errors[i] && <tr className="row-error"><td colSpan={13}>Row {i + 1}: {errors[i]}</td></tr>}
@@ -235,8 +236,8 @@ export default function AddStudents() {
       </div>
 
       <div className="profile-actions">
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRows((rs) => [...rs, blank()])}>＋ Add row</button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRows((rs) => [...rs, ...Array.from({ length: 5 }, blank)])}>＋ Add 5 rows</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRows((rs) => [...rs, blank()])}><Plus size={15} /> Add row</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRows((rs) => [...rs, ...Array.from({ length: 5 }, blank)])}><Plus size={15} /> Add 5 rows</button>
         <span className="grow" />
         <button type="button" className="btn btn-primary"
           disabled={!filled.length || save.isPending || !classGrade || (review.reviewing && !review.ready)}
@@ -250,7 +251,7 @@ export default function AddStudents() {
 
       {done && (
         <div className="prefill-note" style={{ marginTop: ".8rem" }}>
-          ✓ Added {done.added} to Class {done.class_grade} {done.section} ({done.academic_year}):{" "}
+          Added {done.added} to Class {done.class_grade} {done.section} ({done.academic_year}):{" "}
           {done.students.map((s) => `${s.full_name} (${s.roll_number})`).join(", ")}. They're waiting for your admin to verify them.
         </div>
       )}

@@ -2,8 +2,10 @@
    a dropdown of the latest ones. Clicking one marks it read and opens the
    page to act on. */
 import { useEffect, useRef, useState } from "react";
+import { CategoryIcon } from "./Icon";
+import { Bell } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { CATEGORY_ICON, openLink, timeAgo, useMarkRead, useMyNotifications } from "../lib/notifications";
+import { openLink, timeAgo, useMarkRead, useMyNotifications } from "../lib/notifications";
 
 export default function NotificationBell() {
   const [open, setOpen] = useState(false);
@@ -34,7 +36,7 @@ export default function NotificationBell() {
     <div className="bell" ref={box}>
       <button type="button" className="bell-btn" onClick={() => setOpen((o) => !o)}
         aria-label={unread ? `Notifications - ${unread} unread` : "Notifications"} aria-expanded={open}>
-        <span aria-hidden="true">🔔</span>
+        <Bell size={19} strokeWidth={1.8} aria-hidden="true" />
         {unread > 0 && <span className="bell-count">{unread > 99 ? "99+" : unread}</span>}
       </button>
       {open && (
@@ -52,7 +54,7 @@ export default function NotificationBell() {
             {q.isSuccess && items.length === 0 && <div className="bell-empty muted">No notifications yet.</div>}
             {items.map((n) => (
               <button type="button" key={n.id} className={`bell-item ${n.is_read ? "" : "unread"}`} onClick={() => pick(n)} role="menuitem">
-                <span className="bell-ico" aria-hidden="true">{CATEGORY_ICON[n.category] || "🔔"}</span>
+                <span className="bell-ico"><CategoryIcon category={n.category} /></span>
                 <span className="bell-text">
                   <span className="bell-title">{n.title}</span>
                   {n.body && <span className="bell-body">{n.body}</span>}

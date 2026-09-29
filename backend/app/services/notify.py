@@ -56,14 +56,18 @@ def _school_of_lab(lab_id):
     return _school(lab.school_id) if lab else None
 
 
-def _link(path, school=None, for_admin=False, **params):
-    """A page, pre-filtered. An org admin's lists open on a school, so their
-    links carry it (_district/_school - picked up by the page on arrival)."""
+def _link(path, school=None, for_admin=False, record=None, act="view", **params):
+    """A page, pre-filtered, opening the record itself. An admin's lists open
+    on a school, so their links carry it (_district/_school, and _org for the
+    super admin); `record` + `act` open it (the page reads _open/_act)."""
     q = {k: v for k, v in params.items() if v not in (None, "")}
     if for_admin and school is not None:
         q["_school"] = str(school.id)
         if school.district_id:
             q["_district"] = str(school.district_id)
+    if record is not None:
+        q["_open"] = str(record.id)
+        q["_act"] = act
     return f"/app/{path}" + (f"?{urlencode(q)}" if q else "")
 
 
@@ -89,7 +93,8 @@ def issue_raised(issue, actor, kind):
     _send(org_admins(issue.organisation_id), actor, org_id=issue.organisation_id,
           title=f"New issue from a {who}{_where(school)}",
           body=(issue.details or "")[:300], category="issue",
-          link=_link("principal-issues" if kind == "pr" else "issues", school, True, workflow_status="open"))
+          link=_link("principal-issues" if kind == "pr" else "issues", school, True, record=issue, act="resolve",
+                     workflow_status="open"))
 
 
 def issue_status_changed(issue, actor, kind, status):
@@ -99,13 +104,13 @@ def issue_status_changed(issue, actor, kind, status):
     _send(org_admins(issue.organisation_id), actor, org_id=issue.organisation_id,
           title=f"Issue{_where(school)} is now {label}",
           body=(issue.details or "")[:300], category="issue",
-          link=_link(path, school, True, workflow_status=status))
+          link=_link(path, school, True, record=issue, workflow_status=status))
     if status == "resolved":      # whoever raised it: the principal, or the trainer
         raiser = user_by_id(issue.created_by) or (trainer_user(issue.trainer_id) if kind == "vt" else [])
         _send(raiser, actor, org_id=issue.organisation_id,
               title="Your issue has been resolved",
               body=(issue.resolution_note or issue.details or "")[:300], category="issue",
-              link=_link(path, workflow_status="resolved"))
+              link=_link(path, record=issue, workflow_status="resolved"))
 
 
 # ------------------------------------------- org admin: equipment & upkeep
@@ -115,7 +120,7 @@ def maintenance_logged(rec, equipment, actor):
     _send(org_admins(rec.organisation_id), actor, org_id=rec.organisation_id,
           title=f"Maintenance needed: {name}{_where(school)}",
           body=(rec.issue or "")[:300], category="maintenance",
-          link=_link("equipment-maintenance", school, True))
+          link=_link("equipment-maintenance", school, True, record=rec, act="resolve"))
 
 
 def maintenance_status_changed(rec, equipment, actor):
@@ -124,7 +129,7 @@ def maintenance_status_changed(rec, equipment, actor):
     _send(user_by_id(rec.created_by), actor, org_id=rec.organisation_id,
           title=f"{name}: {rec.maintenance_status}",
           body=(rec.action or rec.note or rec.issue or "")[:300], category="maintenance",
-          link=_link("equipment-maintenance"))
+          link=_link("equipment-maintenance", record=rec))
 
 
 def equipment_saved(eq, actor, created):
@@ -132,7 +137,7 @@ def equipment_saved(eq, actor, created):
     _send(org_admins(eq.organisation_id), actor, org_id=eq.organisation_id,
           title=f"Lab equipment {'added' if created else 'updated'}: {eq.name or 'item'}{_where(school)}",
           body=(eq.details or eq.note or "")[:300],
-          category="equipment", link=_link("equipment", school, True))
+          category="equipment", link=_link("equipment", school, True, record=eq))
 
 
 # --------------------------------------------- org admin: students to verify
@@ -151,7 +156,7 @@ def student_leaving(s, actor):
     _send(principals_of(s.school_id), actor, org_id=s.organisation_id,
           title=f"{s.full_name} is leaving - TC needed",
           body=f"Class {s.class_grade} {s.section or ''} · {s.leaving_type}: {s.left_reason or ''}"[:300],
-          category="leaving", link=_link("students", leaving_stage="requested"))
+          category="leaving", link=_link("students", record=s, leaving_stage="requested"))
 
 
 def tc_to_verify(s, actor):
@@ -160,7 +165,7 @@ def tc_to_verify(s, actor):
     _send(org_admins(s.organisation_id), actor, org_id=s.organisation_id,
           title=f"TC to verify: {s.full_name}{_where(school)}",
           body=f"Class {s.class_grade} {s.section or ''} · {s.leaving_type}" + (f" · TC {s.tc_number}" if s.tc_number else ""),
-          category="leaving", link=_link("students", school, True, tab="leaving"))
+          category="leaving", link=_link("students", school, True, record=s, act="leftverify", tab="leaving"))
 
 
 # ------------------------------------------------------------- principal
@@ -171,14 +176,14 @@ def attendance_submitted(rec, actor, kind):
     _send(principals_of(rec.school_id), actor, org_id=rec.organisation_id,
           title=f"{what} to verify",
           body=f"{actor.full_name if actor else 'A trainer'} marked {what.lower()} for {dmy(rec.date)}.",
-          category="attendance", link=_link(path, endorsement_status="submitted"))
+          category="attendance", link=_link(path, record=rec, endorsement_status="submitted"))
 
 
 def guest_lecture_added(rec, actor):
     _send(principals_of(rec.school_id), actor, org_id=rec.organisation_id,
           title=f"Guest lecture added: {rec.topic or 'lecture'}",
           body=f"{rec.lecturer_name or 'A guest'} · Class {rec.class_grade or '-'} · {dmy(rec.reporting_date)}",
-          category="guest_lecture", link=_link("guest-lectures"))
+          category="guest_lecture", link=_link("guest-lectures", record=rec))
 
 
 # --------------------------------------------------------------- trainer
@@ -188,4 +193,51 @@ def attendance_verified(rec, actor, kind):
     _send(user_by_id(rec.created_by) or trainer_user(rec.trainer_id), actor, org_id=rec.organisation_id,
           title="Attendance verified",
           body=f"Your {what} for {dmy(rec.date)} was verified by the principal.",
-          category="attendance", link=_link(path, endorsement_status="endorsed"))
+          category="attendance", link=_link(path, record=rec, endorsement_status="endorsed"))
+
+
+# ------------------------------------------------------------ super admin
+PROFILE_ENTITIES = {"trainer_profile": "trainers", "principal_profile": "principals"}
+
+
+def org_admin_action(actor, action, entity, entity_id, before, after):
+    """The super admin hears what org admins do: every change an org admin
+    makes (as the audit log records it), opening on the record itself."""
+    from app.api.admin import ENTITY_NAMES, _record_name, _verb
+    from app.api.registry import REGISTRY
+    from app.models.organisation import Organisation
+    admins = _active(db.session.query(User).filter(User.role == "SA")).all()
+    if not admins or actor is None:
+        return
+    org = db.session.get(Organisation, actor.organisation_id) if actor.organisation_id else None
+    what = ENTITY_NAMES.get(entity, entity.replace("_", " "))
+    name = _record_name(entity, entity_id, before, after)
+
+    # where it lives: its list, on its organisation (and school)
+    resource = PROFILE_ENTITIES.get(entity) or next(
+        (n for n, c in REGISTRY.items() if c.model.__tablename__ == entity), None)
+    if entity == "app_user":
+        link = "/app/admin/users"
+    elif resource:
+        cfg = REGISTRY[resource]
+        rec = db.session.get(cfg.model, entity_id) if entity_id else None
+        school_id = None
+        if rec is not None:
+            school_id = (getattr(rec, "school_id", None) or getattr(rec, "linked_school_id", None)
+                         or (_school_of_lab(rec.lab_id).id if getattr(rec, "lab_id", None) and _school_of_lab(rec.lab_id) else None))
+            if entity == "school":
+                school_id = rec.id
+        school = _school(school_id)
+        q = {"_org": str(actor.organisation_id)} if actor.organisation_id else {}
+        if school is not None:
+            q["_school"] = str(school.id)
+            if school.district_id:
+                q["_district"] = str(school.district_id)
+        if rec is not None:
+            q["_open"], q["_act"] = str(rec.id), "view"
+        link = f"/app/{resource}?{urlencode(q)}"
+    else:
+        link = "/app/admin/audit"
+    _send(admins, actor, org_id=actor.organisation_id,
+          title=f"{actor.full_name} {_verb(action, after).lower()} {what}" + (f": {name}" if name else ""),
+          body=f"Org Admin at {org.name}" if org else "Org Admin", category="admin", link=link)

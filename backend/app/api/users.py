@@ -19,7 +19,8 @@ bp = Blueprint("users", __name__, url_prefix="/api/users")
 
 # who may create/manage which roles
 CREATE_MATRIX = {
-    Role.SUPER_ADMIN.value: {"SA", "OA", "DM", "PR", "VT"},
+    # org admins' logins come with their organisation (Organisations page)
+    Role.SUPER_ADMIN.value: set(),
     # an org admin's principals and trainers get their logins when they are
     # added (Master Data), so Users & Access only resets and disables them
     Role.ORG_ADMIN.value: set(),
@@ -91,6 +92,8 @@ def _scoped_target(actor, target):
         abort(403, description="Outside your organisation")
     if actor.role == Role.ORG_ADMIN.value and target.role not in SCHOOL_STAFF:
         abort(403, description="Org admins look after principals' and trainers' logins only.")
+    if actor.role == Role.SUPER_ADMIN.value and target.role != Role.ORG_ADMIN.value:
+        abort(403, description="The super admin looks after org admins' logins only.")
 
 
 @bp.get("")
@@ -104,6 +107,8 @@ def list_users():
         q = q.filter(User.organisation_id == user.organisation_id)
     if user.role == Role.ORG_ADMIN.value:
         q = q.filter(User.role.in_(SCHOOL_STAFF), User.school_id.isnot(None))
+    if user.role == Role.SUPER_ADMIN.value:      # their org admins, nobody below
+        q = q.filter(User.role == Role.ORG_ADMIN.value)
     role = request.args.get("role")
     if role:
         q = q.filter(User.role == role)
@@ -185,6 +190,8 @@ def update_user(uid):
     target = db.session.get(User, uid)
     _scoped_target(actor, target)
     data = request.get_json(silent=True) or {}
+    if actor.role == Role.SUPER_ADMIN.value:
+        abort(403, description="The super admin only resets org admins' passwords.")
     if actor.role == Role.ORG_ADMIN.value:
         data = {k: v for k, v in data.items() if k == "status"}   # disable / enable only
     before = target.public_dict()

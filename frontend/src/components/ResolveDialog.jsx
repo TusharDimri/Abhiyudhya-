@@ -3,6 +3,7 @@
    nothing to type); they write the resolution and set Open / Resolved.
    Resolving it tells whoever raised it. */
 import { useState } from "react";
+import { Check, X } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
 import { useToast } from "../lib/toast";
@@ -55,11 +56,11 @@ export default function ResolveDialog({ resource, row, onClose, onDone }) {
             <h3 style={{ margin: 0 }}>Resolve {maintenance ? "maintenance" : "issue"}</h3>
             <span className="drawer-sub">Write what was done, and set the status.</span>
           </div>
-          <button type="button" className="close" onClick={onClose}>×</button>
+          <button type="button" className="close" onClick={onClose}><X size={18} strokeWidth={2} /></button>
         </header>
         <div className="body">
           <div className="known-panel">
-            <div className="known-title">✓ {maintenance ? "What was logged" : "What was raised"}</div>
+            <div className="known-title"><Check size={14} /> {maintenance ? "What was logged" : "What was raised"}</div>
             <div className="known-grid">
               {known.map(([k, v]) => (
                 <div className={`known-item ${["Issue", "Problem"].includes(k) ? "wide" : ""}`} key={k}>

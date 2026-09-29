@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { X } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import api, { apiError } from "../lib/api";
 import { useToast } from "../lib/toast";
@@ -55,7 +56,7 @@ export default function WorkflowDialog({ resource, action, row, onClose, onDone 
       <div className="drawer" style={{ width: "min(440px,100%)" }}>
         <header>
           <h3 style={{ margin: 0 }}>{TITLES[action] || "Update"}</h3>
-          <button className="close" onClick={onClose}>×</button>
+          <button className="close" onClick={onClose}><X size={18} strokeWidth={2} /></button>
         </header>
         <div className="body">
           <div className="field">

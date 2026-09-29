@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import Icon from "../../components/Icon";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api, { apiError } from "../../lib/api";
 import { useBootstrap } from "../../hooks/useBootstrap";
@@ -40,7 +41,7 @@ export default function Trash() {
       <div className="page-head">
         <div>
           <div className="crumb">Administration</div>
-          <h1>♻️ Recycle Bin</h1>
+          <h1><span className="page-ico"><Icon name="trash" size={20} /></span>Recycle Bin</h1>
           <div className="muted" style={{ fontSize: ".85rem" }}>Soft-deleted records. Restore anything deleted by mistake.</div>
         </div>
       </div>
@@ -71,7 +72,7 @@ export default function Trash() {
             </tbody>
           </table>
         </div>
-        {!trash.isLoading && rows.length === 0 && <div className="empty">Recycle bin is empty for this section. 🎉</div>}
+        {!trash.isLoading && rows.length === 0 && <div className="empty">Recycle bin is empty for this section.</div>}
       </div>
     </div>
   );

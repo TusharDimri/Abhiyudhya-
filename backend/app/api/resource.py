@@ -380,9 +380,11 @@ def _apply_profile(cfg, obj, payload, user):
     db.session.flush()
 
 
-def _create_login(cfg, obj, user):
+def _create_login(cfg, obj, user, payload=None):
     from app.api.users import LoginError, create_login_for
     try:
+        if cfg.creates_login:
+            return cfg.creates_login(obj, payload or {}, user)
         return create_login_for(cfg.profile_role, obj, user)
     except LoginError as exc:
         db.session.rollback()
@@ -468,7 +470,8 @@ def create_resource(resource):
         cfg.on_saved(obj, user, True, None)
     # a new trainer / principal gets their login now; its password goes back
     # in this one response and is never shown again
-    login = _create_login(cfg, obj, user) if cfg.profile_role and not obj.user_id else None
+    login = (_create_login(cfg, obj, user, payload) if cfg.creates_login
+             else _create_login(cfg, obj, user) if cfg.profile_role and not obj.user_id else None)
 
     # Verify the newly created row is inside the creator's scope.
     if not can_access_row(obj, user):
