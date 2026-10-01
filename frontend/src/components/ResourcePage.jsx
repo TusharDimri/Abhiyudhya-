@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Icon from "./Icon";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Search } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
@@ -185,11 +185,21 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     enabled: !!mod && gateOpen,
   });
 
-  // the focused record arrived: stay on its page, flash its row for 2 seconds
+  // the focused record arrived: stay on its page, flash its row for 2 seconds.
+  // Not under the link's filters? It changed since (verified, resolved...):
+  // drop those filters once and look again, so it still opens on the record.
+  const widened = useRef("");
   useEffect(() => {
     const f = list.data?.focus;
     if (!focusId || !f || f.id !== focusId) return undefined;
     const next = new URLSearchParams(sp);
+    if (!f.found && widened.current !== focusId && Object.keys(filterValues).length) {
+      widened.current = focusId;
+      for (const k of Object.keys(filterValues)) next.delete(k);
+      next.delete("page");
+      setSp(next, { replace: true });
+      return undefined;
+    }
     next.delete("focus");
     if (f.found) {
       next.set("page", String(f.page));

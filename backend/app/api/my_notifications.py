@@ -5,6 +5,7 @@ from flask import Blueprint, abort, jsonify, request
 from app.extensions import db
 from app.models.misc import Notification
 from app.rbac import current_user, login_required
+from app.services.notify import link_for
 
 bp = Blueprint("my_notifications", __name__, url_prefix="/api/me/notifications")
 
@@ -14,8 +15,9 @@ def _mine(user):
         Notification.user_id == user.id, Notification.is_deleted.is_(False))
 
 
-def _row(n):
-    return {"id": str(n.id), "title": n.title, "body": n.body, "category": n.category, "link": n.link,
+def _row(n, user):
+    # the link made whole for this user (older notifications carry older links)
+    return {"id": str(n.id), "title": n.title, "body": n.body, "category": n.category, "link": link_for(user, n.link),
             "is_read": bool(n.is_read), "created_at": n.created_at.isoformat() if n.created_at else None}
 
 
@@ -32,7 +34,7 @@ def list_mine():
     total = q.count()
     rows = q.order_by(Notification.created_at.desc()).limit(size).offset((page - 1) * size).all()
     unread = _mine(user).filter(Notification.is_read.is_(False)).count()
-    return jsonify({"unread": unread, "data": [_row(n) for n in rows],
+    return jsonify({"unread": unread, "data": [_row(n, user) for n in rows],
                     "pagination": {"page": page, "page_size": size, "total": total,
                                    "pages": max(1, (total + size - 1) // size)}})
 

@@ -5,7 +5,8 @@ page where they can act. The person who caused the event is never told
 about their own action. Called inside the request's transaction, so a
 notification only exists if what it announces was saved.
 """
-from urllib.parse import urlencode
+import uuid
+from urllib.parse import parse_qsl, urlencode
 
 from app.extensions import db
 from app.models.geography import School
@@ -89,6 +90,87 @@ def _link(path, school=None, for_admin=False, record=None, act="view", **params)
     if record is not None:
         q["focus"] = str(record.id)
     return f"/app/{path}" + (f"?{urlencode(q)}" if q else "")
+
+
+# What an admin's list needs picked before it shows anything - mirrors
+# ORG_ADMIN_SCOPE in frontend/src/lib/modules.js (the super admin also picks
+# the organisation first, on every list but Organisations).
+LIST_NEEDS = {"districts": "state", "schools": "district", "principals": "school", **{k: "school" for k in (
+    "labs", "trainers", "students", "assessments", "attendance", "class-attendance", "principal-issues",
+    "issues", "field-visits", "guest-lectures", "equipment", "equipment-maintenance", "ojt-placements")}}
+ADMINS = ("SA", "OA", "DM")
+
+
+def _school_of_record(resource, rec):
+    """The school a record belongs to, however it's linked to one."""
+    if resource == "schools":
+        return rec
+    sid = getattr(rec, "school_id", None) or getattr(rec, "linked_school_id", None)
+    if sid:
+        return _school(sid)
+    if getattr(rec, "lab_id", None):
+        return _school_of_lab(rec.lab_id)
+    if getattr(rec, "equipment_id", None):
+        from app.models.operations import LabEquipment
+        eq = db.session.get(LabEquipment, rec.equipment_id)
+        return _school(eq.school_id) if eq else None
+    if getattr(rec, "student_id", None):
+        from app.models.student import Student
+        st = db.session.get(Student, rec.student_id)
+        return _school(st.school_id) if st else None
+    return None
+
+
+def link_for(user, link):
+    """The link a notification opens, made whole for `user` - however old the
+    notification is. Links have changed shape over time (no record at all;
+    then `_open`/`_act`; now `focus`), and an admin's list shows nothing until
+    its organisation / state / district / school is picked. So the record is
+    looked up and its place is filled in from it: every link opens the right
+    list, on the right pick, at the record. (Stored links stay as they were.)"""
+    if not link or not link.startswith("/app/"):
+        return link
+    path, _, qs = link.partition("?")
+    q = dict(parse_qsl(qs))
+    if "_open" in q:                                  # older links
+        legacy = q.pop("_open")
+        q.setdefault("focus", legacy)
+    q.pop("_act", None)
+    parts = path.strip("/").split("/")                # app/<resource> or app/master/<resource>
+    resource = parts[2] if len(parts) > 2 and parts[1] == "master" else (parts[1] if len(parts) > 1 else "")
+    rec = None
+    if user.role in ADMINS and q.get("focus"):
+        from app.api.registry import REGISTRY
+        cfg = REGISTRY.get(resource)
+        try:
+            rec = db.session.get(cfg.model, uuid.UUID(q["focus"])) if cfg else None
+        except (ValueError, TypeError):
+            rec = None
+    if resource == "students" and "tab" in q:
+        # only the org admin's Students page has tabs (View / Verify / TC to
+        # verify) - and a student verified since, or whose TC was checked,
+        # is no longer on the tab the link named: open them on View
+        tab = q["tab"]
+        if user.role != "OA":
+            q.pop("tab")
+        elif rec is not None and ((tab == "verify" and rec.verification_status != "pending")
+                                  or (tab == "leaving" and rec.leaving_stage != "tc_issued")):
+            q["tab"] = "view"
+    if rec is not None:
+        if user.role == "SA" and resource != "organisations" and getattr(rec, "organisation_id", None):
+            q["_org"] = str(rec.organisation_id)
+        need = LIST_NEEDS.get(resource)
+        if need == "state" and getattr(rec, "state_id", None):
+            q["_state"] = str(rec.state_id)
+        elif need == "district" and getattr(rec, "district_id", None):
+            q["_district"] = str(rec.district_id)
+        elif need == "school":
+            school = _school_of_record(resource, rec)
+            if school is not None:
+                q["_school"] = str(school.id)
+                if school.district_id:
+                    q["_district"] = str(school.district_id)
+    return path + (f"?{urlencode(q)}" if q else "")
 
 
 def _send(recipients, actor, *, org_id, title, body, category, link):

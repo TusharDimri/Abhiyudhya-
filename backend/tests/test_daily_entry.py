@@ -395,6 +395,47 @@ def test_district_manager_reads_master_data_and_has_no_user_admin(client, world)
                        json={"verification_status": "verified"}).status_code == 403
 
 
+def test_older_notification_links_still_open_the_record(client, world):
+    """A notification keeps the link it was made with, and links have changed
+    shape (`_open`/`_act`, then `focus`; no school picked). Whatever is
+    stored, an admin is handed a link that opens the right list, on the
+    record's organisation / district / school, at the record."""
+    from app.models.misc import Notification
+    from app.models.geography import District
+    school, student = world["school"], world["students"][0]
+    student.verification_status = "verified"          # since the notice went out
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    dm = User(organisation_id=world["org"].id, full_name="DM", email="dm@x.com", role="DM")
+    sa = User(full_name="SA", email="sa@x.com", role="SA")
+    for u in (oa, dm, sa):
+        u.set_password("Password@123")
+    dm.districts.append(db.session.get(District, school.district_id))
+    db.session.add_all([oa, dm, sa])
+    db.session.flush()
+    old = f"/app/students?tab=verify&_open={student.id}&_act=verify"     # an older link: no school, old keys
+    for u in (oa, dm, sa):
+        db.session.add(Notification(organisation_id=world["org"].id, user_id=u.id, title="A student to verify",
+                                    category="verification", link=old, is_read=False))
+    db.session.add(Notification(organisation_id=world["org"].id, user_id=sa.id, title="School added",
+                                category="admin", link=f"/app/schools?focus={school.id}", is_read=False))
+    db.session.commit()
+
+    def links(email):
+        return [n["link"] for n in _mine(client, email)["data"]]
+    at_school = (f"_school={school.id}", f"_district={school.district_id}", f"focus={student.id}")
+    oa_link = links("oa@x.com")[0]
+    assert all(p in oa_link for p in at_school) and "_open" not in oa_link and "_act" not in oa_link
+    assert "tab=view" in oa_link                       # verified since: not on the Verify tab any more
+    dm_link = links("dm@x.com")[0]
+    assert all(p in dm_link for p in at_school) and "tab=" not in dm_link   # no tabs on their Students page
+    sa_links = links("sa@x.com")
+    assert all(f"_org={world['org'].id}" in l for l in sa_links)
+    assert any(f"_district={school.district_id}" in l and f"focus={school.id}" in l for l in sa_links)  # schools: a district
+    # ... and the list opens on it
+    r = client.get(f"/api/students?school_id={school.id}&page_size=1&focus={student.id}", headers=_as(client, "dm@x.com"))
+    assert r.get_json()["focus"]["found"] is True
+
+
 def test_issue_resolved_by_one_admin_is_closed_for_both(client, world, principal, principal_record):
     from app.models.geography import District
     oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")

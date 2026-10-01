@@ -32,25 +32,27 @@ export function useMarkRead() {
   };
 }
 
-/* Go where the notification points. Its organisation / district / school
-   become that one list's pick, so it opens there; `_open` (the record) and
-   `_act` stay on for the list to open that record itself. */
+/* Go where the notification points. Its organisation / state / district /
+   school become that one list's pick, so it opens there (the server fills
+   them in from the record - api/my_notifications.py); `focus` (the record)
+   stays on for the list to find it and flash it. */
 export function openLink(link, navigate) {
   if (!link) return;
   const url = new URL(link, window.location.origin);
   const pick = {
     organisation_id: url.searchParams.get("_org") || "",
+    state_id: url.searchParams.get("_state") || "",
     district_id: url.searchParams.get("_district") || "",
     school_id: url.searchParams.get("_school") || "",
   };
-  if (pick.organisation_id || pick.school_id) {
+  if (Object.values(pick).some(Boolean)) {
     // /app/<resource> or /app/master/<resource>
     const parts = url.pathname.split("/");
     const resource = parts[2] === "master" ? parts[3] : parts[2];
     const tab = url.searchParams.get("tab");
     setOrgScopeFor(tab && tab !== "view" ? `${resource}:${tab}` : resource, pick);
   }
-  for (const k of ["_org", "_school", "_district"]) url.searchParams.delete(k);
+  for (const k of ["_org", "_state", "_school", "_district"]) url.searchParams.delete(k);
   navigate(`${url.pathname}${url.search}`);
 }
 
