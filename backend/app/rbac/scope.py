@@ -119,6 +119,13 @@ def apply_scope(query, model, user):
 
     if role == Role.TRAINER.value:
         lab_ids = [l.id for l in user.labs]
+        if getattr(model, "vt_own_only", False):
+            # a trainer's own papers (e.g. their monthly attendance PDF) - not
+            # a colleague's in the same lab
+            from app.models.lab import Trainer
+            from app.extensions import db
+            mine = [r[0] for r in db.session.query(Trainer.id).filter(Trainer.user_id == user.id)]
+            return query.filter(model.trainer_id.in_(mine or [None]))
         if model.__tablename__ == "school":
             query = query.filter(model.id == user.school_id)
         elif model.__tablename__ == "district":

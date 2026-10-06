@@ -2,7 +2,7 @@
    emoji: each module and each kind of notification has its own. */
 import {
   Bell, BookMarked, BookOpen, Briefcase, BriefcaseBusiness, Building, Building2, Bus, CalendarCheck,
-  CalendarRange, ClipboardCheck, ClipboardList, Database, Factory, FileText, Flag, FlaskConical, GraduationCap,
+  CalendarRange, ClipboardCheck, ClipboardList, Database, Factory, FileText, FileUp, Flag, FlaskConical, GraduationCap,
   LayoutDashboard, Link2, Map, MapPin, MessageSquare, MessageSquareWarning, Mic, Monitor, NotebookPen,
   NotebookText, Presentation, School, ScrollText, Tags, Trash2, TriangleAlert, UserCheck, UserCog, UserRound, Users,
   UsersRound, Wrench, CircleDot,
@@ -20,7 +20,7 @@ const ICONS = {
   // people
   students: Users, assessments: ClipboardCheck,
   // daily operations
-  attendance: CalendarCheck, "class-attendance": ClipboardList, "principal-issues": MessageSquareWarning,
+  attendance: CalendarCheck, mapp: FileUp, "class-attendance": ClipboardList, "principal-issues": MessageSquareWarning,
   issues: TriangleAlert, "org-issues": Flag, "field-visits": Bus, "guest-lectures": Mic, equipment: Monitor,
   "equipment-maintenance": Wrench,
   // internship

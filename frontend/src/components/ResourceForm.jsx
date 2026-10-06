@@ -6,6 +6,7 @@ import api from "../lib/api";
 import StudentRoster from "./StudentRoster";
 import { RowsInput } from "./ProfileFields";
 import DateInput from "./DateInput";
+import PhotoInput from "./PhotoInput";
 import { toDMY } from "../lib/dates";
 import { useLocationFix, locationPayload, locationErrorMessage } from "../lib/location";
 import { staticOptionsFor, enumList, splitList, joinList, optionText } from "../lib/fieldOptions";
@@ -27,7 +28,7 @@ const OPTIONKEY_RESOURCE = {
 };
 
 // Field types that need the full width of the drawer.
-const WIDE = new Set(["textarea", "file", "multiselect", "studentmarks", "geopoint", "rows"]);
+const WIDE = new Set(["textarea", "file", "pdf", "multiselect", "studentmarks", "geopoint", "rows"]);
 
 // A field may cascade off more than one answer (a curriculum module list is
 // narrowed by job role *and* by Employability/Vocational). The first parent
@@ -481,6 +482,31 @@ export default function ResourceForm({
 
     if (f.type === "geopoint") return <GeoPointInput f={f} values={values} setValues={setValues} />;
 
+    // a photo: the camera first, the gallery below it
+    if (f.type === "photo")
+      return <PhotoInput value={val} label={f.label} onChange={(key) => set(f.name, key)}
+        onError={(msg) => setErrors((e) => ({ ...e, [f.name]: msg || undefined }))} />;
+
+    // a document (a report): a PDF only
+    if (f.type === "pdf")
+      return (
+        <>
+          <input type="file" className="input" accept="application/pdf,.pdf"
+            onChange={(e) => {
+              const file = e.target.files[0];
+              if (file && !/\.pdf$/i.test(file.name)) {
+                setErrors((x) => ({ ...x, [f.name]: "Choose a PDF file." }));
+                e.target.value = "";
+                return;
+              }
+              setErrors((x) => ({ ...x, [f.name]: undefined }));
+              upload(f, file);
+            }} />
+          {uploading === f.name && <span className="hint">Uploading…</span>}
+          {uploading !== f.name && val && <span className="hint">Uploaded: {String(val).split("/").pop()}</span>}
+        </>
+      );
+
     if (f.type === "file")
       return (
         <>
@@ -525,7 +551,7 @@ export default function ResourceForm({
       <form className="drawer" onSubmit={submit} ref={drawerRef}>
         <header>
           <div>
-            <h3 style={{ margin: 0 }}>{initial ? "Edit" : "New"} {mod.singular}</h3>
+            <h3 style={{ margin: 0 }}>{initial ? `Edit ${mod.singular}` : (mod.formTitle || `New ${mod.singular}`)}</h3>
             {mod.formHint && <span className="drawer-sub">{mod.formHint}</span>}
           </div>
           <button type="button" className="close" onClick={onClose} aria-label="Close"><X size={18} strokeWidth={2} /></button>

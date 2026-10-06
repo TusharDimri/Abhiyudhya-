@@ -265,6 +265,71 @@ def test_class_attendance_too_far_is_refused(client, world):
 
 
 # ---------------------------------------------------------- school location
+SCHOOL_CONTACT = {"board": "CBSE", "email": "school@example.com", "phone": "020 2345 6789"}
+
+
+def test_a_new_school_has_its_board_email_and_phone(client, world):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    h = _as(client, "oa@x.com")
+    base = {"name": "New School", "udise_code": "27999999998", "district_id": str(world["school"].district_id),
+            "school_type": "Co-education", "address": "Main Road", "location_lat": 18.6, "location_lng": 73.9}
+    r = client.post("/api/schools", headers=h, json=base)
+    assert r.status_code == 400
+    assert all(w in r.get_json()["message"] for w in ("Board of school", "Email", "Phone"))
+    for bad in ({"board": "State Board"}, {"email": "not-an-email"}, {"phone": "12345"}):
+        r = client.post("/api/schools", headers=h, json={**base, **SCHOOL_CONTACT, **bad})
+        assert r.status_code == 400, bad
+    r = client.post("/api/schools", headers=h, json={**base, **SCHOOL_CONTACT})
+    assert r.status_code == 201, r.get_json()
+    assert (r.get_json()["board"], r.get_json()["phone"]) == ("CBSE", "02023456789")
+    boards = [o["value"] for o in client.get("/api/meta/bootstrap", headers=h).get_json()["enums"]["school_boards"]]
+    assert boards == ["CBSE", "RamNagar", "PM Shri", "UK Board"]
+
+
+def test_admin_adds_a_principal_with_just_the_basics_and_a_prabhari(client, world):
+    """Name, mobile, gender, email and the school's UDISE code - that's all the
+    admin gives; the Vocational Prabhari is optional. The principal fills in
+    the rest (posting, the Prabhari too) on their profile."""
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    h = _as(client, "oa@x.com")
+    basics = {"full_name": "Asha Kulkarni", "mobile": "9876543210", "gender": "Female",
+              "email": "asha.pr@x.com", "linked_school_id": str(world["school"].id)}
+    r = client.post("/api/principals", headers=h, json={**basics, "linked_school_id": None})
+    assert r.status_code == 400 and "UDISE code" in r.get_json()["message"]
+    # a Prabhari begun needs a name and a mobile, and real contact details
+    for bad in ({"vocational_prabhari_mobile": "9876501234"},
+                {"vocational_prabhari_name": "R. Patil", "vocational_prabhari_mobile": "123"},
+                {"vocational_prabhari_name": "R. Patil", "vocational_prabhari_mobile": "9876501234",
+                 "vocational_prabhari_email": "nope"}):
+        r = client.post("/api/principals", headers=_as(client, "oa@x.com"), json={**basics, **bad})
+        assert r.status_code == 400, (bad, r.get_json())
+    prabhari = {"vocational_prabhari_name": "R. Patil", "vocational_prabhari_mobile": "9876501234",
+                "vocational_prabhari_email": "patil@x.com"}
+    r = client.post("/api/principals", headers=_as(client, "oa@x.com"), json={**basics, **prabhari})
+    assert r.status_code == 201, r.get_json()
+    login = r.get_json()["login"]
+    assert login["username"] == "asha.pr@x.com"
+
+    # the principal: the Prabhari on their profile, and their posting to fill in
+    from flask import g
+    g.pop("current_user", None)                       # switch who is logged in (see _as)
+    t = client.post("/api/auth/login", json={"email": "asha.pr@x.com", "password": login["password"]}).get_json()
+    ph = {"Authorization": f"Bearer {t['access_token']}"}
+    me = client.get("/api/profile", headers=ph).get_json()
+    assert me["vocational_prabhari_name"] == "R. Patil" and me["date_of_joining"] is None
+    assert client.patch("/api/profile", headers=ph, json={"appointment_nature": "Regular"}).status_code == 400  # needs the date
+    r = client.patch("/api/profile", headers=ph, json={"date_of_joining": "2024-06-15", "appointment_nature": "Regular",
+                                                      "vocational_prabhari_mobile": "9123456780"})
+    assert r.status_code == 200, r.get_json()
+    assert (r.get_json()["date_of_joining"], r.get_json()["vocational_prabhari_mobile"]) == ("2024-06-15", "9123456780")
+
+
 def test_admin_sets_a_schools_location(client, world):
     oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
     oa.set_password("Password@123")
@@ -279,7 +344,7 @@ def test_admin_sets_a_schools_location(client, world):
     assert made.status_code == 400 and "district" in made.get_json()["message"]
     made = client.post("/api/schools", headers=oa_h, json={
         "name": "New School", "udise_code": "27999999999", "district_id": str(world["school"].district_id),
-        "school_type": "Co-education", "address": "Main Road",
+        "school_type": "Co-education", "address": "Main Road", **SCHOOL_CONTACT,
         "location_lat": 18.6, "location_lng": 73.9})
     assert made.status_code == 201, made.get_json()
     assert (made.get_json()["location_lat"], made.get_json()["location_lng"]) == (18.6, 73.9)
@@ -504,7 +569,8 @@ def test_super_admin_reads_everything_and_adds_organisations(client, world, prin
     _endorsable(client, world, "daily")                                   # a trainer's work: not for them
     school = client.post("/api/schools", headers=_as(client, "oa@x.com"), json={
         "name": "Org Admin's School", "udise_code": "27111111111", "district_id": str(world["school"].district_id),
-        "school_type": "Co-education", "address": "Main Road", "location_lat": 18.6, "location_lng": 73.9}).get_json()
+        "school_type": "Co-education", "address": "Main Road", **SCHOOL_CONTACT,
+        "location_lat": 18.6, "location_lng": 73.9}).get_json()
     box = client.get("/api/me/notifications?page_size=50", headers=_as(client, "sa@x.com")).get_json()
     added = [n for n in box["data"] if "school" in n["title"]]
     assert added and f"focus={school['id']}" in added[0]["link"] and f"_org={world['org'].id}" in added[0]["link"]
@@ -769,8 +835,14 @@ def test_maintenance_log_entry(client, world):
     assert r.status_code == 201, r.get_json()
     assert r.get_json()["equipment_name"] == "Desktop computer"
 
-    bad = client.post("/api/equipment-maintenance", headers=h, json={**entry, "maintenance_status": "lost"})
-    assert bad.status_code == 400
+    # the trainer reports it - always "Reported"; they can't set any other status
+    for asked in ("Resolved", "Under Progress", "lost"):
+        r = client.post("/api/equipment-maintenance", headers=h, json={**entry, "maintenance_status": asked})
+        assert r.status_code == 201 and r.get_json()["maintenance_status"] == "Reported"
+    # ... nor move it on: that's the admin's (Resolve)
+    r = client.post(f"/api/workflow/equipment-maintenance/{r.get_json()['id']}/status", headers=h,
+                    json={"maintenance_status": "Resolved", "resolution": "Fixed it myself"})
+    assert r.status_code == 403
     future = (date.today() + timedelta(days=5)).isoformat()
     assert client.post("/api/equipment-maintenance", headers=h, json={**entry, "date": future}).status_code == 400
 
@@ -807,7 +879,28 @@ def _lecture(world, **extra):
             "class_grade": "9", "sections": "A,B", "reporting_date": date.today().isoformat(),
             "lecturer_name": "Dr. Meera Rao", "lecturer_qualification": "M.Tech",
             "lecturer_email": "meera@example.com", "lecturer_phone": "9800000000",
-            "lecturer_experience": "8 years", "topic": "Networking basics", **extra}
+            "lecturer_experience": "8 years", "topic": "Networking basics",
+            **{f: f"uploads/x/lecture-{i}.jpg" for i, f in enumerate(LECTURE_PHOTOS, 1)}, **extra}
+
+
+LECTURE_PHOTOS = ("photo_url", "photo_2_url", "photo_3_url", "photo_4_url")
+VISIT_PHOTOS = ("picture_url", "picture_2_url", "picture_3_url", "picture_4_url")
+
+
+@pytest.mark.parametrize("url, body, photos", [("/api/guest-lectures", "_lecture", LECTURE_PHOTOS),
+                                               ("/api/field-visits", "_visit", VISIT_PHOTOS)])
+def test_visits_and_lectures_need_four_photos_and_a_pdf_report(client, world, url, body, photos):
+    make = globals()[body]
+    # every one of the four photos is needed
+    r = _save(client, url, make(world, **{photos[2]: None}))
+    assert r.status_code == 400 and "photo 3" in r.get_json()["message"]
+    # the report is optional - but a PDF when there is one
+    r = _save(client, url, make(world, report_url="uploads/x/report.docx"))
+    assert r.status_code == 400 and "PDF" in r.get_json()["message"]
+    r = _save(client, url, make(world, report_url="uploads/x/Visit Report.pdf"))
+    assert r.status_code == 201, r.get_json()
+    saved = r.get_json()
+    assert all(saved[f] for f in photos) and saved["report_url"].endswith(".pdf")
 
 
 def test_guest_lecture_with_only_the_simple_fields(client, world):
@@ -901,7 +994,8 @@ def _visit(world, **extra):
             "organisation_name": "Tata Motors", "address": "Pimpri, Pune",
             "activities": "Assembly line walkthrough", "purpose": "See industrial automation",
             "contact_person": "R. Kulkarni", "contact_designation": "HR Manager",
-            "contact_email": "hr@example.com", "contact_mobile": "9811111111", **extra}
+            "contact_email": "hr@example.com", "contact_mobile": "9811111111",
+            **{f: f"uploads/x/visit-{i}.jpg" for i, f in enumerate(VISIT_PHOTOS, 1)}, **extra}
 
 
 def test_field_visit_with_only_the_simple_fields(client, world):
@@ -1351,16 +1445,23 @@ def test_profile_formats_are_checked(client, world, field, value):
     assert r.status_code == 400
 
 
-def test_bank_section(client, world):
+def test_bank_section_is_shown_to_the_trainer_but_kept_by_their_admin(client, world):
+    tr = db.session.query(Trainer).filter_by(full_name="VT").one()
+    tr.beneficiary_name, tr.bank_name, tr.ifsc_code = "VT", "Demo Bank", "DEMO0123456"
+    tr.account_number, tr.pan_number, tr.gross_salary, tr.deduction_epf = "123456789012", "ABCDE1234F", 25000, 1800
+    db.session.commit()
     h = _login(client)
-    bank = {"beneficiary_name": "VT", "bank_name": "Demo Bank", "account_number": "123456789012",
-            "ifsc_code": "demo0123456", "gross_salary": 25000, "deduction_epf": 1800, "pan_number": "abcde1234f"}
-    assert client.patch("/api/profile", headers=h, json={**bank, "ifsc_code": "BAD"}).status_code == 400
-    r = client.patch("/api/profile", headers=h, json=bank)
-    assert r.status_code == 200, r.get_json()
-    body = r.get_json()
+    body = client.get("/api/profile", headers=h).get_json()
     assert (body["account_number"], body["pan_number"], body["ifsc_code"]) == ("XXXXXXXX9012", "XXXXXX234F", "DEMO0123456")
-    assert body["net_salary"] == 23200
+    assert body["net_salary"] == 23200 and body["read_only_sections"] == ["bank"]
+    # the trainer can't change any of it
+    for change in ({"bank_name": "Other Bank"}, {"account_number": "999988887777"}, {"gross_salary": 90000}):
+        r = client.patch("/api/profile", headers=h, json=change)
+        assert r.status_code == 400 and "kept by your admin" in r.get_json()["message"], change
+    # ... while other sections still save (the bank details sent back as shown are no change)
+    r = client.patch("/api/profile", headers=h, json={**GENERAL, "bank_name": "Demo Bank", "account_number": "XXXXXXXX9012"})
+    assert r.status_code == 200, r.get_json()
+    assert client.get("/api/profile", headers=h).get_json()["bank_name"] == "Demo Bank"
 
 
 def test_profile_lists_and_total_experience(client, world):
@@ -1524,8 +1625,8 @@ def test_notifications_reach_the_right_people(client, world, principal, principa
     cats = [n["category"] for n in _mine(client, "oa@x.com")["data"]]
     assert "equipment" in cats and "maintenance" in cats
     client.post(f"/api/workflow/equipment-maintenance/{m['id']}/status", headers=_as(client, "oa@x.com"),
-                json={"maintenance_status": "Under Repair"})
-    assert any(n["category"] == "maintenance" and "Under Repair" in n["title"] for n in _mine(client, "vt@x.com")["data"])
+                json={"maintenance_status": "Under Progress"})
+    assert any(n["category"] == "maintenance" and "Under Progress" in n["title"] for n in _mine(client, "vt@x.com")["data"])
 
     # reading them
     box = _mine(client, "oa@x.com")
@@ -1808,3 +1909,110 @@ def test_year_filter_offers_recent_years(client, world):
     years = client.get("/api/meta/bootstrap", headers=_login(client)).get_json()["options"]["year_labels"]
     assert "2025-26" in years and len(years) >= 5
     assert years == sorted(years, reverse=True)
+
+
+def test_trainer_uploads_their_monthly_attendance_mapp(client, world, principal):
+    """Upload MAPP: a PDF for an academic year and a month - not a month still
+    to come; each trainer sees only their own."""
+    from app.models.masters import AcademicYear
+    today = date.today()
+    first = today.year if today.month >= 4 else today.year - 1          # this academic year: April to March
+    this_year, next_year = f"{first}-{(first + 1) % 100:02d}", f"{first + 1}-{(first + 2) % 100:02d}"
+    db.session.add_all([AcademicYear(organisation_id=world["org"].id, label=this_year, start_date=date(first, 4, 1)),
+                        AcademicYear(organisation_id=world["org"].id, label=next_year, start_date=date(first + 1, 4, 1))])
+    other = User(organisation_id=world["org"].id, full_name="VT Two", email="vt2@x.com", role="VT",
+                 school_id=world["school"].id)
+    other.set_password("Password@123")
+    db.session.add(other)
+    db.session.flush()
+    other.labs.append(world["lab"])                                  # same lab, a colleague
+    db.session.add(Trainer(organisation_id=world["org"].id, full_name="VT Two", school_id=world["school"].id,
+                           lab_id=world["lab"].id, job_role_id=world["jr_low"].id, user_id=other.id))
+    db.session.commit()
+
+    h = _as(client, "vt@x.com")
+    month = str(today.month)
+    good = {"academic_year": this_year, "month": month, "document_url": "uploads/x/MAPP.pdf"}
+    assert client.post("/api/mapp", headers=h, json={**good, "document_url": "uploads/x/mapp.jpg"}).status_code == 400
+    r = client.post("/api/mapp", headers=h, json={**good, "document_url": None})
+    assert r.status_code == 400 and "The PDF" in r.get_json()["message"]
+    # this academic year only
+    r = client.post("/api/mapp", headers=h, json={**good, "academic_year": next_year, "month": "4"})
+    assert r.status_code == 400 and "this academic year" in r.get_json()["message"]
+    if today.month != 3:            # a month of this year still to come (March has none after it)
+        r = client.post("/api/mapp", headers=h, json={**good, "month": str(today.month % 12 + 1)})
+        assert r.status_code == 400 and "hasn't started" in r.get_json()["message"]
+    if today.month != 4:            # an earlier month of this year (April has none before it)
+        r = client.post("/api/mapp", headers=h, json={**good, "month": str((today.month - 2) % 12 + 1)})
+        assert r.status_code == 201, r.get_json()
+    r = client.post("/api/mapp", headers=h, json=good)                               # this month: fine
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["month_label"] == f"{today:%B} {today.year}"
+
+    # the list, by year and month - their own only
+    mine = client.get(f"/api/mapp?academic_year={this_year}&month={month}", headers=h).get_json()["data"]
+    assert [x["id"] for x in mine] == [r.get_json()["id"]] and mine[0]["uploaded_on"]
+    assert client.get(f"/api/mapp?month={today.month % 12 + 1}", headers=h).get_json()["data"] == []
+    assert client.get("/api/mapp", headers=_as(client, "vt2@x.com")).get_json()["data"] == []
+    assert client.get(f"/api/mapp/{mine[0]['id']}", headers=_as(client, "vt2@x.com")).status_code in (403, 404)
+    # nobody changes or removes one, and it's the trainer's page alone
+    assert client.patch(f"/api/mapp/{mine[0]['id']}", headers=h, json={"month": "8"}).status_code == 403
+    assert client.get("/api/mapp", headers=_as(client, "pr@x.com")).status_code == 403
+
+
+def test_principal_verifies_many_attendance_records_at_once(client, world, principal):
+    """Tick several, Verify All: each checked like a single verify; ones that
+    can't be are skipped; the trainer hears once for all of theirs."""
+    _, rid = _endorsable(client, world, "daily")
+    first = db.session.get(DailyAttendance, rid)
+    more = [DailyAttendance(organisation_id=first.organisation_id, school_id=first.school_id, lab_id=first.lab_id,
+                            trainer_id=first.trainer_id, academic_year=first.academic_year,
+                            attendance_time=first.attendance_time, created_by=first.created_by,
+                            date=first.date - timedelta(days=d), endorsement_status=status)
+            for d, status in ((1, "submitted"), (2, "submitted"), (3, "endorsed"))]
+    db.session.add_all(more)
+    db.session.commit()
+    ids = [rid] + [str(m.id) for m in more] + ["not-an-id"]
+
+    url = "/api/workflow/attendance/endorse-bulk"
+    assert client.post(url, headers=_as(client, "vt@x.com"), json={"ids": ids}).status_code == 403   # principals only
+    h = _as(client, "pr@x.com")
+    assert client.post(url, headers=h, json={"ids": []}).status_code == 400
+    r = client.post(url, headers=h, json={"ids": ids})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json() == {"verified": 3, "skipped": 2}           # already verified + not an id
+    assert {a.endorsement_status for a in db.session.query(DailyAttendance)} == {"endorsed"}
+    told = [n for n in _mine(client, "vt@x.com")["data"] if n["category"] == "attendance"]
+    assert len(told) == 1 and told[0]["title"] == "3 attendance records verified"
+    # nothing left to verify the second time
+    assert client.post(url, headers=_as(client, "pr@x.com"), json={"ids": ids}).get_json() == {"verified": 0, "skipped": 5}
+
+    # class attendance the same way
+    _as(client, "vt@x.com")
+    _, cid = _endorsable(client, world, "class")
+    r = client.post("/api/workflow/class-attendance/endorse-bulk", headers=_as(client, "pr@x.com"), json={"ids": [cid]})
+    assert r.get_json() == {"verified": 1, "skipped": 0}
+
+
+def test_trainers_issues_are_the_org_admins_not_the_district_managers(client, world):
+    """A district manager has no VT Issues: not listed, not told of new ones,
+    can't resolve them - the org admin does. (Principals' issues are still theirs.)"""
+    from app.models.geography import District
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    dm = User(organisation_id=world["org"].id, full_name="DM", email="dm@x.com", role="DM")
+    for u in (oa, dm):
+        u.set_password("Password@123")
+    dm.districts.append(db.session.get(District, world["school"].district_id))
+    db.session.add_all([oa, dm])
+    db.session.commit()
+    _as(client, "vt@x.com")
+    issue = _save(client, "/api/issues", _issue(world)).get_json()
+    assert any(f"focus={issue['id']}" in n["link"] for n in _mine(client, "oa@x.com")["data"])
+    assert not any("/app/issues" in n["link"] for n in _mine(client, "dm@x.com")["data"])
+    h = _as(client, "dm@x.com")
+    assert client.get("/api/issues", headers=h).status_code == 403
+    assert "issues" not in client.get("/api/meta/bootstrap", headers=h).get_json()["resources"]
+    done = {"workflow_status": "resolved", "resolution_note": "Fixed"}
+    url = f"/api/workflow/issues/{issue['id']}/transition"
+    assert client.post(url, headers=h, json=done).status_code == 403
+    assert client.post(url, headers=_as(client, "oa@x.com"), json=done).status_code == 200

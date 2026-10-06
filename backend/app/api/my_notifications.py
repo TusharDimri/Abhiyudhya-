@@ -11,8 +11,15 @@ bp = Blueprint("my_notifications", __name__, url_prefix="/api/me/notifications")
 
 
 def _mine(user):
-    return db.session.query(Notification).filter(
+    q = db.session.query(Notification).filter(
         Notification.user_id == user.id, Notification.is_deleted.is_(False))
+    # nothing pointing at a list this role can't open (e.g. a district
+    # manager's older notices about trainers' issues)
+    from app.api.registry import REGISTRY
+    for name, cfg in REGISTRY.items():
+        if user.role not in (cfg.view_roles or []):
+            q = q.filter(~Notification.link.like(f"/app/{name}?%"), Notification.link != f"/app/{name}")
+    return q
 
 
 def _row(n, user):

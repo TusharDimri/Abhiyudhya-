@@ -132,10 +132,8 @@ LECTURER_WORK_STATUS = [
 ]
 EQUIPMENT_STATUS = _opts("working", "partially working", "not working")
 # the life of a repair: reported -> diagnosed -> being fixed -> an outcome
-MAINTENANCE_STATUS = _opts(
-    "Reported", "Under Inspection", "Awaiting Spare Parts", "Sent for Repair",
-    "Under Repair", "Repaired", "Not Repairable", "Replaced", "Resolved",
-)
+# a trainer reports it (always "Reported"); an admin moves it on
+MAINTENANCE_STATUS = _opts("Reported", "Under Progress", "Resolved")
 RAW_MATERIAL_AVAILABILITY = [
     {"value": "available", "label": "Available"},
     {"value": "not available", "label": "Not available"},
@@ -147,6 +145,7 @@ GENDERS = _opts("Male", "Female", "Other")
 MARITAL_STATUS = _opts("Single", "Married", "Divorced", "Widowed")
 BLOOD_GROUPS = _opts("A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-")
 SCHOOL_TYPES = _opts("Boys", "Girls", "Co-education")
+SCHOOL_BOARDS = _opts("CBSE", "RamNagar", "PM Shri", "UK Board")
 APPOINTMENT_NATURE = _opts("Contractual", "Adhoc", "Regular", "Guest")
 QUALIFICATION_LEVELS = _opts("10th", "12th", "Diploma", "Graduation", "Masters/Post-Graduation", "Doctorate", "Other")
 COURSE_TYPES = _opts("Full Time", "Part Time", "Distance")
@@ -161,7 +160,7 @@ REGISTRATION_CLASSES = [{"value": g, "label": f"Class {g}"} for g in ("9", "11")
 VERIFICATION_STATUS = _opts("pending", "verified", "rejected")
 ENROLMENT_STATUS = _opts("Studying", "Completed", "Dropped Out", "Transferred Out")
 TRAINER_STATUS = _opts("active", "substitute", "exited")
-ASSESSMENT_TYPES = _opts("internal", "continuous", "year-end board")
+ASSESSMENT_TYPES = _opts("Monthly", "Quarterly", "Half Yearly", "Yearly")
 
 # Everything the frontend receives in /meta/bootstrap under "enums".
 ENUMS = {
@@ -186,6 +185,7 @@ ENUMS = {
     "marital_status": MARITAL_STATUS,
     "blood_groups": BLOOD_GROUPS,
     "school_types": SCHOOL_TYPES,
+    "school_boards": SCHOOL_BOARDS,
     "appointment_nature": APPOINTMENT_NATURE,
     "qualification_levels": QUALIFICATION_LEVELS,
     "course_types": COURSE_TYPES,

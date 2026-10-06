@@ -21,6 +21,7 @@ import TcIssueDialog from "./TcIssueDialog";
 import ResolveDialog from "./ResolveDialog";
 import RecordView from "./RecordView";
 import LoginCreated from "./LoginCreated";
+import BulkVerify from "./BulkVerify";
 import { DistanceLegend, EndorsementLegend } from "./DistanceDot";
 import { visibleFilters, visibleColumns } from "../lib/scope";
 import { EMPTY_HINTS } from "../lib/roleUi";
@@ -264,6 +265,22 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     }
   };
 
+  // the Principal ticks attendance records and verifies them together; the
+  // ticks are for what's on screen, so they clear when the list changes
+  const bulkVerify = user?.role === "PR" && rowActions.includes("endorse");
+  const [picked, setPicked] = useState(() => new Set());
+  useEffect(() => { setPicked(new Set()); }, [apiParams]);
+  const select = bulkVerify ? {
+    can: (r) => r.endorsement_status !== "endorsed" && !r.past_year,
+    ids: picked,
+    toggle: (id) => setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    }),
+    setAll: (ids) => setPicked(new Set(ids)),
+  } : null;
+
   if (!mod) return <div className="card card-pad">Unknown module: {resource}</div>;
 
   const onSort = (key) => {
@@ -293,14 +310,14 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         <div className="page-head">
           <div>
             <div className="crumb">{groupOf(mod, user?.role)}</div>
-            <h1><span className="page-ico"><Icon name={resource} size={20} /></span>{labelOf(mod, user?.role)}</h1>
+            <h1><span className="page-ico"><Icon name={resource} size={20} /></span>{mod.pageTitle || labelOf(mod, user?.role)}</h1>
           </div>
           <div className="page-actions">
             {!readOnly && (mod.pageActions || []).filter((a) => a.roles.includes(user?.role)).map((a) => (
               <button key={a.key} className="btn btn-ghost" onClick={() => setPageAction(a.key)}>{a.label}</button>
             ))}
             {canWrite && !hideCreate && (
-              <button className="btn btn-accent" onClick={() => setEditing({})}><Plus size={16} /> New {mod.singular}</button>
+              <button className="btn btn-accent" onClick={() => setEditing({})}><Plus size={16} /> {mod.addLabel || `New ${mod.singular}`}</button>
             )}
           </div>
         </div>
@@ -374,19 +391,25 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         onEdit={openEdit}
         onRowAction={(action, r) => setWorkflow({ action, row: r })}
         emptyHint={EMPTY_HINTS[resource]?.[user?.role]}
-        emptyAction={canWrite && !hideCreate ? `New ${mod.singular}` : null}
+        emptyAction={canWrite && !hideCreate ? (mod.addLabel || `New ${mod.singular}`) : null}
         onEmptyAction={() => setEditing({})}
+        select={select}
       />
+
+      {bulkVerify && rows.some((r) => select.can(r)) && (
+        <BulkVerify resource={resource} ids={picked} onClear={() => setPicked(new Set())}
+          onDone={() => { setPicked(new Set()); qc.invalidateQueries({ queryKey: ["list", resource] }); }} />
+      )}
 
       <div className="pager">
         <span className="info">
           {list.isFetching ? "Loading…" : `Showing ${from}–${to} of ${pg.total}`}
         </span>
-        <button className="btn btn-ghost btn-sm" disabled={pg.page <= 1} onClick={() => patch({ page: 1 }, false)}><ChevronsLeft size={15} /> First</button>
-        <button className="btn btn-ghost btn-sm" disabled={pg.page <= 1} onClick={() => patch({ page: pg.page - 1 }, false)}><ChevronLeft size={15} /> Prev</button>
+        <button className="btn btn-ghost btn-sm" aria-label="First page" disabled={pg.page <= 1} onClick={() => patch({ page: 1 }, false)}><ChevronsLeft size={15} /><span className="pager-word"> First</span></button>
+        <button className="btn btn-ghost btn-sm" aria-label="Previous page" disabled={pg.page <= 1} onClick={() => patch({ page: pg.page - 1 }, false)}><ChevronLeft size={15} /><span className="pager-word"> Prev</span></button>
         <span className="page-num">Page {pg.page} / {pg.pages || 1}</span>
-        <button className="btn btn-ghost btn-sm" disabled={pg.page >= (pg.pages || 1)} onClick={() => patch({ page: pg.page + 1 }, false)}>Next <ChevronRight size={15} /></button>
-        <button className="btn btn-ghost btn-sm" disabled={pg.page >= (pg.pages || 1)} onClick={() => patch({ page: pg.pages }, false)}>Last <ChevronsRight size={15} /></button>
+        <button className="btn btn-ghost btn-sm" aria-label="Next page" disabled={pg.page >= (pg.pages || 1)} onClick={() => patch({ page: pg.page + 1 }, false)}><span className="pager-word">Next </span><ChevronRight size={15} /></button>
+        <button className="btn btn-ghost btn-sm" aria-label="Last page" disabled={pg.page >= (pg.pages || 1)} onClick={() => patch({ page: pg.pages }, false)}><span className="pager-word">Last </span><ChevronsRight size={15} /></button>
       </div>
       </>)}
 

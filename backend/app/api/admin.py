@@ -102,6 +102,7 @@ ENTITY_NAMES = {
     "principal_profile": "principal profile", "academic_year": "academic year", "sector": "sector",
     "job_role": "job role", "social_category": "social category", "assessment": "assessment",
     "ojt_placement": "OJT / placement", "notification": "notification",
+    "monthly_attendance_report": "monthly attendance (MAPP)",
 }
 FIELD_NAMES = {
     "dob": "Date of birth", "workflow_status": "Status", "endorsement_status": "Verification",

@@ -24,6 +24,8 @@ export const CARD_LINKS = {
   issues_resolved: { to: "/app/issues", params: { workflow_status: "resolved" } },
   pending_endorsement: { to: "/app/attendance", params: { endorsement_status: "submitted" } },
   my_open_issues: { to: "/app/principal-issues", params: { workflow_status: "open" } },
+  pr_issues_action: { to: "/app/principal-issues", params: { workflow_status: "open" } },
+  pr_issues_resolved: { to: "/app/principal-issues", params: { workflow_status: "resolved" } },
   class_pending_endorsement: { to: "/app/class-attendance", params: { endorsement_status: "submitted" } },
   endorsed: { to: "/app/attendance", params: { endorsement_status: "endorsed" } },
   diaries: { to: "/app/diaries" },
@@ -67,7 +69,7 @@ export const QUICK_ACTIONS = {
     { label: "Users & access", icon: "users", to: "/app/admin/users" },
   ],
   DM: [
-    { label: "Issues needing action", icon: "issues", to: "/app/issues?workflow_status=open" },
+    { label: "Principal issues needing action", icon: "principal-issues", to: "/app/principal-issues?workflow_status=open" },
     { label: "Maintenance needing action", icon: "equipment-maintenance", to: "/app/equipment-maintenance?maintenance_status=Reported" },
     { label: "Schools in my district", icon: "schools", to: "/app/schools" },
   ],

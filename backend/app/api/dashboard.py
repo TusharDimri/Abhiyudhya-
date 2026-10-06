@@ -104,13 +104,16 @@ def summary():
         "placements": lambda: {"key": "placements", "label": "Students Placed", "value": _status_count(OJTPlacement, user, "placement_placed", True), "icon": "briefcase"},
         "issues_resolved": lambda: {"key": "issues_resolved", "label": "Issues Resolved", "value": _status_count(VTIssue, user, "workflow_status", "resolved"), "icon": "check"},
         "pending_issues_action": lambda: {"key": "pending_issues_action", "label": "Issues Needing Action", "value": _status_count(VTIssue, user, "workflow_status", "open"), "icon": "alert"},
+        # a district manager's: principals' issues (trainers' issues are the org admin's)
+        "pr_issues_action": lambda: {"key": "pr_issues_action", "label": "Principal Issues Needing Action", "value": _status_count(PrincipalIssue, user, "workflow_status", "open"), "icon": "alert"},
+        "pr_issues_resolved": lambda: {"key": "pr_issues_resolved", "label": "Principal Issues Resolved", "value": _status_count(PrincipalIssue, user, "workflow_status", "resolved"), "icon": "check"},
     }
 
     # relevant card sets per role (spec Part 5.20 - role-scoped dashboards)
     ROLE_CARDS = {
         "SA": ["schools", "labs", "trainers", "students", "attendance", "guest_lectures", "field_visits", "open_issues", "endorsed", "placements"],
         "OA": ["schools", "labs", "trainers", "students", "pending_verification", "attendance", "guest_lectures", "field_visits", "open_issues", "placements"],
-        "DM": ["schools", "labs", "trainers", "students", "pending_verification", "attendance", "pending_issues_action", "issues_resolved", "endorsed", "field_visits"],
+        "DM": ["schools", "labs", "trainers", "students", "pending_verification", "attendance", "pr_issues_action", "pr_issues_resolved", "endorsed", "field_visits"],
         "PR": ["pending_endorsement", "class_pending_endorsement", "endorsed", "students", "trainers", "attendance", "guest_lectures", "field_visits", "my_open_issues"],
         "VT": ["students", "pending_verification", "attendance", "pending_endorsement", "guest_lectures", "field_visits", "open_issues"],
     }

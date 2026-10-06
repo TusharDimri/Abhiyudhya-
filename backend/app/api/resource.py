@@ -405,14 +405,14 @@ def _create_login(cfg, obj, user, payload=None):
 
 
 def _for_viewing(cfg, data):
-    """One record opened on its own (the View window): a link for each photo
-    and the name of each student in its lists, not just their ids."""
+    """One record opened on its own (the View window): a link for each stored
+    file (photos, a report) and the name of each student in its lists, not just their ids."""
     from app.models.student import Student
     from app.services import storage
 
-    for key in ("photo_url", "picture_url", "tc_url"):
+    for key in [k for k in data if k.endswith("_url")]:    # photos, the report, the TC ...
         path = data.get(key)
-        if path:
+        if path and isinstance(path, str):
             try:
                 data[key.replace("_url", "_src")] = path if str(path).startswith("http") else storage.presign_download(path)
             except Exception:  # storage not set up locally: just no picture

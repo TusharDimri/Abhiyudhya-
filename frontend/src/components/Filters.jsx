@@ -1,6 +1,7 @@
 /* URL-driven filter bar. Filter columns come from the backend (per-resource
    whitelist via bootstrap); controls are derived from the module's own field
    config so we never duplicate option lists. */
+import { useEffect, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import api from "../lib/api";
@@ -140,7 +141,22 @@ function controlFor(col, fields, boot, asyncOptions, values) {
   return { type: "text", label: field?.label || humanize(col), placeholder: `Filter ${humanize(col)}…` };
 }
 
+// a phone's width: the filters sit side by side there, so each says less
+const NARROW = "(max-width: 640px)";
+function useNarrow() {
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(NARROW).matches);
+  useEffect(() => {
+    const mq = window.matchMedia?.(NARROW);
+    if (!mq) return undefined;
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return narrow;
+}
+
 export default function Filters({ filters, fields, boot, values, onChange, onClear, aside, schoolId }) {
+  const narrow = useNarrow();
   const resourceCols = (filters || []).filter((c) => RESOURCE_FILTERS[c]);
 
   const results = useQueries({
@@ -166,6 +182,8 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
     <div className="filterbar">
       <div className="filterbar-row">
         <span className="filterbar-label">Filters</span>
+        {/* the controls together: one line on a phone (up to three a row) */}
+        <div className="filterbar-ctls">
         {filters.map((col) => {
           const ctl = controlFor(col, fields, boot, asyncOptions, values);
           // with one school picked, its own labs / trainers only
@@ -174,7 +192,7 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
           if (ctl.type === "select") {
             return (
               <select key={col} className={`select filter-ctl ${val ? "on" : ""}`} value={val} onChange={(e) => onChange(col, e.target.value)}>
-                <option value="">{filterLabel(ctl.label)}: All</option>
+                <option value="">{narrow ? filterLabel(ctl.label) : `${filterLabel(ctl.label)}: All`}</option>
                 {ctl.options.map((o) => <option key={o.value} value={o.value}>{optionText(o.label)}</option>)}
                 {/* a value set from elsewhere (e.g. a target tile) that the list doesn't offer */}
                 {val && !ctl.options.some((o) => String(o.value) === String(val)) && <option value={val}>{val}</option>}
@@ -192,6 +210,7 @@ export default function Filters({ filters, fields, boot, values, onChange, onCle
               placeholder={ctl.placeholder || ctl.label} value={val} onChange={(e) => onChange(col, e.target.value)} />
           );
         })}
+        </div>
         {active.length > 0 && (
           <button className="btn btn-ghost btn-sm" onClick={onClear}>Clear all</button>
         )}

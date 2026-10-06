@@ -1,7 +1,8 @@
 /* An admin resolves what was raised: the org admin (or district manager) a
    trainer's or a principal's issue, or a maintenance log entry; the super
    admin an org admin's own issue. What was raised is shown (filled in,
-   nothing to type); they write the resolution and set Open / Resolved.
+   nothing to type); they write the resolution and set the status (an
+   issue: Open / Resolved; maintenance: Reported / Under Progress / Resolved).
    Resolving it tells whoever raised it. */
 import { useState } from "react";
 import { Check, X } from "lucide-react";
@@ -35,17 +36,22 @@ export default function ResolveDialog({ resource, row, onClose, onDone }) {
   const { push } = useToast();
   const maintenance = resource === "equipment-maintenance";
   const wasResolved = maintenance ? row.maintenance_status === "Resolved" : row.workflow_status === "resolved";
-  const [status, setStatus] = useState(wasResolved ? "open" : "resolved");
+  // what the status can be set to: [value, label]
+  const choices = maintenance
+    ? [["Reported", "Reported"], ["Under Progress", "Under Progress"], ["resolved", "Resolved"]]
+    : [["open", "Open"], ["resolved", "Resolved"]];
+  const [status, setStatus] = useState(wasResolved ? (maintenance ? "Under Progress" : "open") : "resolved");
   const [resolution, setResolution] = useState((maintenance ? row.action : row.resolution_note) || "");
   const needsText = status === "resolved";
 
   const save = useMutation({
     mutationFn: async () => (maintenance
       ? api.post(`/workflow/equipment-maintenance/${row.id}/status`, {
-          maintenance_status: status === "resolved" ? "Resolved" : "Open", resolution })
+          maintenance_status: status === "resolved" ? "Resolved" : status, resolution })
       : api.post(`/workflow/${resource}/${row.id}/transition`, { workflow_status: status, resolution_note: resolution })),
     onSuccess: () => {
-      push(status === "resolved" ? "Resolved - whoever raised it has been told" : "Marked as open", "success");
+      push(status === "resolved" ? "Resolved - whoever raised it has been told"
+        : `Marked as ${choices.find(([v]) => v === status)?.[1] || status}`, "success");
       onDone();
     },
     onError: (e) => push(apiError(e), "error"),
@@ -83,8 +89,7 @@ export default function ResolveDialog({ resource, row, onClose, onDone }) {
           <div className="field">
             <label>Status <span className="req">*</span></label>
             <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="open">Open</option>
-              <option value="resolved">Resolved</option>
+              {choices.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
             {status === "resolved" && (
               <span className="hint">

@@ -1,4 +1,5 @@
-import { useLocationFix } from "../lib/location";
+import { useLocationFix, locationErrorMessage } from "../lib/location";
+import { useToast } from "../lib/toast";
 
 // "3 min ago" for the tooltip
 const ago = (at) => {
@@ -10,6 +11,7 @@ const ago = (at) => {
    location, then settles. Clicking always takes a new reading. */
 export default function LocationButton() {
   const loc = useLocationFix();
+  const { push } = useToast();
   if (!loc) return null;
   const { fix, fresh, status, error, detect } = loc;
 
@@ -34,9 +36,12 @@ export default function LocationButton() {
     <button
       type="button"
       className={`loc-btn loc-${state}`}
-      onClick={() => detect().catch(() => {})}
+      // a phone has no hover for the tooltip - say what went wrong out loud
+      onClick={() => detect().catch((err) => push(err?.response ? "Couldn't confirm your location with the server. Check your connection and try again."
+        : locationErrorMessage(err), "error"))}
       disabled={state === "busy"}
       title={title}
+      aria-label={label}
       aria-live="polite"
     >
       <span className="loc-dot" aria-hidden="true" />

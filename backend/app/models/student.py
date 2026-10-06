@@ -97,7 +97,7 @@ class Assessment(BaseModel):
     class_grade = db.Column(db.String(5))
     job_role_id = db.Column(GUID(), db.ForeignKey("job_role.id"))
     nsqf_level = db.Column(db.Integer)
-    assessment_type = db.Column(db.String(30))  # internal/continuous/year-end board
+    assessment_type = db.Column(db.String(30))  # Monthly / Quarterly / Half Yearly / Yearly
     name = db.Column(db.String(160))
     date = db.Column(db.Date)
     max_marks = db.Column(db.Float)

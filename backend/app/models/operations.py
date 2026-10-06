@@ -159,6 +159,20 @@ class PrincipalIssue(BaseModel):
     resolved_on = db.Column(db.DateTime)
 
 
+class MonthlyAttendanceReport(BaseModel):
+    """MAPP - Maasik Anusaran Praman Patra: a trainer's whole month of
+    attendance, uploaded as one PDF for an academic year and month. A trainer
+    sees only their own (rbac/scope.py: vt_own_only)."""
+    __tablename__ = "monthly_attendance_report"
+    vt_own_only = True
+    organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
+    school_id = db.Column(GUID(), db.ForeignKey("school.id"), index=True)
+    trainer_id = db.Column(GUID(), db.ForeignKey("trainer.id"), nullable=False, index=True)
+    academic_year = db.Column(db.String(20), nullable=False, index=True)
+    month = db.Column(db.Integer, nullable=False, index=True)    # 1-12
+    document_url = db.Column(db.String(500), nullable=False)     # the PDF
+
+
 class OrgIssue(BaseModel):
     """An issue an org admin raises ("My Issues") - about their organisation,
     not one school. The super admin sees them."""
@@ -215,7 +229,11 @@ class FieldVisit(CapturesLocation, BaseModel):
     organisation_name = db.Column(db.String(200))
     address = db.Column(db.Text)
     distance_km = db.Column(db.Float)
-    picture_url = db.Column(db.String(500))
+    picture_url = db.Column(db.String(500))       # photo 1 of the four
+    picture_2_url = db.Column(db.String(500))
+    picture_3_url = db.Column(db.String(500))
+    picture_4_url = db.Column(db.String(500))
+    report_url = db.Column(db.String(500))        # the visit's report (PDF), optional
     contact_person = db.Column(db.String(120))
     contact_mobile = db.Column(db.String(30))
     contact_email = db.Column(db.String(120))
@@ -256,7 +274,11 @@ class GuestLecture(CapturesLocation, BaseModel):
     units = db.Column(db.Text)
     sessions = db.Column(db.Text)
     methodology = db.Column(db.String(60))
-    photo_url = db.Column(db.String(500))
+    photo_url = db.Column(db.String(500))         # photo 1 of the four
+    photo_2_url = db.Column(db.String(500))
+    photo_3_url = db.Column(db.String(500))
+    photo_4_url = db.Column(db.String(500))
+    report_url = db.Column(db.String(500))        # the lecture's report (PDF), optional
     lecturer_name = db.Column(db.String(120))
     lecturer_qualification = db.Column(db.String(200))
     lecturer_phone = db.Column(db.String(30))
@@ -311,5 +333,5 @@ class EquipmentMaintenance(BaseModel):
     cost_incurred = db.Column(db.Float)
     downtime_hours = db.Column(db.Float)
     resolved_by = db.Column(db.String(120))
-    maintenance_status = db.Column(db.String(30), index=True)  # enums.MAINTENANCE_STATUS
+    maintenance_status = db.Column(db.String(30), index=True)  # Reported / Under Progress / Resolved
     note = db.Column(db.Text)

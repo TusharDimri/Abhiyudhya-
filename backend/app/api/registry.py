@@ -242,6 +242,24 @@ def _validate_equipment(instance, user, is_create=False):
     return None
 
 
+VISIT_PHOTOS = ("picture_url", "picture_2_url", "picture_3_url", "picture_4_url")
+LECTURE_PHOTOS = ("photo_url", "photo_2_url", "photo_3_url", "photo_4_url")
+
+
+def _photos_and_report_error(instance, photos, what, is_create):
+    """A field visit or guest lecture is recorded with all four photos (asked
+    for when it's added; older records may have one) and, if there is one, a
+    report - a PDF."""
+    if is_create:
+        missing = [str(i + 1) for i, f in enumerate(photos) if not (getattr(instance, f) or "").strip()]
+        if missing:
+            return f"Add all 4 photos of the {what} (missing: photo {', '.join(missing)})."
+    report = (instance.report_url or "").strip()
+    if report and not report.split("?")[0].lower().endswith(".pdf"):
+        return "The report must be a PDF file."
+    return None
+
+
 def _validate_guest_lecture(instance, user, is_create=False):
     from app.extensions import db
 
@@ -255,7 +273,8 @@ def _validate_guest_lecture(instance, user, is_create=False):
         return "Choose the class."
     if not instance.reporting_date:
         return "Enter the date."
-    err = _future_date_error(instance.reporting_date)
+    err = _future_date_error(instance.reporting_date) or _photos_and_report_error(
+        instance, LECTURE_PHOTOS, "guest lecture", is_create)
     if err:
         return err
     # the school always follows the lab, and the year always follows the date
@@ -280,7 +299,8 @@ def _validate_field_visit(instance, user, is_create=False):
         return "Choose the class."
     if not instance.reporting_date:
         return "Enter the date."
-    err = _future_date_error(instance.reporting_date)
+    err = _future_date_error(instance.reporting_date) or _photos_and_report_error(
+        instance, VISIT_PHOTOS, "field visit", is_create)
     if err:
         return err
     # the school always follows the lab, and the year always follows the date
@@ -480,7 +500,11 @@ def _validate_maintenance(instance, user, is_create=False):
         return "Choose the equipment."
     if not (instance.issue or "").strip():
         return "Describe the issue."
-    if instance.maintenance_status and instance.maintenance_status not in enums.values("maintenance_status"):
+    if is_create:
+        # a trainer reports it; only an admin moves it on (Under Progress /
+        # Resolved - api/workflow.py maintenance_status), never the form
+        instance.maintenance_status = "Reported"
+    elif instance.maintenance_status not in enums.values("maintenance_status"):
         return "Pick a valid status."
     return _future_date_error(instance.date)
 
@@ -657,15 +681,35 @@ register(ResourceConfig(
     default_sort=("name", "asc"),
 ))
 
+def _validate_school(instance, user, is_create=False):
+    """A school's board is one of the list; its email and phone are real ones
+    (a landline with its STD code, or a mobile)."""
+    import re
+    from app.api import enums
+    if instance.board and instance.board not in enums.values("school_boards"):
+        return "Pick the school's board from the list."
+    if instance.email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", instance.email.strip()):
+        return "Enter a valid email address for the school."
+    if instance.phone:
+        digits = re.sub(r"[\s-]", "", instance.phone)
+        if not re.fullmatch(r"\d{10,11}", digits):
+            return "The school's phone must be 10 digits (or 11 with the STD code's 0)."
+        instance.phone = digits
+    return None
+
+
 register(ResourceConfig(
     name="schools", model=M.School, label="School",
-    required={'name': 'School name', 'udise_code': 'UDISE code', 'district_id': 'District', 'school_type': 'School type', 'address': 'Full address', 'location': 'Location'},
+    required={'name': 'School name', 'udise_code': 'UDISE code', 'district_id': 'District', 'school_type': 'School type',
+              'board': 'Board of school', 'address': 'Full address', 'email': 'Email', 'phone': 'Phone',
+              'location': 'Location'},
+    validate=_validate_school,
     # a school sits in a district - asked before the first save, so a missing
     # one gets a clear message rather than a database error
     prepare=lambda school, user: None if school.district_id else "Choose the school's district.",
     write_roles=[SA, OA, DM],
     writable=["name", "udise_code", "district_id", "block", "principal_id",
-              "school_type", "address", "email", "phone", "status"],
+              "school_type", "board", "address", "email", "phone", "status"],
     search=["name", "udise_code", "block"],
     filters=["district_id", "block", "school_type"],
     sortable=["name", "udise_code", "created_at"], default_sort=("name", "asc"),
@@ -742,7 +786,9 @@ def _link_principal_to_school(instance, user, is_create=False):
 
 register(ResourceConfig(
     name="principals", model=M.Principal, label="Principal / Headmaster",
-    required={'full_name': 'Full name', 'gender': 'Gender', 'mobile': 'Mobile', 'email': 'Email', 'linked_school_id': 'School', 'designation': 'Designation', 'date_of_joining': 'Date of joining'},
+    # the admin adds just who they are and their school (by its UDISE code);
+    # the rest the principal fills in on their own profile page
+    required={'full_name': 'Full name', 'gender': 'Gender', 'mobile': 'Mobile', 'email': 'Email', 'linked_school_id': 'UDISE code'},
     profile_role=PR,
     validate=_link_principal_to_school,
     write_roles=[SA, OA, DM],
@@ -965,6 +1011,97 @@ register(ResourceConfig(
     children=[ChildCollection("student_marks", M.AttendanceStudentMark,
                               "attendance_id", ["student_id", "present"])],
 ))
+MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
+          "September", "October", "November", "December"]
+
+
+def _month_start(org_id, label, month):
+    """The first day of `month` within the academic year `label` (April to
+    March: April-December fall in its first calendar year)."""
+    from datetime import date
+    from app.extensions import db
+    year = db.session.query(M.AcademicYear).filter_by(organisation_id=org_id, label=label, is_deleted=False).first()
+    if year is None:
+        return None
+    first = year.start_date.year if year.start_date else int(str(label)[:4])
+    start_month = year.start_date.month if year.start_date else 4
+    return date(first if month >= start_month else first + 1, month, 1)
+
+
+def _this_academic_year(org_id):
+    """The academic year running today (by its dates; by the April-March
+    calendar when a year has no dates on record)."""
+    from datetime import date
+    from app.services.academic_year import academic_year_for
+    today = date.today()
+    found = academic_year_for(org_id, today)
+    if found:
+        return found
+    first = today.year if today.month >= 4 else today.year - 1
+    return f"{first}-{(first + 1) % 100:02d}"
+
+
+def _prepare_mapp(instance, user):
+    """Uploaded by a trainer, for themselves (and their school)."""
+    from app.extensions import db
+    trainer = db.session.query(M.Trainer).filter(M.Trainer.user_id == user.id, M.Trainer.is_deleted.is_(False)).first()
+    if trainer is None:
+        return "Only a trainer uploads their monthly attendance."
+    instance.trainer_id, instance.school_id = trainer.id, trainer.school_id
+    return None
+
+
+def _validate_mapp(instance, user, is_create=False):
+    from datetime import date
+    if not instance.academic_year:
+        return "Choose the academic year."
+    try:
+        instance.month = int(instance.month)
+    except (TypeError, ValueError):
+        return "Choose the month."
+    if not 1 <= instance.month <= 12:
+        return "Choose the month."
+    # this month or an earlier one - of this academic year only
+    current = _this_academic_year(instance.organisation_id)
+    if instance.academic_year != current:
+        return f"A MAPP can only be uploaded for this academic year ({current})."
+    start = _month_start(instance.organisation_id, instance.academic_year, instance.month)
+    if start is None:
+        return "Choose an academic year from the list."
+    if start > date.today():
+        return f"{MONTHS[instance.month - 1]} {start.year} hasn't started yet."
+    doc = (instance.document_url or "").strip()
+    if not doc:
+        return "Upload the PDF."
+    if not doc.split("?")[0].lower().endswith(".pdf"):
+        return "The upload must be a PDF file."
+    return None
+
+
+def _mapp_display(obj):
+    from app.services import storage
+    start = _month_start(obj.organisation_id, obj.academic_year, obj.month) if obj.month else None
+    try:
+        src = storage.presign_download(obj.document_url) if obj.document_url else None
+    except Exception:  # storage not set up locally - no link
+        src = None
+    return {"month_label": f"{MONTHS[obj.month - 1]} {start.year}" if start else None,
+            "uploaded_on": obj.created_at.strftime("%d/%m/%Y") if obj.created_at else None,
+            "document_src": src}
+
+
+register(ResourceConfig(
+    # "Upload MAPP" - the trainer's own page, below Daily Attendance
+    name="mapp", model=M.MonthlyAttendanceReport, label="Monthly Attendance (MAPP)",
+    write_roles=[VT], edit_roles=[],
+    writable=["academic_year", "month", "document_url"],
+    required={"academic_year": "Academic year", "month": "Month", "document_url": "The PDF"},
+    filters=["academic_year", "month"],
+    sortable=["created_at"], default_sort=("created_at", "desc"),
+    prepare=_prepare_mapp,
+    validate=_validate_mapp,
+    computed=_mapp_display,
+))
 register(ResourceConfig(
     name="class-attendance", model=M.ClassAttendance, label="Class Attendance",
     on_saved=_saved_attendance("class"),
@@ -1030,7 +1167,7 @@ register(ResourceConfig(
     computed=_vt_issue_display,
     on_saved=_saved_vt_issue,
     extra_filters={"school_id": _school_by_lab},   # ?school_id= (org admins pick a school first)
-    write_roles=[SA, OA, DM, VT],
+    write_roles=[SA, OA, VT],    # (not district managers: trainers' issues are the org admin's)
     writable=["trainer_id", "lab_id", "academic_year", "reporting_date", "reporting_time",
               "details", "workflow_status", "assigned_to", "resolution_note", "status"],
     search=["details"],
@@ -1044,7 +1181,8 @@ register(ResourceConfig(
     write_roles=[SA, OA, DM, VT],
     writable=["lab_id", "job_role_id", "class_grade", "sections", "academic_year",
               "reporting_date", "purpose", "activities", "organisation_name", "address",
-              "picture_url", "contact_person", "contact_mobile", "contact_email",
+              "picture_url", "picture_2_url", "picture_3_url", "picture_4_url", "report_url",
+              "contact_person", "contact_mobile", "contact_email",
               "contact_designation", "status"],
     search=["organisation_name", "address", "purpose"],
     filters=["school_id", "lab_id", "job_role_id", "academic_year", "class_grade", "section"],
@@ -1061,7 +1199,8 @@ register(ResourceConfig(
     on_saved=_saved_guest_lecture,
     write_roles=[SA, OA, DM, VT],
     writable=["lab_id", "job_role_id", "class_grade", "sections", "academic_year",
-              "reporting_date", "topic", "photo_url", "lecturer_name",
+              "reporting_date", "topic", "photo_url", "photo_2_url", "photo_3_url", "photo_4_url",
+              "report_url", "lecturer_name",
               "lecturer_qualification", "lecturer_phone", "lecturer_email",
               "lecturer_experience", "status"],
     search=["topic", "lecturer_name"],
@@ -1091,7 +1230,9 @@ register(ResourceConfig(
     on_saved=_saved_maintenance,
     extra_filters={"school_id": _school_by_equipment},   # ?school_id= (org admins pick a school first)
     write_roles=[SA, OA, DM, VT],
-    writable=["equipment_id", "date", "issue", "maintenance_status", "note", "status"],
+    # (no maintenance_status: it starts as Reported; admins change it through
+    # the Resolve dialog - api/workflow.py)
+    writable=["equipment_id", "date", "issue", "note", "status"],
     search=["issue", "note"], filters=["equipment_id", "maintenance_status"],
     sortable=["date", "created_at"], default_sort=("date", "desc"),
     computed=_maintenance_display,
@@ -1199,9 +1340,10 @@ VIEW_ROLES = {
     "diaries": STAFF,
     "ojt-placements": STAFF,
     "feedback": ALL_ROLES,
-    "issues": [SA, OA, DM, VT],
+    "issues": [SA, OA, VT],         # (not district managers)
     "principal-issues": [SA, OA, DM, PR],
     "org-issues": [SA, OA],
+    "mapp": [VT],
     "notifications": [SA, OA],
 }
 DATE_FIELDS = {

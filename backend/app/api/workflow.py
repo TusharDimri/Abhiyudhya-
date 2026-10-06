@@ -1,4 +1,5 @@
 """Endorsement + issue workflow endpoints - spec Part 5.21 & 3.12."""
+import uuid
 from datetime import datetime
 
 from flask import Blueprint, request, jsonify, abort
@@ -75,6 +76,46 @@ def _endorse(model, uid):
     return jsonify({"id": str(rec.id), "endorsement_status": decision})
 
 
+@bp.post("/<any(attendance, 'class-attendance'):which>/endorse-bulk")
+@login_required
+def endorse_many(which):
+    """The Principal verifies several attendance records at once (the ticked
+    rows of a page). Each gets the same checks as one verified on its own;
+    any that can't be (already verified, a closed year, not their school)
+    are skipped and counted. Each trainer is told once, for all of theirs."""
+    from app.services.academic_year import is_past_year
+    user = current_user()
+    if user.role != Role.PRINCIPAL.value:
+        abort(403, description="Only the Principal can verify attendance")
+    model = DailyAttendance if which == "attendance" else ClassAttendance
+    ids = (request.get_json(silent=True) or {}).get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        abort(400, description="Tick the attendance records to verify.")
+    if len(ids) > 200:
+        abort(400, description="Verify up to 200 records at a time.")
+    done, skipped = [], 0
+    for uid in dict.fromkeys(str(i) for i in ids):      # each once, in order
+        try:
+            rec = db.session.get(model, uuid.UUID(uid))
+        except ValueError:                                # not an id at all
+            rec = None
+        if (rec is None or rec.is_deleted or not can_access_row(rec, user) or is_past_year(rec)
+                or rec.endorsement_status == "endorsed"):
+            skipped += 1
+            continue
+        before = {"endorsement_status": rec.endorsement_status}
+        rec.endorsement_status = "endorsed"
+        rec.endorsed_by = user.id
+        rec.endorsed_on = datetime.utcnow()
+        audit.record(user, "update", model.__tablename__, rec.id, before=before,
+                     after={"endorsement_status": "endorsed"})
+        done.append(rec)
+    from app.services import notify
+    notify.attendance_verified_many(done, user, "daily" if model is DailyAttendance else "class")
+    db.session.commit()
+    return jsonify({"verified": len(done), "skipped": skipped})
+
+
 @bp.post("/attendance/<uid>/endorse")
 @login_required
 def endorse_attendance(uid):
@@ -89,9 +130,9 @@ def endorse_class_attendance(uid):
 
 ISSUE_KINDS = {"issues": ("vt", VTIssue, "vt_issue"), "principal-issues": ("pr", PrincipalIssue, "principal_issue"),
                "org-issues": ("oa", OrgIssue, "org_issue")}
-# who resolves what: a trainer's or a principal's issue - the org admin or the
-# district manager; an org admin's own issue - the super admin
-RESOLVERS = {"vt": (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value),
+# who resolves what: a trainer's issue - the org admin; a principal's issue -
+# the org admin or the district manager; an org admin's own - the super admin
+RESOLVERS = {"vt": (Role.ORG_ADMIN.value,),
              "pr": (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value),
              "oa": (Role.SUPER_ADMIN.value,)}
 
@@ -104,8 +145,9 @@ def transition_issue(which, uid):
     user = current_user()
     kind, model, table = ISSUE_KINDS[which]
     if user.role not in RESOLVERS[kind]:
-        abort(403, description="The super admin resolves org admin issues." if kind == "oa"
-              else "Only the org admin or the district manager resolves issues.")
+        abort(403, description={"oa": "The super admin resolves org admin issues.",
+                                "vt": "The org admin resolves trainers' issues."}.get(
+            kind, "Only the org admin or the district manager resolves issues."))
     rec = db.session.get(model, uid)
     if rec is None or rec.is_deleted:
         abort(404)
@@ -138,7 +180,7 @@ def transition_issue(which, uid):
 @bp.post("/equipment-maintenance/<uid>/status")
 @login_required
 def maintenance_status(uid):
-    """An admin moves a maintenance record along (Reported -> ... -> Repaired);
+    """An admin moves a maintenance record along (Reported -> Under Progress -> Resolved);
     the trainer who logged it is told."""
     from app.api import enums
     from app.models.operations import EquipmentMaintenance, LabEquipment

@@ -100,10 +100,10 @@ EQUIPMENT = [
     ("Headphones (set of 20)", "For typing tutor audio"), ("Server rack", "For the lab server"),
 ]
 MAINTENANCE = [
-    (1, "Two PCs not booting - SMPS failure", "Repaired"), (2, "Projector bulb fused", "Replaced"),
-    (4, "UPS battery backup under 5 minutes", "Awaiting Spare Parts"), (3, "Paper jam and faded prints", "Repaired"),
-    (5, "Router drops connection every hour", "Under Inspection"), (9, "AC not cooling", "Sent for Repair"),
-    (0, "One monitor flickers", "Under Repair"), (10, "Four headphones broken", "Reported"),
+    (1, "Two PCs not booting - SMPS failure", "Resolved"), (2, "Projector bulb fused", "Resolved"),
+    (4, "UPS battery backup under 5 minutes", "Under Progress"), (3, "Paper jam and faded prints", "Resolved"),
+    (5, "Router drops connection every hour", "Under Progress"), (9, "AC not cooling", "Under Progress"),
+    (0, "One monitor flickers", "Under Progress"), (10, "Four headphones broken", "Reported"),
 ]
 
 
@@ -346,8 +346,8 @@ def run_demo_data():
         for s in group:
             if s.verification_status != "verified":
                 continue
-            for name, kind, when, maxm in (("Unit test 1", "internal", date(2026, 7, 20), 25),
-                                           ("Practical assessment 1", "continuous", date(2026, 8, 24), 50)):
+            for name, kind, when, maxm in (("Unit test 1", "Monthly", date(2026, 7, 20), 25),
+                                           ("Practical assessment 1", "Quarterly", date(2026, 8, 24), 50)):
                 got = R.randint(int(maxm * 0.35), maxm)
                 db.session.add(Assessment(organisation_id=org_id, student_id=s.id, academic_year=year_now,
                                           class_grade=cls, job_role_id=role_of[cls], nsqf_level=int(cls) - 8,

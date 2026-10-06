@@ -29,6 +29,10 @@ function readStored() {
 const isFresh = (fix) => !!fix?.sig && Date.now() - fix.at < FRESH_MS;
 
 export function locationErrorMessage(err) {
+  // browsers share location only with secure (https://) pages - e.g. not a
+  // phone opening the dev server by its network address over http://
+  if (typeof window !== "undefined" && window.isSecureContext === false)
+    return "Location only works on a secure (https://) address. Open the app's https:// link to share your location.";
   if (err?.code === 1)
     return "Location access is blocked. Click the icon at the left of the address bar, allow Location, then try again.";
   if (err?.code === 3) return "Finding your location took too long. Try again, near a window if you're indoors.";

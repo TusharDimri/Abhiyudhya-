@@ -51,6 +51,14 @@ def super_admins():
     return _active(db.session.query(User).filter(User.role == "SA")).all()
 
 
+def _issue_resolvers(issue, school, kind):
+    """A principal's issue: the org admins and the district's managers. A
+    trainer's: the org admins only (district managers don't see those)."""
+    if kind == "vt":
+        return org_admins(issue.organisation_id)
+    return resolvers_of(issue.organisation_id, school)
+
+
 def principals_of(school_id):
     if not school_id:
         return []
@@ -192,7 +200,7 @@ def issue_raised(issue, actor, kind):
     """A trainer's (kind='vt') or a principal's (kind='pr') issue was added."""
     school = _school(issue.school_id) if kind == "pr" else _school_of_lab(issue.lab_id)
     who = "principal" if kind == "pr" else "trainer"
-    _send(resolvers_of(issue.organisation_id, school), actor, org_id=issue.organisation_id,
+    _send(_issue_resolvers(issue, school, kind), actor, org_id=issue.organisation_id,
           title=f"New issue from a {who}{_where(school)}",
           body=(issue.details or "")[:300], category="issue",
           link=_link("principal-issues" if kind == "pr" else "issues", school, True, record=issue, act="resolve",
@@ -252,7 +260,7 @@ def issue_status_changed(issue, actor, kind, status):
     if status == "resolved":
         close_resolver_notices(issue, actor, issue.resolution_note or "")
     else:   # opened again: the resolvers hear it's back
-        _send(resolvers_of(issue.organisation_id, school), actor, org_id=issue.organisation_id,
+        _send(_issue_resolvers(issue, school, kind), actor, org_id=issue.organisation_id,
               title=f"Issue{_where(school)} is now {label}",
               body=(issue.details or "")[:300], category="issue",
               link=_link(path, school, True, record=issue, workflow_status=status))
@@ -349,6 +357,25 @@ def attendance_verified(rec, actor, kind):
           title="Attendance verified",
           body=f"Your {what} for {dmy(rec.date)} was verified by the principal.",
           category="attendance", link=_link(path, record=rec, endorsement_status="endorsed"))
+
+
+def attendance_verified_many(recs, actor, kind):
+    """Several verified at once: each trainer hears once, for all of theirs."""
+    by_trainer = {}
+    for rec in recs:
+        by_trainer.setdefault(rec.created_by or rec.trainer_id, []).append(rec)
+    path = "attendance" if kind == "daily" else "class-attendance"
+    for group in by_trainer.values():
+        if len(group) == 1:
+            attendance_verified(group[0], actor, kind)
+            continue
+        first = group[0]
+        what = "daily attendance" if kind == "daily" else "class attendance"
+        dates = ", ".join(dmy(r.date) for r in sorted(group, key=lambda r: r.date))
+        _send(user_by_id(first.created_by) or trainer_user(first.trainer_id), actor, org_id=first.organisation_id,
+              title=f"{len(group)} attendance records verified",
+              body=f"Your {what} for {dates} was verified by the principal."[:300],
+              category="attendance", link=_link(path, endorsement_status="endorsed"))
 
 
 # ------------------------------------------------------------ super admin

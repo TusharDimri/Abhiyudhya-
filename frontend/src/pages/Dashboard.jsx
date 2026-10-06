@@ -17,6 +17,7 @@ const ICONS = {
   guest_lectures: "guest-lectures", field_visits: "field-visits", open_issues: "issues",
   placements: "ojt-placements", my_open_issues: "principal-issues", diaries: "diaries",
   my_employer: "ojt-placements", assessments: "assessments", pending_issues_action: "issues",
+  pr_issues_action: "principal-issues", pr_issues_resolved: "principal-issues",
 };
 const OWN_ICONS = {
   endorsed: CircleCheck, issues_resolved: CircleCheck, ojt_hours: Timer,
@@ -28,8 +29,8 @@ const KpiIcon = ({ k }) => {
 };
 const ACCENT = {
   open_issues: "warn", pending_verification: "warn", pending_endorsement: "warn", class_pending_endorsement: "warn",
-  pending_issues_action: "warn",
-  endorsed: "good", placements: "good", issues_resolved: "good",
+  pending_issues_action: "warn", pr_issues_action: "warn",
+  endorsed: "good", placements: "good", issues_resolved: "good", pr_issues_resolved: "good",
 };
 
 // which charts each role sees (relevant-only, spec Part 5.20)

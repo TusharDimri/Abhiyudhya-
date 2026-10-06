@@ -9,7 +9,7 @@ import { toDMY } from "../lib/dates";
 import { uploadFile } from "../lib/upload";
 import { useAuth } from "../lib/auth";
 import {
-  GENERAL, ADDRESS, BANK, TABLES, PR_GENERAL, PR_SERVICE, PR_TABLES, Control,
+  GENERAL, ADDRESS, BANK, TABLES, PR_GENERAL, PR_SERVICE, PR_POSTING, PR_PRABHARI, PR_TABLES, Control,
 } from "../components/ProfileFields";
 
 /* The trainer's own service record, section by section. Each section is
@@ -22,6 +22,7 @@ function InfoSection({ title, fields, data, section, boot, save, saving, note })
   const [draft, setDraft] = useState(null);
   const required = new Set(data.required?.[section] || []);
   const locked = new Set(data.locked || []);
+  const readOnly = (data.read_only_sections || []).includes(section);   // kept by their admin
   const editing = draft !== null;
   const display = (f) => {
     const v = f.show ? f.show(data) : data[f.name];
@@ -40,9 +41,10 @@ function InfoSection({ title, fields, data, section, boot, save, saving, note })
     <section className="card profile-card">
       <div className="profile-card-head">
         <h3>{title}</h3>
-        {section && !editing && <button className="btn btn-ghost btn-sm" onClick={start}><PencilLine size={14} /> Edit</button>}
+        {section && !editing && !readOnly && <button className="btn btn-ghost btn-sm" onClick={start}><PencilLine size={14} /> Edit</button>}
       </div>
       {note && <p className="muted profile-note">{note}</p>}
+      {readOnly && <p className="muted profile-note">Kept by your admin - ask them if anything here needs changing.</p>}
       <dl className="profile-grid">
         {fields.map((f) => (
           <div key={f.name} className={`profile-item ${f.wide ? "wide" : ""}`}>
@@ -240,6 +242,7 @@ function PrincipalProfile({ d, common }) {
         chips={[{ icon: <Icon name="schools" size={14} />, key: "s", text: p.school_name }, { icon: <Icon name="districts" size={14} />, key: "d", text: withBlock(p) }]} />
       <InfoSection title="General Information" section="general" fields={PR_GENERAL} {...common} />
       <InfoSection title="Service Details" section="service" fields={PR_SERVICE} {...common} />
+      <InfoSection title="Posting Details" section="posting" fields={PR_POSTING} {...common} />
       <InfoSection title="Address Details" section="address" fields={ADDRESS} {...common} />
       <InfoSection
         title="School Information" fields={[
@@ -248,15 +251,15 @@ function PrincipalProfile({ d, common }) {
           { name: "s_type", label: "School type", computed: true, show: () => p.school_type },
           { name: "s_address", label: "School address", computed: true, show: () => p.school_address },
           { name: "s_contact", label: "School contact", computed: true, show: () => [p.school_phone, p.school_email].filter(Boolean).join(" · ") },
-          { name: "s_doj", label: "In charge since", computed: true, type: "date", show: () => p.date_of_joining },
           { name: "s_years", label: "Years at this school", computed: true, show: () => d.years_at_school != null && `${d.years_at_school} years` },
-          { name: "s_nature", label: "Nature of appointment", computed: true, show: () => p.appointment_nature },
           { name: "s_labs", label: "Vocational labs", computed: true, show: () => list(p.labs) },
           { name: "s_trainers", label: "Vocational trainers", computed: true, show: () => list(p.trainers) },
         ]}
-        note="Your school and posting, as your admin has them on record."
+        note="Your school, as your admin has it on record."
         {...common}
       />
+      <InfoSection title="Vocational Prabhari" section="prabhari" fields={PR_PRABHARI}
+        note="Your school's Vocational Prabhari, if there is one." {...common} />
       <TableSection listKey="qualifications" tables={PR_TABLES} {...common} />
       <TableSection listKey="postings" tables={PR_TABLES} {...common} />
       <TableSection listKey="trainings" tables={PR_TABLES} {...common} />

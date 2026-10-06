@@ -126,6 +126,16 @@ export const PR_SERVICE = [
   { name: "subject_specialisation", label: "Subject specialisation" },
   { name: "superannuation_date", label: "Superannuation (at 60)", computed: true, type: "date", show: (d) => d.superannuation_date },
 ];
+// at this school - no longer asked when the admin adds them
+export const PR_POSTING = [
+  { name: "date_of_joining", label: "In charge since", type: "date" },
+  { name: "appointment_nature", label: "Nature of appointment", type: "select", enumKey: "appointment_nature" },
+];
+export const PR_PRABHARI = [
+  { name: "vocational_prabhari_name", label: "Name" },
+  { name: "vocational_prabhari_mobile", label: "Mobile no.", type: "tel", placeholder: "10 digits" },
+  { name: "vocational_prabhari_email", label: "Email ID", type: "email" },
+];
 export const PR_TABLES = {
   qualifications: TABLES.qualifications,
   postings: {

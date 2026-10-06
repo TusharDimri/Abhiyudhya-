@@ -125,8 +125,8 @@ EQUIPMENT = {
              ("Air compressor", "With tyre inflator"), ("Battery tester", "Digital"), ("Hydraulic jack", "2 ton"),
              ("Wheel balancer", "Bench type"), ("Projector", "For theory classes")],
 }
-MAINTENANCE = [(0, "Two units not starting", "Repaired"), (2, "Needs a replacement part", "Awaiting Spare Parts"),
-               (3, "Faded output / weak reading", "Under Inspection"), (4, "Battery backup under 5 minutes", "Sent for Repair"),
+MAINTENANCE = [(0, "Two units not starting", "Resolved"), (2, "Needs a replacement part", "Under Progress"),
+               (3, "Faded output / weak reading", "Under Progress"), (4, "Battery backup under 5 minutes", "Under Progress"),
                (5, "Drops connection every hour", "Reported")]
 HOLIDAY_DAYS = {(8, 15), (10, 2), (1, 26), (11, 1)}   # (month, day) - national holidays and one festival day
 
@@ -514,10 +514,12 @@ def _notifications(org, today):
 
     has = {uid for (uid,) in db.session.query(Notification.user_id).filter(Notification.organisation_id == org.id)}
     def dm_notices(u):
-        """a district manager: issues and maintenance, at a school in their districts"""
+        """a district manager: principals' issues and maintenance, at a school in
+        their districts (trainers' issues are the org admin's)"""
         mine = {d.id for d in u.districts}
         school = next((s for s in schools if s.district_id in mine), None)
-        return [x for x in oa_notices(school) if x[2] in ("issue", "maintenance")] if school else []
+        return [x for x in oa_notices(school) if x[2] in ("issue", "maintenance")
+                and not x[3].startswith("/app/issues")] if school else []
 
     for u in db.session.query(User).filter(User.organisation_id == org.id, User.role.in_(["OA", "DM", "PR", "VT"])):
         if u.id in has:
@@ -745,8 +747,8 @@ def _fill_lab(org, school, lab, sector_code, vt_low, vt_high, pr_user, size, clo
 
     # ---- assessments + OJT
     n_as = 0
-    tests = [("Unit test 1", "internal", clock.this_span[0] + timedelta(days=35), 25),
-             ("Practical assessment 1", "continuous", clock.this_span[0] + timedelta(days=70), 50)]
+    tests = [("Unit test 1", "Monthly", clock.this_span[0] + timedelta(days=35), 25),
+             ("Practical assessment 1", "Quarterly", clock.this_span[0] + timedelta(days=70), 50)]
     for cls, group in studying.items():
         for s in group:
             if s.verification_status != "verified":

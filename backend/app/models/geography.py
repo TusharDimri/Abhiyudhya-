@@ -40,6 +40,7 @@ class School(BaseModel):
     address = db.Column(db.Text)
     email = db.Column(db.String(120))
     school_type = db.Column(db.String(20))  # Boys / Girls / Co-education
+    board = db.Column(db.String(30))        # enums.SCHOOL_BOARDS: CBSE / RamNagar / PM Shri / UK Board
     # where the school is - trainers' attendance must be marked within 1 km
     location = db.Column(Geography(geometry_type="POINT", srid=4326, spatial_index=False))
     phone = db.Column(db.String(30))
@@ -90,11 +91,18 @@ class Principal(BaseModel):
     signature_url = db.Column(db.String(500))
     school_seal_url = db.Column(db.String(500))
 
+    # ---- the school's Vocational Prabhari (optional) - added with the
+    # principal by the admin, or by the principal on their profile
+    vocational_prabhari_name = db.Column(db.String(160))
+    vocational_prabhari_mobile = db.Column(db.String(30))
+    vocational_prabhari_email = db.Column(db.String(120))
+
     # Personal details stay on the principal's own profile (api/profile.py);
     # the ordinary principal list - readable by trainers - never carries them.
     PRIVATE = {
         "photo_url", "father_name", "dob", "social_category_id", "alternate_mobile",
         "correspondence_address", "permanent_address", "signature_url", "school_seal_url",
+        "vocational_prabhari_name", "vocational_prabhari_mobile", "vocational_prabhari_email",
     }
 
     def to_dict(self, exclude=None):

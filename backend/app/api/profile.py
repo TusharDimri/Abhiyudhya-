@@ -48,6 +48,8 @@ FORMATS = {
     "mobile": (re.compile(r"^[6-9]\d{9}$"), "Mobile number must be 10 digits starting 6-9."),
     "alternate_mobile": (re.compile(r"^[6-9]\d{9}$"), "Alternate mobile must be 10 digits starting 6-9."),
     "email": (re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$"), "Enter a valid email address."),
+    "vocational_prabhari_mobile": (re.compile(r"^[6-9]\d{9}$"), "Vocational Prabhari's mobile must be 10 digits starting 6-9."),
+    "vocational_prabhari_email": (re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$"), "Enter a valid email for the Vocational Prabhari."),
 }
 FIELD_LABELS = {
     "full_name": "Name", "father_name": "Father's name", "mother_name": "Mother's name",
@@ -62,6 +64,9 @@ FIELD_LABELS = {
     "highest_qualification": "Highest qualification", "gross_salary": "Gross salary",
     "deduction_esi": "ESI deduction", "deduction_epf": "EPF deduction",
     "deduction_tds": "TDS deduction", "deduction_other": "Other deduction",
+    "date_of_joining": "In charge since", "appointment_nature": "Nature of appointment",
+    "vocational_prabhari_name": "Vocational Prabhari's name",
+    "vocational_prabhari_mobile": "Vocational Prabhari's mobile", "vocational_prabhari_email": "Vocational Prabhari's email",
 }
 # answers that must be one of a fixed list (enums.py)
 CHOICES = {"gender": "genders", "marital_status": "marital_status", "blood_group": "blood_groups",
@@ -69,7 +74,7 @@ CHOICES = {"gender": "genders", "marital_status": "marital_status", "blood_group
            "appointment_nature": "appointment_nature"}
 ROW_CHOICES = {"qualification": "qualification_levels", "course_type": "course_types", "job_type": "job_types",
                "job_nature": "job_nature", "appointment_nature": "appointment_nature", "school_type": "school_types"}
-DATES = {"dob", "service_joining_date"}
+DATES = {"dob", "service_joining_date", "date_of_joining"}
 MONEY = {"gross_salary", "deduction_esi", "deduction_epf", "deduction_tds", "deduction_other"}
 
 QUALIFICATION_FIELDS = ["qualification", "course", "institution", "course_type", "passing_year", "marksheet_date"]
@@ -173,6 +178,9 @@ PROFILES = {
         "sensitive": {"aadhaar_number", "account_number", "pan_number"},
         # identity details: blank ones filled in once, then only an admin changes them
         "locked": {"full_name", "father_name", "dob", "gender", "aadhaar_number", "pan_number", "vtp_name"},
+        # shown to the trainer, never changed by them - their admin keeps it
+        # (the admin's trainer form: apply_admin_profile)
+        "read_only_sections": {"bank"},
         # the page saves one section at a time; a saved section must be complete
         "sections": {
             "general": {
@@ -212,6 +220,8 @@ PROFILES = {
             "mobile", "alternate_mobile", "email", "photo_url", "correspondence_address", "permanent_address",
             "service_joining_date", "substantive_post", "highest_qualification",
             "professional_qualification", "subject_specialisation", "signature_url", "school_seal_url",
+            "date_of_joining", "appointment_nature",
+            "vocational_prabhari_name", "vocational_prabhari_mobile", "vocational_prabhari_email",
         },
         "sensitive": set(),
         "locked": {"full_name", "father_name", "dob", "gender", "employee_id"},
@@ -228,6 +238,12 @@ PROFILES = {
             },
             "address": {"fields": {"correspondence_address", "permanent_address"},
                         "required": ["correspondence_address", "permanent_address"]},
+            # at this school: since when, and how appointed (no longer asked
+            # when the admin adds them)
+            "posting": {"fields": {"date_of_joining", "appointment_nature"}, "required": ["date_of_joining"]},
+            # optional; once begun, it needs at least a name and a mobile
+            "prabhari": {"fields": {"vocational_prabhari_name", "vocational_prabhari_mobile", "vocational_prabhari_email"},
+                         "required": ["vocational_prabhari_name", "vocational_prabhari_mobile"]},
             "pictures": {"fields": {"photo_url", "signature_url", "school_seal_url"}, "required": []},
         },
         "lists": {
@@ -370,6 +386,7 @@ def _serialise(kind, rec):
     data["category_name"] = category.name if category else None
     data["locked"] = sorted(f for f in kind["locked"] if getattr(rec, f) not in (None, ""))
     data["required"] = {k: v["required"] for k, v in kind["sections"].items()}
+    data["read_only_sections"] = sorted(kind.get("read_only_sections", ()))
 
     # pictures: short-lived links the browser can open
     from app.services import storage
@@ -446,6 +463,7 @@ def update_profile():
     user, kind, rec = _kind_and_record()
     payload = request.get_json(silent=True) or {}
     before = _serialise(kind, rec)
+    read_only = {f for sec in kind.get("read_only_sections", ()) for f in kind["sections"][sec]["fields"]}
     try:
         for name, value in payload.items():
             if name not in kind["fields"]:
@@ -454,6 +472,8 @@ def update_profile():
                 continue  # the masked value the page was shown - keep what is stored
             new = _field(name, value)
             current = getattr(rec, name)
+            if name in read_only and str(new or "") != str(current or ""):
+                raise Invalid("Bank and salary details are kept by your admin - ask them to change them.")
             if name in kind["locked"] and current not in (None, "") and str(new or "") != str(current):
                 raise Invalid(f"{FIELD_LABELS.get(name, name)} is on record and can't be changed here "
                               "- ask your admin.")

@@ -55,7 +55,12 @@ function Students({ marks }) {
 function valueOf(f, data, boot) {
   const v = data[f.name];
   if (f.type === "studentmarks") return <Students marks={v} />;
-  if (f.type === "file") {
+  if (f.type === "pdf") {
+    const src = data[f.name.replace(/_url$/, "_src")];
+    if (src) return <a href={src} target="_blank" rel="noreferrer">Open {f.label.toLowerCase()} (PDF)</a>;
+    return v ? <span className="muted">Attached (not available here)</span> : <span className="muted">None</span>;
+  }
+  if (f.type === "file" || f.type === "photo") {
     const src = data[f.name.replace(/_url$/, "_src")];
     if (src) return <a href={src} target="_blank" rel="noreferrer"><img className="view-photo" src={src} alt={f.label} /></a>;
     return v ? <span className="muted">Photo attached (not available here)</span> : <span className="muted">No photo</span>;

@@ -21,7 +21,7 @@ import {
 } from "./fieldOptions";
 import { todayISO } from "./dates";
 import { ISSUE_STATUS_LABELS, VERIFICATION_LABELS } from "./roleUi";
-import { principalProfileFields, trainerProfileFields } from "../components/ProfileFields";
+import { trainerProfileFields } from "../components/ProfileFields";
 
 // shared option-key shortcuts
 const SECTOR = { optionsKey: "sectors" };
@@ -179,6 +179,19 @@ const FROM_STUDENT = (attr, from = "student_id") => (values, c) => {
 };
 const STUDENT_NOTE = "From the student's record";
 
+// the months of an academic year, in its order (April to March)
+const ACADEMIC_MONTHS = ["April", "May", "June", "July", "August", "September", "October", "November",
+  "December", "January", "February", "March"].map((label, i) => ({ value: String(((i + 3) % 12) + 1), label }));
+
+// ... and the ones that have begun so far this academic year (April up to now)
+const MONTHS_SO_FAR = () => ACADEMIC_MONTHS.slice(0, ((new Date().getMonth() + 1 + 8) % 12) + 1);
+
+// Photo 1..n, each taken with the camera (or from the gallery), all required
+// (in their own "Photos & Report" section of the form)
+const MEDIA = "Photos & Report";
+const photoSet = (names) => names.map((name, i) => ({ name, label: `Photo ${i + 1}`, type: "photo", required: true, group: MEDIA }));
+const reportField = { name: "report_url", label: "Report", type: "pdf", hint: "PDF only", group: MEDIA };
+
 export const MODULES = {
   // ---------------- MASTER DATA ----------------
   organisations: {
@@ -234,6 +247,7 @@ export const MODULES = {
       { key: "udise_code", label: "UDISE" },
       { key: "district_name", label: "District" },
       { key: "block", label: "Block" },
+      { key: "board", label: "Board" },
       { key: "status", label: "Status", badge: true },
     ],
     formHint: "Labs are attached to a school from Master Data → Labs.",
@@ -243,9 +257,10 @@ export const MODULES = {
       { name: "district_id", label: "District", type: "select", ...DISTRICT, required: true, autoFor: ["DM"], group: "School" },
       { name: "block", label: "Block", group: "School" },
       { name: "school_type", label: "School type", type: "select", enumKey: "school_types", required: true, group: "School" },
+      { name: "board", label: "Board of school", type: "select", enumKey: "school_boards", required: true, group: "School" },
       { name: "address", label: "Full address", type: "textarea", required: true, group: "Contact" },
-      { name: "email", label: "Email", type: "email", group: "Contact" },
-      { name: "phone", label: "Phone", type: "tel", group: "Contact" },
+      { name: "email", label: "Email", type: "email", required: true, group: "Contact" },
+      { name: "phone", label: "Phone", type: "tel", required: true, placeholder: "10 digits (11 with the STD code's 0)", group: "Contact" },
       {
         name: "location_lat", label: "Location", type: "geopoint", lngField: "location_lng", required: true, group: "Location",
         hint: "Trainers can only mark attendance within 1 km of this point. Stand at the school and use your current location, or copy the coordinates from Google Maps (right-click the school).",
@@ -264,22 +279,21 @@ export const MODULES = {
     ],
     // the edit form needs the whole record (profile, tables), not the list row
     fetchOnEdit: true,
-    formHint: "Everything on the principal's profile page. Start a section and fill its main fields; the rest can wait.",
+    formHint: "Just who they are and their school - the principal fills in the rest on their own profile page.",
     fields: [
-      { name: "full_name", label: "Full name", required: true, group: "Personal details" },
-      { name: "gender", label: "Gender", type: "select", enumKey: "genders", required: true, group: "Personal details" },
-      { name: "mobile", label: "Mobile", type: "tel", placeholder: "10 digits", required: true, group: "Personal details" },
-      { name: "email", label: "Email", type: "email", required: true, group: "Personal details",
+      { name: "full_name", label: "Name", required: true, group: "Principal" },
+      { name: "mobile", label: "Mobile number", type: "tel", placeholder: "10 digits", required: true, group: "Principal" },
+      { name: "gender", label: "Gender", type: "select", enumKey: "genders", required: true, group: "Principal" },
+      { name: "email", label: "Email ID", type: "email", required: true, group: "Principal",
         hint: "Their username for logging in - the login is made when you save." },
-      { name: "linked_school_id", label: "School", type: "select", ...SCHOOL, required: true, group: "Posting" },
-      { name: "years_in_school", label: "Years in school", type: "number", min: 0, group: "Posting" },
-      { name: "date_of_joining", label: "Date of joining", type: "date", required: true, group: "Posting" },
-      { name: "date_of_resignation", label: "Date of resignation", type: "date", group: "Posting", hint: "Leave blank while they are still in post." },
-      { name: "designation", label: "Designation", type: "select", enumKey: "principal_designations", required: true, group: "Posting" },
-      { name: "employee_id", label: "Employee ID", group: "Posting" },
-      { name: "appointment_nature", label: "Nature of appointment", type: "select", enumKey: "appointment_nature", group: "Posting" },
-      // ... and the rest of the principal's profile
-      ...principalProfileFields(["full_name", "gender", "mobile", "email", "designation", "employee_id"]),
+      // their school, picked by its UDISE code (the school chosen above, to start with)
+      { name: "linked_school_id", label: "UDISE code", type: "select", required: true, group: "Principal",
+        dynamicOptions: (_, c) => (c.boot?.options?.schools || []).map((s) => (
+          { value: s.value, label: s.udise_code ? `${s.udise_code} - ${s.label}` : s.label })) },
+      // the school's Vocational Prabhari - optional; the principal can add it later too
+      { name: "vocational_prabhari_name", label: "Vocational Prabhari name", group: "Vocational Prabhari (optional)" },
+      { name: "vocational_prabhari_mobile", label: "Mobile number", type: "tel", placeholder: "10 digits", group: "Vocational Prabhari (optional)" },
+      { name: "vocational_prabhari_email", label: "Email", type: "email", group: "Vocational Prabhari (optional)" },
     ],
   },
   labs: {
@@ -572,7 +586,7 @@ export const MODULES = {
       // today and now, as the trainer marks it - not changeable by them
       { name: "date", label: "Date", required: true, ...PAST_DATE, readOnlyFor: ["VT"] },
       { name: "attendance_time", label: "Time", type: "time", required: true, defaultValue: nowTime, readOnlyFor: ["VT"] },
-      { name: "photo_url", label: "Photo", type: "file", accept: "image/*" },
+      { name: "photo_url", label: "Photo", type: "photo", wide: true },
       { name: "details", label: "Comment", type: "textarea", rows: 3, placeholder: "Anything to note about today (optional)" },
       { name: "trainer_id", label: "Trainer", type: "select", optionsKey: "trainers", autoFor: ["VT"], quiet: true },
       { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"], quiet: true,
@@ -580,6 +594,28 @@ export const MODULES = {
     ],
     // only the principal verifies attendance; everyone else just sees it
     rowActions: [{ action: "view", roles: ["VT", "PR", "DM", "OA", "SA"] }, { action: "endorse", roles: ["PR"] }],
+  },
+  // MAPP - Maasik Anusaran Praman Patra: the trainer's whole month of
+  // attendance, uploaded as one PDF (only their own - api/registry.py "mapp")
+  mapp: {
+    label: "Upload MAPP", pageTitle: "Upload Maasik Anusaran Praman Patra",
+    singular: "MAPP", addLabel: "Upload", formTitle: "Upload MAPP", group: "Daily Operations",
+    searchable: false,
+    columns: [
+      { key: "academic_year", label: "Academic year" },
+      { key: "month_label", label: "Month" },
+      { key: "uploaded_on", label: "Uploaded on" },
+    ],
+    fields: [
+      // this academic year only (the server checks it too) - so it's shown, not asked
+      { name: "academic_year", label: "Academic year", type: "select", ...AY, valueKey: "label", required: true,
+        defaultValue: ({ options }) => options?.academic_years?.find((y) => y.is_current)?.label, readOnlyFor: ["VT"] },
+      // this month or an earlier one of the year (the filter still offers all twelve)
+      { name: "month", label: "Month", type: "select", options: ACADEMIC_MONTHS, dynamicOptions: MONTHS_SO_FAR,
+        required: true, defaultValue: () => String(new Date().getMonth() + 1) },
+      { name: "document_url", label: "MAPP document", type: "pdf", required: true, hint: "PDF only" },
+    ],
+    rowActions: [{ action: "pdf", roles: ["VT"] }],
   },
   "class-attendance": {
     label: "Class Attendance", singular: "Class Attendance", icon: "🧑‍🏫", group: "Daily Operations",
@@ -619,7 +655,7 @@ export const MODULES = {
         classField: "class_grade", sectionField: "sections" },
       { name: "activity", label: "Activity", type: "textarea", rows: 3, required: true, group: "Activity",
         placeholder: "What was done in class today?" },
-      { name: "photo_url", label: "Photo", type: "file", accept: "image/*", group: "Activity" },
+      { name: "photo_url", label: "Photo", type: "photo", wide: true, group: "Activity" },
       { name: "comment", label: "Comment", type: "textarea", rows: 2, placeholder: "Anything else (optional)", group: "Activity" },
       { name: "trainer_id", label: "Trainer", type: "select", optionsKey: "trainers", autoFor: ["VT"], quiet: true },
     ],
@@ -690,6 +726,7 @@ export const MODULES = {
   },
   "field-visits": {
     label: "Field / Industry Visits", singular: "Field Visit", icon: "🚌", group: "Daily Operations",
+    defaultGroup: "Visit",
     searchHint: "Search by organisation, address or purpose",
     captureLocation: true,
     yearlyTarget: true,   // 2 per level per academic year (api/targets.py)
@@ -702,8 +739,7 @@ export const MODULES = {
       { key: "sections", label: "Sections" },
     ],
     fields: [
-      { name: "organisation_name", label: "Field visit organisation", required: true, placeholder: "e.g. Tata Motors, Pimpri plant",
-        lookup: { fill: ["address", "contact_person", "contact_designation", "contact_email", "contact_mobile"] } },
+      { name: "organisation_name", label: "Field visit organisation", required: true, placeholder: "e.g. Tata Motors, Pimpri plant" },
       { name: "address", label: "Organisation address", type: "textarea", rows: 2 },
       { name: "activities", label: "Field visit activity", type: "textarea", rows: 2 },
       { name: "purpose", label: "Purpose of visit", type: "textarea", rows: 2 },
@@ -714,7 +750,6 @@ export const MODULES = {
       // one lab: filled in silently; several: the first is preselected
       { name: "lab_id", label: "Lab", type: "select", optionsKey: "labs", required: true, autoFor: ["VT"], quiet: true,
         defaultValue: FIRST_LAB },
-      { name: "picture_url", label: "Photo", type: "file", accept: "image/*" },
       { name: "class_grade", label: "Class", type: "select", dynamicOptions: CLASS_BY_LAB, required: true, remember: true },
       { name: "job_role_id", label: "Job role", type: "select", dynamicOptions: JOBROLE_BY_LAB,
         derive: DERIVE_JOB_ROLE("class_grade"), deriveNote: JOB_ROLE_NOTE,
@@ -728,10 +763,14 @@ export const MODULES = {
       { name: "student_marks", label: "Students", type: "studentmarks", mode: "attend",
         classField: "class_grade", sectionField: "sections" },
       { name: "reporting_date", label: "Date", required: true, ...PAST_DATE },
+      // four photos of the visit, all needed (api/registry.py checks it too)
+      ...photoSet(["picture_url", "picture_2_url", "picture_3_url", "picture_4_url"]),
+      reportField,
     ],
   },
   "guest-lectures": {
     label: "Guest Lectures", singular: "Guest Lecture", icon: "🎤", group: "Daily Operations",
+    defaultGroup: "Lecture",
     searchHint: "Search by topic or lecturer",
     captureLocation: true,
     yearlyTarget: true,   // 15 per level per academic year (api/targets.py)
@@ -743,8 +782,7 @@ export const MODULES = {
       { key: "class_grade", label: "Class" },
     ],
     fields: [
-      { name: "lecturer_name", label: "Guest lecturer's name", required: true,
-        lookup: { fill: ["lecturer_qualification", "lecturer_email", "lecturer_phone", "lecturer_experience"] } },
+      { name: "lecturer_name", label: "Guest lecturer's name", required: true },
       { name: "lecturer_qualification", label: "Qualification" },
       { name: "lecturer_email", label: "Email", type: "email" },
       { name: "lecturer_phone", label: "Phone", type: "tel" },
@@ -766,8 +804,10 @@ export const MODULES = {
       // everyone starts "not attended"; the trainer taps Attend per student
       { name: "student_marks", label: "Students", type: "studentmarks", mode: "attend",
         classField: "class_grade", sectionField: "sections" },
-      { name: "photo_url", label: "Photo", type: "file", accept: "image/*" },
       { name: "reporting_date", label: "Date", required: true, ...PAST_DATE },
+      // four photos of the lecture, all needed (api/registry.py checks it too)
+      ...photoSet(["photo_url", "photo_2_url", "photo_3_url", "photo_4_url"]),
+      reportField,
     ],
   },
   equipment: {
@@ -810,7 +850,8 @@ export const MODULES = {
       { name: "equipment_id", label: "Lab equipment", type: "select", optionsKey: "equipment", async: true, required: true },
       { name: "date", label: "Date", required: true, ...PAST_DATE },
       { name: "issue", label: "Issue", type: "textarea", required: true },
-      { name: "maintenance_status", label: "Status", type: "select", enumKey: "maintenance_status", required: true, defaultValue: "Reported" },
+      // always Reported when a trainer logs it; an admin moves it on (Resolve)
+      { name: "maintenance_status", label: "Status", type: "select", enumKey: "maintenance_status", defaultValue: "Reported", readOnlyFor: ["VT"] },
       { name: "note", label: "Note", type: "textarea", rows: 2, placeholder: "Any short note" },
     ],
   },
@@ -1012,7 +1053,8 @@ export const HIDDEN_SECTIONS = {
   // (notifications: they have their own, from the bell - not this list of everyone's)
   OA: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback", "notifications"],
   // district managers: the same (feedback off for now too); notifications are their own, from the bell
-  DM: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback", "notifications"],
+  DM: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback", "notifications",
+    "issues"],   // trainers' issues are the org admin's
   // the super admin reads everything else; notifications are their own, from the bell
   SA: ["modules", "units", "sessions", "diaries", "feedback", "notifications", "employers", "employer-student-maps"],
 };
