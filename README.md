@@ -78,7 +78,7 @@ Colours are taken from the RNAF logo — deep **navy** (`#12294B`) with a **gold
 |-|-------|-----------|
 | Start | `docker compose -f docker-compose.local.yml up -d` | `docker compose -f docker-compose.prod.yml up -d --build` |
 | Frontend | `cd frontend && npm run dev` (port 5173) | served by Nginx in the `web` container |
-| DB setup | `flask db upgrade` then `flask seed` | `flask db upgrade`, once |
+| DB setup | `flask db upgrade` then `flask seed` | `flask db upgrade`, then `flask create-super-admin --email … --name "…"` once (never `flask seed`) |
 | DB change | `flask db migrate -m "…"` then review + `flask db upgrade` | `flask db upgrade` on deploy |
 | Tests | `docker compose -f docker-compose.local.yml exec backend pytest` | — |
 

@@ -2,7 +2,16 @@
 # RDS PostgreSQL and S3 are external AWS services (NOT containers here).
 # Bring up:  docker compose -f docker-compose.prod.yml up -d --build
 #
-# Reads secrets from a .env.prod file in this directory (never commit it).
+# Reads secrets from a .env.prod file in this directory (never commit it);
+# start from .env.prod.example.
+
+# Docker keeps every container's log forever by default and would slowly fill
+# the server's disk: keep five files of 10 MB each per container.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
 
 services:
   backend:
@@ -13,6 +22,7 @@ services:
     restart: unless-stopped          # self-heal on crash (spec 7.11)
     expose: ["5000"]
     depends_on: [redis]
+    logging: *logging
 
   celery-worker:
     build:
@@ -22,18 +32,24 @@ services:
     env_file: ./.env.prod
     restart: unless-stopped
     depends_on: [redis]
+    logging: *logging
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *logging
 
   web:
     build:
       context: ./frontend
       target: production
     restart: unless-stopped
-    ports: ["80:80", "443:443"]      # Certbot/TLS wired in the deploy doc
+    ports: ["80:80", "443:443"]
+    # Certbot writes the certificate to certbot/conf and its domain check to
+    # certbot/www; the web container serves HTTPS once the certificate is
+    # there (frontend/nginx/choose-site.sh).
     volumes:
       - ./certbot/conf:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
     depends_on: [backend]
+    logging: *logging

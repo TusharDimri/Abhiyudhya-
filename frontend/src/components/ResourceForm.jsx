@@ -3,6 +3,7 @@ import { Check, Crosshair, MapPin, X } from "lucide-react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useAuth } from "../lib/auth";
 import api from "../lib/api";
+import { uploadFile } from "../lib/upload";
 import StudentRoster from "./StudentRoster";
 import { RowsInput } from "./ProfileFields";
 import DateInput from "./DateInput";
@@ -293,11 +294,9 @@ export default function ResourceForm({
     if (!file) return;
     setUploading(f.name);
     try {
-      const { data } = await api.post("/uploads/presign", {
-        filename: file.name, content_type: file.type || "application/octet-stream",
-      });
-      await fetch(data.upload_url, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
-      set(f.name, data.public_path);
+      // uploadFile throws when storage refuses the file, so a failed upload
+      // is never saved as if it had worked
+      set(f.name, await uploadFile(file));
     } catch {
       setErrors((e) => ({ ...e, [f.name]: "Upload unavailable — paste a URL below." }));
     } finally {

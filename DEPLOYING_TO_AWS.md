@@ -156,48 +156,27 @@ git clone <your-repo-url> rnaf
 cd rnaf
 ```
 
-Create the production settings file `.env.prod` in the project root:
+Create the production settings file `.env.prod` from the template, readable by
+you only:
 
 ```bash
+cp .env.prod.example .env.prod
+chmod 600 .env.prod
 nano .env.prod
 ```
 
-Paste this and fill in **your** values (RDS endpoint, RDS password, S3 bucket,
-and long random secrets — you can generate secrets with
-`python3 -c "import secrets; print(secrets.token_hex(32))"`):
-
-```env
-FLASK_ENV=production
-SECRET_KEY=paste-a-long-random-string-here
-JWT_SECRET_KEY=paste-a-different-long-random-string-here
-
-# Database — use YOUR RDS endpoint and password
-DATABASE_URL=postgresql+psycopg2://rnaf:YOUR_DB_PASSWORD@rnaf-db.xxxx.ap-south-1.rds.amazonaws.com:5432/rnaf
-
-# Redis (runs inside Docker on this server)
-REDIS_URL=redis://redis:6379/0
-CELERY_BROKER_URL=redis://redis:6379/0
-CELERY_RESULT_BACKEND=redis://redis:6379/0
-
-# S3 — real bucket. Leave S3_ENDPOINT_URL blank so it uses real AWS S3.
-S3_ENDPOINT_URL=
-# Leave blank too: only needed locally, where the browser reaches MinIO at localhost
-S3_PUBLIC_ENDPOINT_URL=
-S3_BUCKET=rnaf-media-yourname
-S3_REGION=ap-south-1
-S3_ACCESS_KEY=your-iam-access-key
-S3_SECRET_KEY=your-iam-secret-key
-
-# Your domain (or the Elastic IP for now)
-CORS_ORIGINS=https://yourdomain.com
-```
+Replace every `<...>` and both `change-me` values (RDS endpoint and password,
+S3 bucket, your domain). Make each secret key with
+`python3 -c "import secrets; print(secrets.token_urlsafe(48))"` — the app
+refuses to start in production while a key is missing, short, or still says
+`change-me`.
 
 Save in nano: **Ctrl+O**, **Enter**, then **Ctrl+X**.
 
 > **About S3 keys:** the cleanest way is to attach an **IAM Role** to the EC2
-> instance so no keys are needed. For a first deploy it's simpler to create an
-> **IAM user** with *AmazonS3FullAccess*, generate an access key, and paste it
-> above. You can switch to a role later with no code change.
+> instance and leave `S3_ACCESS_KEY` / `S3_SECRET_KEY` blank — the app then uses
+> the role. If you use an **IAM user** with an access key instead, paste the key
+> into those two settings. You can switch between them with no code change.
 
 > The `RDS…` database has no `rnaf` database inside it yet by default — RDS
 > creates one only if you set an initial DB name. If your connection fails with
@@ -215,21 +194,21 @@ Still on the server, in the `rnaf` folder:
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-The first build takes several minutes. Then create the database tables and (once)
-the demo/admin data:
+The first build takes several minutes. Then create the database tables and
+(once) the first Super Admin login:
 
 ```bash
 docker compose -f docker-compose.prod.yml exec backend flask db upgrade
-docker compose -f docker-compose.prod.yml exec backend flask seed
+docker compose -f docker-compose.prod.yml exec backend flask create-super-admin --email you@example.org --name "Your Name"
 ```
 
-Now open **http://YOUR_ELASTIC_IP** in your browser — the login page should
-appear. 🎉 Log in with `sa@rnaf.demo` / `Password@123` and **immediately change
-that password** from the app.
+The second command prints a random password **once** — put it in a password
+manager. Now open **http://YOUR_ELASTIC_IP** in your browser — the login page
+should appear. 🎉 Log in with that email and password.
 
-> **Security:** the seed creates demo accounts with a known password. For a real
-> deployment, log in as Super Admin, create your real admin user, then delete the
-> demo users.
+> **Security:** never run `flask seed`, `flask seed-demo`, `flask demo-data` or
+> `flask test-schools` on a real server — they create demo logins with the
+> shared password `Password@123`. They are for laptops only.
 
 ---
 
@@ -241,33 +220,36 @@ Skip if you only need the IP for now. To use `https://yourdomain.com`:
    Namecheap, etc.) create an **A record** for `yourdomain.com` → **YOUR
    Elastic IP**. Wait a few minutes for it to take effect.
 
-2. **Get a free HTTPS certificate** using Certbot. On the server:
+2. **Get a free HTTPS certificate** using Certbot, while the site is running.
+   The `web` container already answers Let's Encrypt's check on port 80. On the
+   server, in the `rnaf` folder:
 
 ```bash
-# stop the web container briefly so Certbot can use port 80
-docker compose -f docker-compose.prod.yml stop web
-
-sudo apt install -y certbot
-sudo certbot certonly --standalone -d yourdomain.com
-
-# copy the certificate where our containers expect it
-sudo mkdir -p certbot/conf
-sudo cp -rL /etc/letsencrypt/* certbot/conf/
+docker run --rm \
+  -v "$PWD/certbot/conf:/etc/letsencrypt" -v "$PWD/certbot/www:/var/www/certbot" \
+  certbot/certbot certonly --webroot -w /var/www/certbot \
+  --cert-name abhiyudhya -d yourdomain.com \
+  --email you@example.org --agree-tos --no-eff-email
 ```
 
-3. Tell Nginx to use HTTPS. Edit `frontend/nginx.conf` to add a TLS server block
-   (a ready-to-use HTTPS example is in the comments at the bottom of that file's
-   documentation, or ask your developer). At minimum, start the web container again:
+3. Restart the web container. It finds the certificate and switches to HTTPS by
+   itself (`frontend/nginx/choose-site.sh`); plain `http://` then redirects to
+   `https://`:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d web
+docker compose -f docker-compose.prod.yml restart web
 ```
 
 4. Set `CORS_ORIGINS=https://yourdomain.com` in `.env.prod` and restart:
    `docker compose -f docker-compose.prod.yml up -d`.
 
-> Certificates auto-expire every 90 days. Renew with `sudo certbot renew` (set up
-> a monthly cron job to do it automatically).
+> Certificates expire after 90 days. Renew automatically: run `crontab -e` and
+> add this line (every Monday at 03:00; only certificates near expiry are
+> renewed, with no downtime):
+>
+> ```
+> 0 3 * * 1 cd /home/ubuntu/rnaf && docker run --rm -v "$PWD/certbot/conf:/etc/letsencrypt" -v "$PWD/certbot/www:/var/www/certbot" certbot/certbot renew --quiet && docker compose -f docker-compose.prod.yml exec -T web nginx -s reload
+> ```
 
 ---
 
@@ -283,7 +265,8 @@ These match the reliability plan (spec 7.11) and are mostly free:
    the instance"* on system-status-check failure.
 
 3. **Free uptime monitor** — sign up at https://uptimerobot.com (free), add a
-   monitor for `http://yourdomain.com/health`. It emails you if the site goes down.
+   monitor for `https://yourdomain.com/health/deep`. It emails you if the site
+   goes down, or if the API is up but can't reach the database or Redis.
 
 4. **Database backups** — RDS already takes daily automated backups. Confirm under
    RDS → your DB → *Maintenance & backups* that the retention is 7 days.

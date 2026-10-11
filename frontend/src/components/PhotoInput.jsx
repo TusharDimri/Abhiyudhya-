@@ -6,7 +6,7 @@
    the field's value. */
 import { useEffect, useRef, useState } from "react";
 import { Camera, Image as ImageIcon, RefreshCw, X } from "lucide-react";
-import { uploadFile } from "../lib/upload";
+import { shrinkPhoto, uploadFile } from "../lib/upload";
 
 const isTouch = () => typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
 const canStream = () => !!navigator.mediaDevices?.getUserMedia;
@@ -25,8 +25,9 @@ export default function PhotoInput({ value, onChange, onError, label = "Photo" }
     if (!file.type.startsWith("image/")) { onError?.("Choose a photo (an image file)."); return; }
     setBusy(true);
     try {
-      const key = await uploadFile(file);
-      setPreview(URL.createObjectURL(file));
+      const photo = await shrinkPhoto(file);
+      const key = await uploadFile(photo);
+      setPreview(URL.createObjectURL(photo));
       onChange(key);
       onError?.("");
     } catch {

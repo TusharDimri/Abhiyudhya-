@@ -11,6 +11,13 @@ def _bool(key: str, default: bool = False) -> bool:
     return os.getenv(key, str(default)).lower() in ("1", "true", "yes", "on")
 
 
+def _optional(key: str):
+    """A setting that may be left blank: `S3_ACCESS_KEY=` in an env file
+    arrives as "", which boto3 would take as a real (empty) key instead of
+    falling back to the server's IAM role."""
+    return os.getenv(key) or None
+
+
 class Config:
     # --- Core ---
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
@@ -44,6 +51,8 @@ class Config:
 
     # --- Rate limiting ---
     RATELIMIT_STORAGE_URI = os.getenv("REDIS_URL", "memory://")
+    # Redis down must not mean nobody can log in: count in memory until it is back
+    RATELIMIT_IN_MEMORY_FALLBACK_ENABLED = True
     # Redis cache for read endpoints (services/cache.py)
     CACHE_ENABLED = _bool("CACHE_ENABLED", True)
     CACHE_PREFIX = os.getenv("CACHE_PREFIX", "rnaf")
@@ -53,13 +62,14 @@ class Config:
     MAX_PAGE_SIZE = int(os.getenv("MAX_PAGE_SIZE", "200"))
 
     # --- S3 / storage ---
-    S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL")  # set for MinIO locally
+    S3_ENDPOINT_URL = _optional("S3_ENDPOINT_URL")  # set for MinIO locally; blank = AWS S3
     # the same store as the browser reaches it (pre-signed upload links); blank = S3_ENDPOINT_URL
-    S3_PUBLIC_ENDPOINT_URL = os.getenv("S3_PUBLIC_ENDPOINT_URL")
+    S3_PUBLIC_ENDPOINT_URL = _optional("S3_PUBLIC_ENDPOINT_URL")
     S3_BUCKET = os.getenv("S3_BUCKET", "rnaf-media")
     S3_REGION = os.getenv("S3_REGION", "us-east-1")
-    S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
-    S3_SECRET_KEY = os.getenv("S3_SECRET_KEY")
+    # blank on AWS: boto3 then uses the EC2 server's IAM role
+    S3_ACCESS_KEY = _optional("S3_ACCESS_KEY")
+    S3_SECRET_KEY = _optional("S3_SECRET_KEY")
     S3_PRESIGN_EXPIRY = int(os.getenv("S3_PRESIGN_EXPIRY", "3600"))
 
     # --- Celery / Redis ---
