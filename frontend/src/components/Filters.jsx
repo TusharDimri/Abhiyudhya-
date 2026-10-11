@@ -155,8 +155,10 @@ function useNarrow() {
   return narrow;
 }
 
-export default function Filters({ filters, fields, boot, values, onChange, onClear, aside, schoolId }) {
+export default function Filters({ filters: wanted, fields, boot, values, onChange, onClear, aside, schoolId }) {
   const narrow = useNarrow();
+  // (a filter picking from a list this role can't open - e.g. trainers - isn't offered)
+  const filters = (wanted || []).filter((c) => !RESOURCE_FILTERS[c] || boot?.resources?.[RESOURCE_FILTERS[c].resource]);
   const resourceCols = (filters || []).filter((c) => RESOURCE_FILTERS[c]);
 
   const results = useQueries({

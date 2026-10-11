@@ -18,6 +18,7 @@ const ICONS = {
   placements: "ojt-placements", my_open_issues: "principal-issues", diaries: "diaries",
   my_employer: "ojt-placements", assessments: "assessments", pending_issues_action: "issues",
   pr_issues_action: "principal-issues", pr_issues_resolved: "principal-issues",
+  class_attendance: "class-attendance", equipment: "equipment", equipment_under_repair: "equipment-maintenance",
 };
 const OWN_ICONS = {
   endorsed: CircleCheck, issues_resolved: CircleCheck, ojt_hours: Timer,
@@ -29,7 +30,7 @@ const KpiIcon = ({ k }) => {
 };
 const ACCENT = {
   open_issues: "warn", pending_verification: "warn", pending_endorsement: "warn", class_pending_endorsement: "warn",
-  pending_issues_action: "warn", pr_issues_action: "warn",
+  pending_issues_action: "warn", pr_issues_action: "warn", equipment_under_repair: "warn",
   endorsed: "good", placements: "good", issues_resolved: "good", pr_issues_resolved: "good",
 };
 
@@ -38,6 +39,7 @@ const ROLE_CHARTS = {
   SA: ["trend", "activity", "verification", "endorsement", "school"],
   OA: ["trend", "activity", "verification", "endorsement", "school"],
   DM: ["trend", "activity", "verification", "school"],
+  DEPT: ["trend", "activity", "verification", "endorsement", "school"],
   PR: ["trend", "activity", "endorsement"],
   VT: ["trend", "verification"],
 };

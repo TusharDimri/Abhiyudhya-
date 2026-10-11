@@ -514,12 +514,10 @@ def _notifications(org, today):
 
     has = {uid for (uid,) in db.session.query(Notification.user_id).filter(Notification.organisation_id == org.id)}
     def dm_notices(u):
-        """a district manager: principals' issues and maintenance, at a school in
-        their districts (trainers' issues are the org admin's)"""
+        """a district manager: issues and maintenance, at a school in their districts"""
         mine = {d.id for d in u.districts}
         school = next((s for s in schools if s.district_id in mine), None)
-        return [x for x in oa_notices(school) if x[2] in ("issue", "maintenance")
-                and not x[3].startswith("/app/issues")] if school else []
+        return [x for x in oa_notices(school) if x[2] in ("issue", "maintenance")] if school else []
 
     for u in db.session.query(User).filter(User.organisation_id == org.id, User.role.in_(["OA", "DM", "PR", "VT"])):
         if u.id in has:

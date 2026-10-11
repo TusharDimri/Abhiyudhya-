@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "./api";
 import { setOrgScopeFor } from "./orgScope";
 
-export const NOTIFY_ROLES = ["SA", "OA", "DM", "PR", "VT"];
+export const NOTIFY_ROLES = ["SA", "OA", "DM", "DEPT", "PR", "VT"];
 
 export const CATEGORY_ICON = {
   issue: "⚠️", maintenance: "🔧", equipment: "🖥️", verification: "🧑‍🎓",

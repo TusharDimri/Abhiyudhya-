@@ -30,11 +30,12 @@ from app.rbac.roles import Role
 SA = Role.SUPER_ADMIN.value
 OA = Role.ORG_ADMIN.value
 DM = Role.DISTRICT_MANAGER.value
+DEPT = Role.DEPARTMENT.value
 PR = Role.PRINCIPAL.value
 VT = Role.TRAINER.value
 
 
-ALL_ROLES = [SA, OA, DM, PR, VT]
+ALL_ROLES = [SA, OA, DM, PR, VT]   # (not the department login: it sees Students only - VIEW_ROLES)
 
 
 @dataclass
@@ -114,8 +115,10 @@ class ResourceConfig:
             return False
         if role == "SA" and self.name != "organisations":
             return False
-        if role == "DM":      # a district manager adds nothing - they read, resolve and verify
+        if role == DM:      # adds nothing: a district manager reads, resolves and verifies
             return False
+        if role == DEPT:    # a department login reads, and raises its own issues
+            return self.name == "dept-issues"
         return role in self.write_roles
 
     def locked_for(self, role):
@@ -125,7 +128,7 @@ class ResourceConfig:
         actions, not by editing)."""
         if role == "SA":
             return self.name != "organisations"
-        if role == "DM":
+        if role in (DM, DEPT):
             return True
         return role in LOCKED_AFTER_SAVE and self.name not in PEOPLE_DATA
 
@@ -208,8 +211,17 @@ def _equipment_display(obj):
     from app.extensions import db
     lab = db.session.get(M.Lab, obj.lab_id) if obj.lab_id else None
     tr = db.session.get(M.Trainer, obj.trainer_id) if obj.trainer_id else None
+    # its current status: Working, unless a maintenance report on it is still
+    # open - then that report's status (Reported / Under Progress)
+    open_report = (db.session.query(M.EquipmentMaintenance.maintenance_status)
+                   .filter(M.EquipmentMaintenance.equipment_id == obj.id,
+                           M.EquipmentMaintenance.is_deleted.is_(False),
+                           M.EquipmentMaintenance.maintenance_status != "Resolved")
+                   .order_by(M.EquipmentMaintenance.date.desc(), M.EquipmentMaintenance.created_at.desc())
+                   .first())
     return {"lab_name": lab.name if lab else None,
-            "trainer_name": tr.full_name if tr else None}
+            "trainer_name": tr.full_name if tr else None,
+            "current_status": open_report[0] if open_report else "Working"}
 
 
 def _validate_equipment(instance, user, is_create=False):
@@ -1142,6 +1154,30 @@ def _saved_org_issue(obj, user, created, changed):
         notify.org_issue_raised(obj, user)
 
 
+def _prepare_dept_issue(instance, user):
+    """Raised by the department login itself, dated and timed as it is saved
+    (India time) - only the issue is written."""
+    from datetime import datetime, timedelta
+    now = datetime.utcnow() + timedelta(hours=5, minutes=30)
+    instance.raised_by = user.id
+    instance.reporting_date = now.date()
+    instance.reporting_time = now.time().replace(second=0, microsecond=0)
+    instance.academic_year = _this_academic_year(user.organisation_id)
+    return None
+
+
+def _validate_dept_issue(instance, user, is_create=False):
+    if not (instance.details or "").strip():
+        return "Write what the issue is."
+    return None
+
+
+def _saved_dept_issue(obj, user, created, changed):
+    from app.services import notify
+    if created:
+        notify.dept_issue_raised(obj, user)
+
+
 def _org_issue_display(obj):
     from app.extensions import db
     by = db.session.get(M.User, obj.raised_by) if obj.raised_by else None
@@ -1163,11 +1199,25 @@ register(ResourceConfig(
     validate=_validate_principal_issue,   # the same checks: something written, a date not in the future
 ))
 register(ResourceConfig(
+    name="dept-issues", model=M.DeptIssue, label="Department Issue",
+    # "My Issues": a department login's own issues - only the description is
+    # written; the org admin resolves them (api/workflow.py transition_issue)
+    write_roles=[DEPT], edit_roles=[],
+    writable=["details"],
+    required={"details": "Issue"},
+    prepare=_prepare_dept_issue,
+    on_saved=_saved_dept_issue,
+    computed=_org_issue_display,      # who raised it, and their organisation
+    search=["details"], filters=["workflow_status", "academic_year"],
+    sortable=["reporting_date", "created_at"], default_sort=("created_at", "desc"),
+    validate=_validate_dept_issue,
+))
+register(ResourceConfig(
     name="issues", model=M.VTIssue, label="VT Issue",
     computed=_vt_issue_display,
     on_saved=_saved_vt_issue,
     extra_filters={"school_id": _school_by_lab},   # ?school_id= (org admins pick a school first)
-    write_roles=[SA, OA, VT],    # (not district managers: trainers' issues are the org admin's)
+    write_roles=[SA, OA, DM, VT],
     writable=["trainer_id", "lab_id", "academic_year", "reporting_date", "reporting_time",
               "details", "workflow_status", "assigned_to", "resolution_note", "status"],
     search=["details"],
@@ -1340,12 +1390,17 @@ VIEW_ROLES = {
     "diaries": STAFF,
     "ojt-placements": STAFF,
     "feedback": ALL_ROLES,
-    "issues": [SA, OA, VT],         # (not district managers)
+    "issues": [SA, OA, DM, VT],
     "principal-issues": [SA, OA, DM, PR],
     "org-issues": [SA, OA],
+    "dept-issues": [SA, OA],        # (+ the department login, which writes them)
     "mapp": [VT],
     "notifications": [SA, OA],
 }
+# a department login reads these lists - every detail, changing nothing - and
+# no others: no issues of any kind, no maintenance log, no master data
+DEPT_SEES = {"students", "attendance", "class-attendance", "equipment", "assessments",
+             "ojt-placements", "field-visits", "guest-lectures"}
 DATE_FIELDS = {
     "attendance": "date", "issues": "reporting_date", "field-visits": "reporting_date",
     "guest-lectures": "reporting_date", "diaries": "date", "assessments": "date",
@@ -1357,6 +1412,8 @@ def _finalise():
     for name, cfg in REGISTRY.items():
         if cfg.view_roles is None:
             cfg.view_roles = VIEW_ROLES.get(name, ALL_ROLES)
+        if name in DEPT_SEES:
+            cfg.view_roles = [*cfg.view_roles, DEPT]
         # writers can always view what they write
         for r in cfg.write_roles:
             if r not in cfg.view_roles:

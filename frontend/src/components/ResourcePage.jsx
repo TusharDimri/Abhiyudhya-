@@ -66,7 +66,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
   // district, then a school; a super admin an organisation first, then the same
   const [orgScope, setOrgScope] = useOrgScope(scopeKey || resource);
   const saGate = user?.role === "SA" && resource !== "organisations";
-  const gate = ["OA", "DM"].includes(user?.role) ? ORG_ADMIN_SCOPE[resource]
+  const gate = ["OA", "DM", "DEPT"].includes(user?.role) ? ORG_ADMIN_SCOPE[resource]
     : saGate ? { needs: "org", param: null, ...ORG_ADMIN_SCOPE[resource], withOrg: true } : null;
   const gateValue = gate && gate.needs !== "org" ? orgScope[`${gate.needs}_id`] : null;
   const gateOpen = !gate || ((!gate.withOrg || !!orgScope.organisation_id) && (gate.needs === "org" || !!gateValue));
@@ -291,7 +291,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
   // With no search box the page size sits at the end of the filters row
   // instead of alone on a row of its own.
   // org admins narrow things down with the district / school picker and filters instead
-  const showSearch = mod.searchable !== false && (perm?.search?.length ?? 0) > 0 && !["OA", "DM", "SA"].includes(user?.role);
+  const showSearch = mod.searchable !== false && (perm?.search?.length ?? 0) > 0 && !["OA", "DM", "DEPT", "SA"].includes(user?.role);
   const toolbarRow = showSearch || (isSA && orgScoped && !gate);
   const pageSizeBox = (
     <select className="select pagesize" value={pageSize} onChange={(e) => patch({ page_size: e.target.value })} aria-label="Rows per page">

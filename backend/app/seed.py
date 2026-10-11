@@ -171,12 +171,15 @@ def seed_base():
     sa = _mkuser(org, "Super Admin", "sa@rnaf.demo", "SA")
     oa = _mkuser(org, "Org Admin", "oa@rnaf.demo", "OA")
     dm = _mkuser(org, "District Manager", "dm@rnaf.demo", "DM")
+    dept = _mkuser(org, "Department Login", "dept@rnaf.demo", "DEPT")
     pr = _mkuser(org, "Principal One", "pr@rnaf.demo", "PR", school_id=s1.id)
     vt = _mkuser(org, "Vocational Trainer", "vt@rnaf.demo", "VT", school_id=s1.id)
     db.session.flush()
 
     dm.districts.append(d1)
     dm.districts.append(d2)
+    dept.districts.append(d1)
+    dept.districts.append(d2)
     vt.labs.append(lab1)
     p1.user_id = pr.id
 

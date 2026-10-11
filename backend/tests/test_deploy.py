@@ -106,7 +106,8 @@ def test_production_starts_with_long_random_keys():
 
 
 def test_development_keys_are_fine_off_production():
-    assert create_app(TestConfig).config["SECRET_KEY"] == "dev-secret-change-me"
+    # (whatever development key is set - backend/.env sets its own - the app starts)
+    assert create_app(TestConfig).config["SECRET_KEY"] == TestConfig.SECRET_KEY
 
 
 # ------------------------------------------------------------ S3 settings

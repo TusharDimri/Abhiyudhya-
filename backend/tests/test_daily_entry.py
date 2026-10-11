@@ -639,6 +639,7 @@ def test_org_admin_raises_their_own_issues(client, world, principal):
 
 
 def test_org_admin_adds_district_managers(client, world):
+    kind, role = "district-managers", "DM"
     oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
     oa.set_password("Password@123")
     db.session.add(oa)
@@ -646,15 +647,18 @@ def test_org_admin_adds_district_managers(client, world):
     h = _as(client, "oa@x.com")
     district = str(world["school"].district_id)
     body = {"full_name": "Meera DM", "email": "meera.dm@x.com", "phone": "9876512345", "district_ids": [district]}
-    assert client.post("/api/users/district-managers", headers=h, json={**body, "district_ids": []}).status_code == 400
-    assert client.post("/api/users/district-managers", headers=h, json={**body, "phone": "123"}).status_code == 400
-    r = client.post("/api/users/district-managers", headers=h, json=body)
+    assert client.post(f"/api/users/{kind}", headers=h, json={**body, "district_ids": []}).status_code == 400
+    assert client.post(f"/api/users/{kind}", headers=h, json={**body, "phone": "123"}).status_code == 400
+    r = client.post(f"/api/users/{kind}", headers=h, json=body)
     assert r.status_code == 201, r.get_json()
     login = r.get_json()["login"]
     assert login["username"] == "meera.dm@x.com" and login["name"] == "Meera DM"
     assert r.get_json()["user"]["districts"][0]["id"] == district
-    listed = client.get(f"/api/users/district-managers?district_id={district}", headers=h).get_json()["data"]
+    listed = client.get(f"/api/users/{kind}?district_id={district}", headers=h).get_json()["data"]
     assert [u["email"] for u in listed] == ["meera.dm@x.com"]
+    # (department logins aren't theirs: the super admin adds and lists those)
+    assert client.get("/api/users/department-logins", headers=h).status_code == 403
+    assert client.post("/api/users/department-logins", headers=h, json=body).status_code == 403
     # the org admin looks after their login too: listed in Users & Access, and can be disabled
     users = client.get("/api/users", headers=h).get_json()["data"]
     dm = next(u for u in users if u["email"] == "meera.dm@x.com")
@@ -662,7 +666,43 @@ def test_org_admin_adds_district_managers(client, world):
     # the login works (once enabled), as a district manager for that district
     client.patch(f"/api/users/{dm['id']}", headers=h, json={"status": "active"})
     signed = client.post("/api/auth/login", json={"email": "meera.dm@x.com", "password": login["password"]})
-    assert signed.status_code == 200 and signed.get_json()["user"]["role"] == "DM"
+    assert signed.status_code == 200 and signed.get_json()["user"]["role"] == role
+
+
+def test_super_admin_adds_department_logins(client, world):
+    """Department logins are the super admin's: added for the organisation
+    they pick (with its districts), listed, and their passwords reset from
+    Users & Access. The org admin neither adds nor looks after them."""
+    sa = User(full_name="SA", email="sa@x.com", role="SA")
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    for u in (sa, oa):
+        u.set_password("Password@123")
+    db.session.add_all([sa, oa])
+    db.session.commit()
+    org, district = str(world["org"].id), str(world["school"].district_id)
+    body = {"full_name": "Asha Dept", "email": "asha.dept@x.com", "phone": "9876512345",
+            "district_ids": [district], "organisation_id": org}
+    h = _as(client, "sa@x.com")
+    assert client.post("/api/users/department-logins", headers=h, json={**body, "organisation_id": None}).status_code == 400
+    assert client.post("/api/users/department-logins", headers=h, json={**body, "district_ids": []}).status_code == 400
+    r = client.post("/api/users/department-logins", headers=h, json=body)
+    assert r.status_code == 201, r.get_json()
+    login = r.get_json()["login"]
+    assert r.get_json()["user"]["organisation_id"] == org
+    listed = client.get(f"/api/users/department-logins?organisation_id={org}", headers=h).get_json()["data"]
+    assert [u["email"] for u in listed] == ["asha.dept@x.com"]
+    # the super admin resets their password (Users & Access) ...
+    users = client.get("/api/users", headers=h).get_json()["data"]
+    dept = next(u for u in users if u["email"] == "asha.dept@x.com")
+    assert client.post(f"/api/users/{dept['id']}/reset-password", headers=h,
+                       json={"new_password": "Fresh@2026x"}).status_code == 200
+    # ... and the org admin doesn't see or touch them
+    h = _as(client, "oa@x.com")
+    assert all(u["email"] != "asha.dept@x.com" for u in client.get("/api/users", headers=h).get_json()["data"])
+    assert client.post(f"/api/users/{dept['id']}/reset-password", headers=h,
+                       json={"new_password": "Fresh@2026y"}).status_code == 403
+    signed = client.post("/api/auth/login", json={"email": "asha.dept@x.com", "password": "Fresh@2026x"})
+    assert signed.status_code == 200 and signed.get_json()["user"]["role"] == "DEPT"
 
 
 def test_org_admin_sees_and_manages_only_their_schools_staff(client, world, principal, principal_record):
@@ -1994,25 +2034,165 @@ def test_principal_verifies_many_attendance_records_at_once(client, world, princ
     assert r.get_json() == {"verified": 1, "skipped": 0}
 
 
-def test_trainers_issues_are_the_org_admins_not_the_district_managers(client, world):
-    """A district manager has no VT Issues: not listed, not told of new ones,
-    can't resolve them - the org admin does. (Principals' issues are still theirs.)"""
+def test_trainers_issue_goes_to_the_org_admin_and_district_manager_either_resolves(client, world):
+    """A trainer logs an issue: the org admin and the district's manager are
+    both told, both see it, and either one resolves it - then the other's
+    notice says so, and the trainer hears it's done."""
     from app.models.geography import District
     oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
-    dm = User(organisation_id=world["org"].id, full_name="DM", email="dm@x.com", role="DM")
+    dm = User(organisation_id=world["org"].id, full_name="Dev DM", email="dm@x.com", role="DM")
     for u in (oa, dm):
         u.set_password("Password@123")
     dm.districts.append(db.session.get(District, world["school"].district_id))
     db.session.add_all([oa, dm])
     db.session.commit()
     _as(client, "vt@x.com")
-    issue = _save(client, "/api/issues", _issue(world)).get_json()
-    assert any(f"focus={issue['id']}" in n["link"] for n in _mine(client, "oa@x.com")["data"])
-    assert not any("/app/issues" in n["link"] for n in _mine(client, "dm@x.com")["data"])
+    first = _save(client, "/api/issues", _issue(world)).get_json()
+    for email in ("oa@x.com", "dm@x.com"):
+        assert any(f"focus={first['id']}" in n["link"] for n in _mine(client, email)["data"]), email
     h = _as(client, "dm@x.com")
-    assert client.get("/api/issues", headers=h).status_code == 403
-    assert "issues" not in client.get("/api/meta/bootstrap", headers=h).get_json()["resources"]
+    assert "issues" in client.get("/api/meta/bootstrap", headers=h).get_json()["resources"]
+    assert first["id"] in {r["id"] for r in client.get("/api/issues", headers=h).get_json()["data"]}
+    # the district manager resolves it ...
     done = {"workflow_status": "resolved", "resolution_note": "Fixed"}
-    url = f"/api/workflow/issues/{issue['id']}/transition"
-    assert client.post(url, headers=h, json=done).status_code == 403
+    r = client.post(f"/api/workflow/issues/{first['id']}/transition", headers=h, json=done)
+    assert r.status_code == 200, r.get_json()
+    # ... so the org admin's notice says so, and it can't be resolved twice
+    n = next(n for n in _mine(client, "oa@x.com")["data"] if f"focus={first['id']}" in n["link"])
+    assert n["title"].startswith("Resolved") and "Dev DM" in n["body"]
+    assert client.post(f"/api/workflow/issues/{first['id']}/transition", headers=_as(client, "oa@x.com"),
+                       json=done).status_code == 409
+    assert any(x["title"] == "Your issue has been resolved" for x in _mine(client, "vt@x.com")["data"])
+    # the org admin resolves the next one just the same
+    _as(client, "vt@x.com")
+    second = _save(client, "/api/issues", _issue(world)).get_json()
+    assert client.post(f"/api/workflow/issues/{second['id']}/transition", headers=_as(client, "oa@x.com"),
+                       json=done).status_code == 200
+    n = next(n for n in _mine(client, "dm@x.com")["data"] if f"focus={second['id']}" in n["link"])
+    assert n["title"].startswith("Resolved")
+
+
+def test_department_login_reads_its_lists_and_changes_nothing(client, world, principal, principal_record):
+    """A department login reads students, daily and class attendance, lab
+    equipment (with its current status), assessments, OJT, field visits and
+    guest lectures in its districts - every detail, changing nothing - and has
+    a dashboard of them. No issues of any kind, no maintenance log, no notifications."""
+    from app.models.geography import District
+    from app.models.operations import LabEquipment, EquipmentMaintenance
+    dept = User(organisation_id=world["org"].id, full_name="Dept", email="dept@x.com", role="DEPT")
+    dept.set_password("Password@123")
+    dept.districts.append(db.session.get(District, world["school"].district_id))
+    db.session.add(dept)
+    org, school, lab = world["org"].id, world["school"].id, world["lab"].id
+    fine = LabEquipment(organisation_id=org, school_id=school, lab_id=lab, name="Printer")
+    broken = LabEquipment(organisation_id=org, school_id=school, lab_id=lab, name="Desktop")
+    db.session.add_all([fine, broken])
+    db.session.flush()
+    db.session.add_all([
+        EquipmentMaintenance(organisation_id=org, equipment_id=fine.id, date=date.today() - timedelta(days=9),
+                             issue="Paper jam", maintenance_status="Resolved"),
+        EquipmentMaintenance(organisation_id=org, equipment_id=broken.id, date=date.today(),
+                             issue="No display", maintenance_status="Under Progress"),
+    ])
+    db.session.commit()
+    h = _as(client, "dept@x.com")
+    lists = {"students", "attendance", "class-attendance", "equipment", "assessments",
+             "ojt-placements", "field-visits", "guest-lectures"}
+    res = client.get("/api/meta/bootstrap", headers=h).get_json()["resources"]
+    assert set(res) == lists | {"dept-issues"}          # ... and their own issues
+    assert all(not v["can_write"] and not v["can_edit"] for k, v in res.items() if k in lists)
+    assert res["dept-issues"]["can_write"] and not res["dept-issues"]["can_edit"]
+    for name in lists:
+        assert client.get(f"/api/{name}?school_id={school}", headers=h).status_code == 200, name
+    # every detail of a record
+    sid = str(world["students"][0].id)
+    assert client.get(f"/api/students/{sid}", headers=h).status_code == 200
+    assert client.get(f"/api/promotion/history/{sid}", headers=h).status_code == 200
+    # lab equipment with its current status
+    eq = {r["name"]: r["current_status"] for r in
+          client.get(f"/api/equipment?school_id={school}", headers=h).get_json()["data"]}
+    assert eq == {"Printer": "Working", "Desktop": "Under Progress"}
+    assert client.get(f"/api/equipment/{broken.id}", headers=h).status_code == 200
+    # ... and change nothing
+    assert client.post("/api/students", headers=h, json={"first_name": "X"}).status_code == 403
+    assert client.patch(f"/api/students/{sid}", headers=h, json={"first_name": "X"}).status_code == 403
+    assert client.post("/api/equipment", headers=h, json={"name": "X", "lab_id": str(lab)}).status_code == 403
+    assert client.patch(f"/api/equipment/{fine.id}", headers=h, json={"name": "X"}).status_code == 403
+    assert client.post(f"/api/workflow/students/{sid}/verify", headers=h,
+                       json={"verification_status": "verified"}).status_code == 403
+    assert client.post(f"/api/workflow/equipment-maintenance/{broken.id}/status", headers=h,
+                       json={"maintenance_status": "Resolved"}).status_code == 403
+    assert client.get("/api/promotion/options", headers=h).status_code == 403
+    # its dashboard: numbers about those lists only
+    cards = {c["key"]: c["value"] for c in client.get("/api/dashboard/summary", headers=h).get_json()["cards"]}
+    assert set(cards) == {"students", "attendance", "endorsed", "class_attendance", "assessments", "placements",
+                          "field_visits", "guest_lectures", "equipment", "equipment_under_repair"}
+    assert cards["equipment"] == 2 and cards["equipment_under_repair"] == 1
+    assert cards["students"] == len(world["students"])
+    # no issues, no maintenance log, no master data, no user admin
+    for other in ("issues", "principal-issues", "org-issues", "equipment-maintenance", "schools", "labs",
+                  "trainers", "principals", "districts", "employers", "diaries", "notifications"):
+        assert client.get(f"/api/{other}", headers=h).status_code == 403, other
+    assert client.get("/api/users", headers=h).status_code == 403
+    # a principal's issue in their district is not theirs to hear of or resolve
+    issue = client.post("/api/principal-issues", headers=_as(client, "pr@x.com"), json={
+        "reporting_date": date.today().isoformat(), "details": "Lab door broken"}).get_json()
+    assert _mine(client, "dept@x.com")["data"] == []
+    assert client.post(f"/api/workflow/principal-issues/{issue['id']}/transition", headers=_as(client, "dept@x.com"),
+                       json={"workflow_status": "resolved", "resolution_note": "x"}).status_code == 403
+
+
+def test_department_issue_goes_only_to_the_org_admin_who_resolves_it(client, world):
+    """A department login raises an issue with just its description - the date
+    and time are filled in. Only the org admin is told (not the district
+    manager, not the super admin), only the org admin resolves it, and the
+    department login hears when it's resolved. Each sees only their own."""
+    from datetime import datetime, timedelta
+    from app.models.geography import District
+    district = db.session.get(District, world["school"].district_id)
+    org = world["org"].id
+    people = [User(full_name="SA", email="sa@x.com", role="SA"),
+              User(organisation_id=org, full_name="OA", email="oa@x.com", role="OA"),
+              User(organisation_id=org, full_name="DM", email="dm@x.com", role="DM"),
+              User(organisation_id=org, full_name="Asha Dept", email="dept@x.com", role="DEPT"),
+              User(organisation_id=org, full_name="Other Dept", email="dept2@x.com", role="DEPT")]
+    for u in people:
+        u.set_password("Password@123")
+        if u.role in ("DM", "DEPT"):
+            u.districts.append(district)
+    db.session.add_all(people)
+    db.session.commit()
+    h = _as(client, "dept@x.com")
+    assert client.post("/api/dept-issues", headers=h, json={"details": "  "}).status_code == 400
+    r = client.post("/api/dept-issues", headers=h, json={"details": "Need the Pune lab report",
+                                                          "reporting_date": "2020-01-01"})
+    assert r.status_code == 201, r.get_json()
+    issue = r.get_json()
+    india = datetime.utcnow() + timedelta(hours=5, minutes=30)
+    assert issue["reporting_date"] == india.date().isoformat()          # filled in, not taken from the form
+    assert issue["reporting_time"][:2] == india.strftime("%H") or india.minute < 2
+    assert issue["workflow_status"] == "open" and issue["raised_by_name"] == "Asha Dept"
+    # only the org admin hears of it
+    assert any(f"focus={issue['id']}" in n["link"] for n in _mine(client, "oa@x.com")["data"])
+    for email in ("dm@x.com", "sa@x.com", "dept2@x.com"):
+        assert not any(issue["id"] in (n["link"] or "") for n in _mine(client, email)["data"]), email
+    # each department login sees only their own; the org admin sees them all
+    assert [x["id"] for x in client.get("/api/dept-issues", headers=_as(client, "dept@x.com")).get_json()["data"]] == [issue["id"]]
+    assert client.get("/api/dept-issues", headers=_as(client, "dept2@x.com")).get_json()["data"] == []
+    assert client.get(f"/api/dept-issues/{issue['id']}", headers=_as(client, "dept2@x.com")).status_code in (403, 404)
+    assert issue["id"] in {x["id"] for x in client.get("/api/dept-issues", headers=_as(client, "oa@x.com")).get_json()["data"]}
+    assert client.get("/api/dept-issues", headers=_as(client, "dm@x.com")).status_code == 403
+    # the department login can't change it once raised
+    assert client.patch(f"/api/dept-issues/{issue['id']}", headers=_as(client, "dept@x.com"),
+                        json={"details": "x"}).status_code == 403
+    # only the org admin resolves it
+    url = f"/api/workflow/dept-issues/{issue['id']}/transition"
+    done = {"workflow_status": "resolved", "resolution_note": "Report sent by email"}
+    for email in ("dm@x.com", "sa@x.com", "dept@x.com"):
+        assert client.post(url, headers=_as(client, email), json=done).status_code == 403, email
     assert client.post(url, headers=_as(client, "oa@x.com"), json=done).status_code == 200
+    # ... and the department login hears it's resolved
+    told = [n for n in _mine(client, "dept@x.com")["data"] if n["title"] == "Your issue has been resolved"]
+    assert len(told) == 1 and "/app/dept-issues" in told[0]["link"] and issue["id"] in told[0]["link"]
+    oa_notice = next(n for n in _mine(client, "oa@x.com")["data"] if f"focus={issue['id']}" in n["link"])
+    assert oa_notice["title"].startswith("Resolved")

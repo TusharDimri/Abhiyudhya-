@@ -12,7 +12,7 @@ from app.models.user import User
 from app.models.geography import District
 from app.models.lab import Lab
 from app.rbac import login_required, current_user
-from app.rbac.roles import Role, ROLE_LABELS
+from app.rbac.roles import DISTRICT_ROLES, Role, ROLE_LABELS
 from app.services import audit
 from app.utils.security import validate_password
 from app.services.cache import cached_json
@@ -35,6 +35,8 @@ MANAGER_ROLES = {Role.SUPER_ADMIN.value, Role.ORG_ADMIN.value}
 # schools' principals and trainers (not other org admins)
 SCHOOL_STAFF = (Role.PRINCIPAL.value, Role.TRAINER.value)
 ORG_ADMIN_LOOKS_AFTER = (Role.DISTRICT_MANAGER.value, *SCHOOL_STAFF)
+# ... and the super admin's: org admins and department logins
+SUPER_ADMIN_LOOKS_AFTER = (Role.ORG_ADMIN.value, Role.DEPARTMENT.value)
 
 # no look-alike characters (0/O, 1/l/I) - the password is read off a screen
 _PW_UPPER, _PW_LOWER, _PW_DIGIT = "ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnpqrstuvwxyz", "23456789"
@@ -95,8 +97,8 @@ def _scoped_target(actor, target):
         abort(403, description="Outside your organisation")
     if actor.role == Role.ORG_ADMIN.value and target.role not in ORG_ADMIN_LOOKS_AFTER:
         abort(403, description="Org admins look after district managers', principals' and trainers' logins only.")
-    if actor.role == Role.SUPER_ADMIN.value and target.role != Role.ORG_ADMIN.value:
-        abort(403, description="The super admin looks after org admins' logins only.")
+    if actor.role == Role.SUPER_ADMIN.value and target.role not in SUPER_ADMIN_LOOKS_AFTER:
+        abort(403, description="The super admin looks after org admins' and department logins only.")
 
 
 @bp.get("")
@@ -111,8 +113,8 @@ def list_users():
     if user.role == Role.ORG_ADMIN.value:      # their district managers, principals and trainers
         q = q.filter(or_(User.role == Role.DISTRICT_MANAGER.value,
                          db.and_(User.role.in_(SCHOOL_STAFF), User.school_id.isnot(None))))
-    if user.role == Role.SUPER_ADMIN.value:      # their org admins, nobody below
-        q = q.filter(User.role == Role.ORG_ADMIN.value)
+    if user.role == Role.SUPER_ADMIN.value:      # their org admins and department logins, nobody else
+        q = q.filter(User.role.in_(SUPER_ADMIN_LOOKS_AFTER))
     role = request.args.get("role")
     if role:
         q = q.filter(User.role == role)
@@ -143,7 +145,7 @@ def create_user():
         missing.append("School")
     if role == Role.TRAINER.value and not data.get("lab_ids"):
         missing.append("Lab")
-    if role == Role.DISTRICT_MANAGER.value and not data.get("district_ids"):
+    if role in DISTRICT_ROLES and not data.get("district_ids"):
         missing.append("District")
     if missing:
         abort(400, description="Please fill in: " + ", ".join(missing) + ".")
@@ -237,9 +239,18 @@ def reset_password(uid):
     return jsonify({"reset": True})
 
 
-# ------------------------------------------ district managers (Master Data)
-# A district manager is below the org admin: the org admin adds them (with
-# the district or districts they look after) and hands over their login.
+# ------------------------- district managers and department logins
+# Each looks after one or more districts of an organisation. The org admin
+# adds district managers (Master Data); the super admin adds department
+# logins (Administration), for the organisation they pick. Either way the
+# login is shown once.
+# kind -> (role, its name, who adds them, who lists them)
+DISTRICT_KINDS = {
+    "district-managers": (Role.DISTRICT_MANAGER.value, "district managers", Role.ORG_ADMIN.value,
+                          (Role.ORG_ADMIN.value, Role.SUPER_ADMIN.value)),
+    "department-logins": (Role.DEPARTMENT.value, "department logins", Role.SUPER_ADMIN.value,
+                          (Role.SUPER_ADMIN.value,)),
+}
 MOBILE = re.compile(r"^[6-9]\d{9}$")
 
 
@@ -252,33 +263,39 @@ def _dm_row(u):
     }
 
 
-@bp.get("/district-managers")
+@bp.get("/<any('district-managers', 'department-logins'):kind>")
 @login_required
-def list_district_managers():
-    """An org admin's district managers (the super admin reads them too,
-    for the organisation they pick). ?district_id= narrows it."""
+def list_district_managers(kind):
+    """An org admin's district managers or department logins (the super admin
+    reads them too, for the organisation they pick). ?district_id= narrows it."""
+    role, plural, _adder, readers = DISTRICT_KINDS[kind]
     actor = current_user()
-    if actor.role not in (Role.ORG_ADMIN.value, Role.SUPER_ADMIN.value):
-        abort(403, description="Only admins see district managers.")
+    if actor.role not in readers:
+        abort(403, description=f"Only the {'super admin' if readers == (Role.SUPER_ADMIN.value,) else 'admins'} see {plural}.")
     org_id = actor.organisation_id if actor.role == Role.ORG_ADMIN.value else request.args.get("organisation_id")
     if not org_id:
         return jsonify({"data": []})
-    q = db.session.query(User).filter(User.role == Role.DISTRICT_MANAGER.value, User.is_deleted.is_(False),
+    q = db.session.query(User).filter(User.role == role, User.is_deleted.is_(False),
                                       User.organisation_id == org_id)
     if request.args.get("district_id"):
         q = q.filter(User.districts.any(District.id == request.args["district_id"]))
     return jsonify({"data": [_dm_row(u) for u in q.order_by(User.full_name).all()]})
 
 
-@bp.post("/district-managers")
+@bp.post("/<any('district-managers', 'department-logins'):kind>")
 @login_required
-def create_district_manager():
+def create_district_manager(kind):
     """Body: {full_name, email, phone, district_ids}. Makes their login and
     returns it - the only time the password is shown."""
     from types import SimpleNamespace
+    role, plural, adder, _readers = DISTRICT_KINDS[kind]
     actor = current_user()
-    if actor.role != Role.ORG_ADMIN.value:
-        abort(403, description="Only the org admin adds district managers.")
+    if actor.role != adder:
+        abort(403, description=f"Only the {'super admin' if adder == Role.SUPER_ADMIN.value else 'org admin'} adds {plural}.")
+    # the super admin adds them for the organisation they pick
+    org_id = actor.organisation_id if actor.role == Role.ORG_ADMIN.value else (request.get_json(silent=True) or {}).get("organisation_id")
+    if not org_id:
+        abort(400, description="Please fill in: Organisation.")
     data = request.get_json(silent=True) or {}
     name = (data.get("full_name") or "").strip()
     phone = (data.get("phone") or "").strip()
@@ -289,14 +306,14 @@ def create_district_manager():
         abort(400, description="Please fill in: " + ", ".join(missing) + ".")
     if not MOBILE.match(phone):
         abort(400, description="Mobile number must be 10 digits starting 6-9.")
-    districts = db.session.query(District).filter(District.id.in_(ids), District.organisation_id == actor.organisation_id,
+    districts = db.session.query(District).filter(District.id.in_(ids), District.organisation_id == org_id,
                                                   District.is_deleted.is_(False)).all()
     if len(districts) != len(set(ids)):
-        abort(400, description="Choose districts of your own organisation.")
-    person = SimpleNamespace(organisation_id=actor.organisation_id, full_name=name, email=data.get("email"),
+        abort(400, description="Choose districts of that organisation.")
+    person = SimpleNamespace(organisation_id=org_id, full_name=name, email=data.get("email"),
                              phone=phone, user_id=None)
     try:
-        login = create_login_for(Role.DISTRICT_MANAGER.value, person, actor)
+        login = create_login_for(role, person, actor)
     except LoginError as exc:
         abort(400, description=str(exc))
     u = db.session.get(User, person.user_id)

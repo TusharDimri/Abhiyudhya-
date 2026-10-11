@@ -8,7 +8,8 @@ import DistrictManagers from "./DistrictManagers";
 
 // Tabs that aren't record lists of their own: a district manager is a login
 // (with the districts they look after) - the org admin adds them here, right
-// after Districts. The super admin sees them read-only.
+// after Districts. The super admin sees them read-only. (Department logins
+// are the super admin's: Administration -> Department Logins.)
 const EXTRA_TABS = {
   "district-managers": { label: "District Managers", after: "districts", roles: ["OA", "SA"], Page: DistrictManagers },
 };

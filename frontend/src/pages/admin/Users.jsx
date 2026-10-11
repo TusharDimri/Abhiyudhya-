@@ -12,7 +12,7 @@ import { useReviewGate, ReviewNotice, reviewLabel } from "../../components/Revie
 import LoginCreated from "../../components/LoginCreated";
 
 const ROLE_LABELS = {
-  SA: "Super Admin", OA: "Organisation Admin", DM: "District Manager",
+  SA: "Super Admin", OA: "Organisation Admin", DM: "District Manager", DEPT: "Department Login",
   PR: "Principal", VT: "Vocational Trainer",
 };
 
@@ -148,7 +148,7 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
 
   const needsSchool = ["PR", "VT"].includes(f.role);
   const needsLab = f.role === "VT";
-  const needsDistrict = f.role === "DM";
+  const needsDistrict = ["DM", "DEPT"].includes(f.role);
   const orgLocked = isSA && f.role !== "SA" && !f.organisation_id;
   // every starred field has an answer (the server checks the same)
   const requiredFilled = f.full_name.trim() && f.email.trim()

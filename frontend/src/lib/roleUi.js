@@ -33,6 +33,9 @@ export const CARD_LINKS = {
   ojt_hours: { to: "/app/ojt-placements" },
   my_employer: { to: "/app/employer-student-maps" },
   assessments: { to: "/app/assessments" },
+  class_attendance: { to: "/app/class-attendance" },
+  equipment: { to: "/app/equipment" },
+  equipment_under_repair: { to: "/app/equipment" },
 };
 
 export function cardHref(key) {
@@ -69,9 +72,16 @@ export const QUICK_ACTIONS = {
     { label: "Users & access", icon: "users", to: "/app/admin/users" },
   ],
   DM: [
+    { label: "VT issues needing action", icon: "issues", to: "/app/issues?workflow_status=open" },
     { label: "Principal issues needing action", icon: "principal-issues", to: "/app/principal-issues?workflow_status=open" },
     { label: "Maintenance needing action", icon: "equipment-maintenance", to: "/app/equipment-maintenance?maintenance_status=Reported" },
     { label: "Schools in my district", icon: "schools", to: "/app/schools" },
+  ],
+  DEPT: [
+    { label: "Students", icon: "students", to: "/app/students" },
+    { label: "Daily attendance", icon: "attendance", to: "/app/attendance" },
+    { label: "Class attendance", icon: "class-attendance", to: "/app/class-attendance" },
+    { label: "Lab equipment", icon: "equipment", to: "/app/equipment" },
   ],
   PR: [
     { label: "Verify daily attendance", icon: "attendance", to: "/app/attendance?endorsement_status=submitted" },
@@ -94,6 +104,7 @@ export const DASHBOARD_SUBTITLE = {
   SA: "Every organisation on the platform",
   OA: "Your organisation at a glance",
   DM: "The schools and labs in your district",
+  DEPT: "Students, attendance and labs in your district",
   PR: "Your school at a glance",
   VT: "Your lab, your classes, your day",
 };
@@ -102,7 +113,9 @@ export const DASHBOARD_SUBTITLE = {
 export const EMPTY_HINTS = {
   attendance: { VT: "No attendance yet. Mark today's and it will appear here.", PR: "Nothing waiting for verification yet." },
   "class-attendance": { VT: "No classes marked yet." },
-  students: { VT: "No students registered for your lab yet.", PR: "No students registered at your school yet." },
+  "dept-issues": { DEPT: "You haven't raised any issues.", OA: "No issues raised by department logins." },
+  students: { VT: "No students registered for your lab yet.", PR: "No students registered at your school yet.",
+    DEPT: "No students registered at this school yet." },
   issues: { VT: "You haven't reported any issues.", DM: "No issues reported in your district." },
   "field-visits": { VT: "No field visits recorded yet." },
   "guest-lectures": { VT: "No guest lectures recorded yet." },

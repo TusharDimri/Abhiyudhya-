@@ -45,6 +45,7 @@ export function visibleColumns(columns, options, profile, role) {
   };
   return columns
     .filter((c) => !hide[c.key] && (!c.hideFor || !(role && c.hideFor.includes(role))))
+    .filter((c) => !c.onlyFor || c.onlyFor.includes(role))
     .map((c) => (role && c.forRole?.[role] ? { ...c, ...c.forRole[role] } : c));
 }
 

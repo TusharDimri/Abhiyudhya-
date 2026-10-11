@@ -1,7 +1,9 @@
 /* District managers - below the org admin, each looking after one or more
    districts. The org admin adds them here (a login is made, and its username
    and password shown once); the super admin reads the list for the
-   organisation they pick. Passwords and access: Users & Access. */
+   organisation they pick. Passwords and access: Users & Access.
+   Department logins are the same kind of login: the super admin adds them
+   (Administration), for the organisation they pick. */
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
@@ -17,7 +19,14 @@ import ScopePicker, { ScopeEmpty } from "./ScopePicker";
 import LoginCreated from "./LoginCreated";
 import { useReviewGate, ReviewNotice, reviewLabel } from "./ReviewGate";
 
-function NewDistrictManager({ districts, onClose, onDone }) {
+// the two kinds of district login this page lists and adds
+const KINDS = {
+  "district-managers": { title: "District Managers", one: "District Manager", few: "district managers", adder: "OA", crumb: "Master Data" },
+  "department-logins": { title: "Department Logins", one: "Department Login", few: "department logins", adder: "SA", crumb: "Administration" },
+};
+
+function NewDistrictManager({ kind, orgId, districts, onClose, onDone }) {
+  const k = KINDS[kind];
   const { push } = useToast();
   const review = useReviewGate();
   const box = useRef(null);
@@ -27,17 +36,17 @@ function NewDistrictManager({ districts, onClose, onDone }) {
   const filled = f.full_name.trim() && f.email.trim() && /^[6-9]\d{9}$/.test(f.phone.trim()) && f.district_ids.length;
 
   const save = useMutation({
-    mutationFn: async () => (await api.post("/users/district-managers", f)).data,
-    onSuccess: (r) => { push("District manager added", "success"); onDone(r.login); },
+    mutationFn: async () => (await api.post(`/users/${kind}`, { ...f, organisation_id: orgId })).data,
+    onSuccess: (r) => { push(`${k.one} added`, "success"); onDone(r.login); },
     onError: (e) => push(apiError(e), "error"),
   });
 
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="drawer" style={{ width: "min(680px,100%)" }} ref={box} role="dialog" aria-label="New District Manager">
+      <div className="drawer" style={{ width: "min(680px,100%)" }} ref={box} role="dialog" aria-label={`New ${k.one}`}>
         <header>
           <div>
-            <h3 style={{ margin: 0 }}>New District Manager</h3>
+            <h3 style={{ margin: 0 }}>New {k.one}</h3>
             <span className="drawer-sub">Their login is made when you save - you'll see the username and password.</span>
           </div>
           <button type="button" className="close" onClick={onClose} aria-label="Close"><X size={18} strokeWidth={2} /></button>
@@ -72,7 +81,7 @@ function NewDistrictManager({ districts, onClose, onDone }) {
           <button type="button" className="btn btn-primary"
             disabled={!filled || save.isPending || (review.reviewing && !review.ready)}
             onClick={() => (review.reviewing ? save.mutate() : review.start(box.current))}>
-            {reviewLabel(review, { busy: save.isPending, submitText: "Add District Manager" })}
+            {reviewLabel(review, { busy: save.isPending, submitText: `Add ${k.one}` })}
           </button>
         </footer>
       </div>
@@ -80,16 +89,23 @@ function NewDistrictManager({ districts, onClose, onDone }) {
   );
 }
 
-export default function DistrictManagers() {
+export function DepartmentLogins() {
+  return <DistrictManagers kind="department-logins" />;
+}
+
+export default function DistrictManagers({ kind = "district-managers" }) {
+  const k = KINDS[kind];
   const qc = useQueryClient();
   const { user } = useAuth();
   const { data: boot } = useBootstrap();
   const isSA = user?.role === "SA";
-  const [scope, setScope] = useOrgScope("district-managers");
+  const [scope, setScope] = useOrgScope(kind);
   const [district, setDistrict] = useState("");
   const [adding, setAdding] = useState(false);
   const [login, setLogin] = useState(null);
   const orgId = isSA ? scope.organisation_id : user?.organisation_id;
+  // the org admin adds district managers; the super admin department logins, once an organisation is picked
+  const canAdd = user?.role === k.adder && !!orgId;
 
   const districtsOfOrg = useQuery({
     queryKey: ["scope-options", "districts", orgId, "dm"],
@@ -100,12 +116,12 @@ export default function DistrictManagers() {
   const districts = districtsOfOrg.data || [];
 
   const list = useQuery({
-    queryKey: ["district-managers", orgId, district],
+    queryKey: [kind, orgId, district],
     queryFn: async () => {
       const p = new URLSearchParams();
       if (isSA) p.set("organisation_id", orgId);
       if (district) p.set("district_id", district);
-      return (await api.get(`/users/district-managers?${p}`)).data.data;
+      return (await api.get(`/users/${kind}?${p}`)).data.data;
     },
     enabled: !!orgId,
   });
@@ -115,18 +131,18 @@ export default function DistrictManagers() {
     <div className="stack" style={{ gap: "1rem" }}>
       <div className="page-head">
         <div>
-          <div className="crumb">Master Data</div>
-          <h1><span className="page-ico"><Icon name="district-managers" size={20} /></span>District Managers</h1>
+          <div className="crumb">{k.crumb}</div>
+          <h1><span className="page-ico"><Icon name={kind} size={20} /></span>{k.title}</h1>
         </div>
-        {!isSA && (
+        {canAdd && (
           <div className="page-actions">
-            <button className="btn btn-accent" onClick={() => setAdding(true)}><Plus size={16} /> New District Manager</button>
+            <button className="btn btn-accent" onClick={() => setAdding(true)}><Plus size={16} /> New {k.one}</button>
           </div>
         )}
       </div>
 
       {isSA && <ScopePicker needs="org" scope={scope} setScope={setScope} boot={boot} isSA />}
-      {isSA && !orgId ? <ScopeEmpty needs="org" label="District Managers" isSA /> : (
+      {isSA && !orgId ? <ScopeEmpty needs="org" label={k.title} isSA /> : (
         <>
           <div className="filterbar">
             <div className="filterbar-row">
@@ -160,16 +176,16 @@ export default function DistrictManagers() {
               </table>
             </div>
             {!list.isLoading && rows.length === 0 && (
-              <div className="empty">No district managers yet{district ? " for this district" : ""}.</div>
+              <div className="empty">No {k.few} yet{district ? " for this district" : ""}.</div>
             )}
           </div>
-          {!isSA && <p className="muted" style={{ margin: 0, fontSize: ".8125rem" }}>Reset a district manager's password or disable their login from Users &amp; Access.</p>}
+          {canAdd && <p className="muted" style={{ margin: 0, fontSize: ".8125rem" }}>Reset a {k.one.toLowerCase()}'s password{isSA ? '' : ' or disable their login'} from Users &amp; Access.</p>}
         </>
       )}
 
       {adding && (
-        <NewDistrictManager districts={districts} onClose={() => setAdding(false)}
-          onDone={(l) => { setAdding(false); setLogin(l); qc.invalidateQueries({ queryKey: ["district-managers"] }); qc.invalidateQueries({ queryKey: ["users"] }); }} />
+        <NewDistrictManager kind={kind} orgId={orgId} districts={districts} onClose={() => setAdding(false)}
+          onDone={(l) => { setAdding(false); setLogin(l); qc.invalidateQueries({ queryKey: [kind] }); qc.invalidateQueries({ queryKey: ["users"] }); }} />
       )}
       {login && <LoginCreated {...login} onDone={() => setLogin(null)} />}
     </div>
