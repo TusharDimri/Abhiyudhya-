@@ -4,7 +4,7 @@ The single place scope is *derived from the authenticated user* (never trusted
 from the client). Every list/detail/write query for tenant-scoped data passes
 through `apply_scope`, so isolation logic lives here, not per-endpoint.
 """
-from app.rbac.roles import Role
+from app.rbac.roles import DISTRICT_ROLES, Role
 from app.rbac.curriculum import allowed_job_role_ids
 
 
@@ -63,7 +63,7 @@ def apply_scope(query, model, user):
     `user` is the current User object. Scope is layered:
       SA -> everything (all orgs)
       OA -> their organisation
-      DM -> their districts (via school -> district or direct district_id)
+      DM, DEPT -> their districts (via school -> district or direct district_id)
       PR -> their school
       VT -> their labs/school, and (for curriculum) only the job role(s) those
             labs actually teach (spec Part 1.3 lab job-role slots)
@@ -85,7 +85,9 @@ def apply_scope(query, model, user):
     if role == Role.ORG_ADMIN.value:
         return query
 
-    if role == Role.DISTRICT_MANAGER.value:
+    if role == Role.DEPARTMENT.value and getattr(model, "raiser_own_only", False):
+        return query.filter(model.raised_by == user.id)     # their own issues only
+    if role in DISTRICT_ROLES:
         district_ids = [d.id for d in user.districts]
         if model.__tablename__ == "district":
             # a DM's own assigned district(s) - was previously falling through

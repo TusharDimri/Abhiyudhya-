@@ -18,6 +18,7 @@ const ADMIN_GROUP = "Administration";
 
 // Special admin pages (not resource modules) with the roles allowed to see them.
 const ADMIN_LINKS = [
+  { to: "/app/admin/department-logins", label: "Department Logins", icon: "department-logins", roles: ["SA"] },
   { to: "/app/admin/users", label: "Users & Access", icon: "users", roles: ["SA", "OA"] },
   { to: "/app/admin/audit", label: "Audit Log", icon: "audit", roles: ["SA", "OA"] },
   // Recycle Bin: switched off - nothing can be deleted any more, so there's

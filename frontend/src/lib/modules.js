@@ -525,17 +525,19 @@ export const MODULES = {
     ],
     rowActions: [
       { action: "verify", roles: ["OA"] },   // trainers add students; the org admin verifies them
-      { action: "history", roles: ["VT", "PR", "DM", "OA", "SA"] },
+      { action: "view", roles: ["DEPT"] },   // a department login reads every detail
+      { action: "history", roles: ["VT", "PR", "DM", "DEPT", "OA", "SA"] },
       // leaving the school: the trainer marks -> the principal records the TC -> the org admin confirms
       { action: "status", roles: ["VT"] },
       { action: "tc", roles: ["PR"] },
       { action: "leftverify", roles: ["OA"] },
       // a student who has left: View (their record and history) is all anyone gets
-      { action: "record", roles: ["VT", "PR", "DM", "OA", "SA"] },
+      { action: "record", roles: ["VT", "PR", "DM", "DEPT", "OA", "SA"] },
     ],
   },
   assessments: {
     label: "Assessments", singular: "Assessment", icon: "🎯", group: "People & Students",
+    rowActions: [{ action: "view", roles: ["DEPT"] }],   // a department login reads every detail
     searchable: false,
     columns: [
       { key: "student_name", label: "Student" },
@@ -593,7 +595,7 @@ export const MODULES = {
         defaultValue: FIRST_LAB },
     ],
     // only the principal verifies attendance; everyone else just sees it
-    rowActions: [{ action: "view", roles: ["VT", "PR", "DM", "OA", "SA"] }, { action: "endorse", roles: ["PR"] }],
+    rowActions: [{ action: "view", roles: ["VT", "PR", "DM", "DEPT", "OA", "SA"] }, { action: "endorse", roles: ["PR"] }],
   },
   // MAPP - Maasik Anusaran Praman Patra: the trainer's whole month of
   // attendance, uploaded as one PDF (only their own - api/registry.py "mapp")
@@ -635,7 +637,7 @@ export const MODULES = {
       { key: "distance_from_school_m", label: "At school?", dot: "distance", hideFor: ["VT"] },
     ],
     // only the principal verifies attendance; everyone else just sees it
-    rowActions: [{ action: "view", roles: ["VT", "PR", "DM", "OA", "SA"] }, { action: "endorse", roles: ["PR"] }],
+    rowActions: [{ action: "view", roles: ["VT", "PR", "DM", "DEPT", "OA", "SA"] }, { action: "endorse", roles: ["PR"] }],
     fields: [
       { name: "date", label: "Date", required: true, ...PAST_DATE, readOnlyFor: ["VT"] },
       { name: "time", label: "Time", type: "time", required: true, defaultValue: nowTime, readOnlyFor: ["VT"] },
@@ -724,13 +726,36 @@ export const MODULES = {
     // the org admin reads their own; the super admin resolves them (the org admin is told)
     rowActions: [{ action: "view", roles: ["OA"] }, { action: "resolve", roles: ["SA"] }],
   },
+  // a department login's own issues: just what the issue is - the date and time
+  // are filled in when it's saved. Only their org admin hears of it and resolves it.
+  "dept-issues": {
+    label: "My Issues", labelFor: { OA: "Department Issues", SA: "Department Issues" }, singular: "Issue", icon: "",
+    group: "Daily Operations",
+    columns: [
+      { key: "reporting_date", label: "Date" },
+      { key: "reporting_time", label: "Time" },
+      { key: "details", label: "Issue" },
+      { key: "raised_by_name", label: "Raised by", hideFor: ["DEPT"] },
+      { key: "organisation_name", label: "Organisation", onlyFor: ["SA"] },
+      { key: "workflow_status", label: "Status", badge: true, valueLabels: ISSUE_STATUS_LABELS },
+      { key: "resolution_note", label: "Resolution" },
+    ],
+    fields: [
+      // shown, not asked: now, as the form opens (the server stamps the moment it's saved)
+      { name: "reporting_date", label: "Date", type: "date", defaultValue: today, readOnlyFor: ["DEPT"] },
+      { name: "reporting_time", label: "Time", type: "time", defaultValue: nowTime, readOnlyFor: ["DEPT"] },
+      { name: "details", label: "Issue", type: "textarea", rows: 5, required: true, placeholder: "What is the issue?" },
+    ],
+    // the department login reads their own; the org admin resolves them (the department login is told)
+    rowActions: [{ action: "view", roles: ["DEPT"] }, { action: "resolve", roles: ["OA"] }],
+  },
   "field-visits": {
     label: "Field / Industry Visits", singular: "Field Visit", icon: "🚌", group: "Daily Operations",
     defaultGroup: "Visit",
     searchHint: "Search by organisation, address or purpose",
     captureLocation: true,
     yearlyTarget: true,   // 2 per level per academic year (api/targets.py)
-    rowActions: [{ action: "view", roles: ["PR"] }],
+    rowActions: [{ action: "view", roles: ["PR", "DEPT"] }],
     columns: [
       { key: "reporting_date", label: "Date" },
       { key: "organisation_name", label: "Organisation" },
@@ -774,7 +799,7 @@ export const MODULES = {
     searchHint: "Search by topic or lecturer",
     captureLocation: true,
     yearlyTarget: true,   // 15 per level per academic year (api/targets.py)
-    rowActions: [{ action: "view", roles: ["PR"] }],
+    rowActions: [{ action: "view", roles: ["PR", "DEPT"] }],
     columns: [
       { key: "reporting_date", label: "Date" },
       { key: "lecturer_name", label: "Lecturer" },
@@ -812,12 +837,14 @@ export const MODULES = {
   },
   equipment: {
     label: "Lab Equipment", singular: "Equipment", icon: "🖥️", group: "Daily Operations",
+    rowActions: [{ action: "view", roles: ["DEPT"] }],   // a department login reads every detail
     searchHint: "Search by equipment name, description or note",
     columns: [
       { key: "name", label: "Equipment" },
       { key: "lab_name", label: "Lab" },
       { key: "trainer_name", label: "Trainer" },
       { key: "receipt_date", label: "Date" },
+      { key: "current_status", label: "Current status", badge: true, onlyFor: ["DEPT"] },
     ],
     fields: [
       // Every item is owned by a trainer, so it can be handed over when one
@@ -931,6 +958,7 @@ export const MODULES = {
   },
   "ojt-placements": {
     label: "OJT / Placement", singular: "OJT / Placement", icon: "🎓", group: "Internship & Placement",
+    rowActions: [{ action: "view", roles: ["DEPT"] }],   // a department login reads every detail
     searchable: false,
     columns: [
       { key: "student_name", label: "Student" },
@@ -1031,6 +1059,7 @@ const ORG_ADMIN_FILTERS = {
   "class-attendance": ["trainer_id", "lab_id", "class_grade", "section", "date", "endorsement_status"],
   "principal-issues": ["workflow_status", "academic_year"],
   "org-issues": ["workflow_status", "academic_year"],
+  "dept-issues": ["workflow_status"],
   issues: ["trainer_id", "lab_id", "workflow_status", "academic_year"],
   "field-visits": ["lab_id", "academic_year", "class_grade", "section"],
   "guest-lectures": ["lab_id", "academic_year", "class_grade", "section"],
@@ -1040,8 +1069,8 @@ const ORG_ADMIN_FILTERS = {
   notifications: ["category", "is_read"],
 };
 for (const [key, cols] of Object.entries(ORG_ADMIN_FILTERS)) {
-  // district managers work the same lists the same way
-  if (MODULES[key]) MODULES[key].filtersFor = { ...(MODULES[key].filtersFor || {}), OA: cols, DM: cols };
+  // district managers (and department logins) work the same lists the same way
+  if (MODULES[key]) MODULES[key].filtersFor = { ...(MODULES[key].filtersFor || {}), OA: cols, DM: cols, DEPT: cols };
 }
 
 export const HIDDEN_SECTIONS = {
@@ -1053,8 +1082,7 @@ export const HIDDEN_SECTIONS = {
   // (notifications: they have their own, from the bell - not this list of everyone's)
   OA: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback", "notifications"],
   // district managers: the same (feedback off for now too); notifications are their own, from the bell
-  DM: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback", "notifications",
-    "issues"],   // trainers' issues are the org admin's
+  DM: ["modules", "units", "sessions", "diaries", "employers", "employer-student-maps", "feedback", "notifications"],
   // the super admin reads everything else; notifications are their own, from the bell
   SA: ["modules", "units", "sessions", "diaries", "feedback", "notifications", "employers", "employer-student-maps"],
 };
@@ -1089,6 +1117,7 @@ export const NAV_GROUP_ORDER = {
   SA: NAV_GROUPS,
   OA: NAV_GROUPS,
   DM: ["People & Students", "Daily Operations", "Master Data", "Internship & Placement", "Cross-cutting", "Administration"],
+  DEPT: ["People & Students", "Daily Operations", "Internship & Placement"],
   PR: ["Daily Operations", "People & Students", "Internship & Placement", "Master Data", "Cross-cutting", "Administration"],
   VT: ["Daily Operations", "People & Students", "Internship & Placement", "Master Data", "Cross-cutting", "Administration"],
 };

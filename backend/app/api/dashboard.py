@@ -6,9 +6,10 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models.geography import School
-from app.models.student import Student
+from app.models.student import Assessment, Student
 from app.models.lab import Lab, Trainer
-from app.models.operations import ClassAttendance, DailyAttendance, PrincipalIssue, VTIssue, GuestLecture, FieldVisit
+from app.models.operations import (ClassAttendance, DailyAttendance, PrincipalIssue, VTIssue, GuestLecture, FieldVisit,
+                                   LabEquipment, EquipmentMaintenance)
 from app.models.internship import OJTPlacement, DailyDiary
 from app.rbac import login_required, current_user, apply_scope
 from app.services.cache import cached_json
@@ -77,6 +78,16 @@ def _status_count(model, user, col, val, negate=False):
     return _scoped(q, model, user).scalar() or 0
 
 
+def _equipment_under_repair(user):
+    """Lab equipment with a maintenance report still open (Reported / Under Progress)."""
+    open_report = (db.session.query(EquipmentMaintenance.id)
+                   .filter(EquipmentMaintenance.equipment_id == LabEquipment.id,
+                           EquipmentMaintenance.is_deleted.is_(False),
+                           EquipmentMaintenance.maintenance_status != "Resolved").exists())
+    q = db.session.query(func.count(LabEquipment.id)).filter(LabEquipment.is_deleted.is_(False), open_report)
+    return _scoped(q, LabEquipment, user).scalar() or 0
+
+
 @bp.get("/summary")
 @login_required
 @cached_json("summary", ttl=120)
@@ -102,10 +113,15 @@ def summary():
         "endorsed": lambda: {"key": "endorsed", "label": "Verified Attendance", "value": _status_count(DailyAttendance, user, "endorsement_status", "endorsed"), "icon": "check"},
         "diaries": lambda: {"key": "diaries", "label": "Diary Entries", "value": _count(DailyDiary, user, "date"), "icon": "book"},
         "placements": lambda: {"key": "placements", "label": "Students Placed", "value": _status_count(OJTPlacement, user, "placement_placed", True), "icon": "briefcase"},
-        "issues_resolved": lambda: {"key": "issues_resolved", "label": "Issues Resolved", "value": _status_count(VTIssue, user, "workflow_status", "resolved"), "icon": "check"},
-        "pending_issues_action": lambda: {"key": "pending_issues_action", "label": "Issues Needing Action", "value": _status_count(VTIssue, user, "workflow_status", "open"), "icon": "alert"},
-        # a district manager's: principals' issues (trainers' issues are the org admin's)
+        "issues_resolved": lambda: {"key": "issues_resolved", "label": "VT Issues Resolved", "value": _status_count(VTIssue, user, "workflow_status", "resolved"), "icon": "check"},
+        "pending_issues_action": lambda: {"key": "pending_issues_action", "label": "VT Issues Needing Action", "value": _status_count(VTIssue, user, "workflow_status", "open"), "icon": "alert"},
+        # a district manager's: trainers' issues (above) and principals' issues
         "pr_issues_action": lambda: {"key": "pr_issues_action", "label": "Principal Issues Needing Action", "value": _status_count(PrincipalIssue, user, "workflow_status", "open"), "icon": "alert"},
+        # a department login's: the other lists it reads
+        "class_attendance": lambda: {"key": "class_attendance", "label": "Class Attendance Entries", "value": _count(ClassAttendance, user, "date"), "icon": "clock"},
+        "assessments": lambda: {"key": "assessments", "label": "Assessments", "value": _count(Assessment, user, "date"), "icon": "book"},
+        "equipment": lambda: {"key": "equipment", "label": "Lab Equipment", "value": _count(LabEquipment, user), "icon": "flask"},
+        "equipment_under_repair": lambda: {"key": "equipment_under_repair", "label": "Equipment Under Repair", "value": _equipment_under_repair(user), "icon": "alert"},
         "pr_issues_resolved": lambda: {"key": "pr_issues_resolved", "label": "Principal Issues Resolved", "value": _status_count(PrincipalIssue, user, "workflow_status", "resolved"), "icon": "check"},
     }
 
@@ -113,7 +129,10 @@ def summary():
     ROLE_CARDS = {
         "SA": ["schools", "labs", "trainers", "students", "attendance", "guest_lectures", "field_visits", "open_issues", "endorsed", "placements"],
         "OA": ["schools", "labs", "trainers", "students", "pending_verification", "attendance", "guest_lectures", "field_visits", "open_issues", "placements"],
-        "DM": ["schools", "labs", "trainers", "students", "pending_verification", "attendance", "pr_issues_action", "pr_issues_resolved", "endorsed", "field_visits"],
+        "DM": ["schools", "labs", "trainers", "students", "pending_verification", "attendance", "pending_issues_action", "issues_resolved",
+               "pr_issues_action", "pr_issues_resolved", "endorsed", "field_visits"],
+        "DEPT": ["students", "attendance", "endorsed", "class_attendance", "assessments", "placements",
+                 "field_visits", "guest_lectures", "equipment", "equipment_under_repair"],
         "PR": ["pending_endorsement", "class_pending_endorsement", "endorsed", "students", "trainers", "attendance", "guest_lectures", "field_visits", "my_open_issues"],
         "VT": ["students", "pending_verification", "attendance", "pending_endorsement", "guest_lectures", "field_visits", "open_issues"],
     }

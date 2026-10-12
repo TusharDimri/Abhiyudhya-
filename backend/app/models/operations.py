@@ -159,6 +159,24 @@ class PrincipalIssue(BaseModel):
     resolved_on = db.Column(db.DateTime)
 
 
+class DeptIssue(BaseModel):
+    """An issue a department login raises ("My Issues"): just what the issue
+    is - the date and time are filled in when it is saved. Only their org
+    admin hears of it and resolves it; a department login sees only its own
+    (rbac/scope.py: raiser_own_only)."""
+    __tablename__ = "dept_issue"
+    raiser_own_only = True
+    organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
+    raised_by = db.Column(GUID(), db.ForeignKey("app_user.id", name="fk_dept_issue_raised_by_app_user"), index=True)
+    academic_year = db.Column(db.String(20), index=True)
+    reporting_date = db.Column(db.Date, nullable=False)
+    reporting_time = db.Column(db.Time)
+    details = db.Column(db.Text, nullable=False)
+    workflow_status = db.Column(db.String(20), default="open", server_default="open", index=True)
+    resolution_note = db.Column(db.Text)
+    resolved_on = db.Column(db.DateTime)
+
+
 class MonthlyAttendanceReport(BaseModel):
     """MAPP - Maasik Anusaran Praman Patra: a trainer's whole month of
     attendance, uploaded as one PDF for an academic year and month. A trainer

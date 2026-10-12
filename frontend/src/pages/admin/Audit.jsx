@@ -9,7 +9,7 @@ import api from "../../lib/api";
    Out). */
 const ACTION_BADGE = { create: "success", update: "info", delete: "danger", restore: "gold" };
 const ACTIONS = [["create", "Added"], ["update", "Changed"], ["delete", "Deleted"], ["restore", "Restored"]];
-const ROLE_NAMES = { SA: "Super Admin", OA: "Org Admin", DM: "District Manager", PR: "Principal", VT: "Trainer" };
+const ROLE_NAMES = { SA: "Super Admin", OA: "Org Admin", DM: "District Manager", DEPT: "Department Login", PR: "Principal", VT: "Trainer" };
 
 function when(iso) {
   if (!iso) return ["—", ""];

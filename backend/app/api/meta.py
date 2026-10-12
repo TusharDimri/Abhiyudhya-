@@ -84,7 +84,7 @@ def _user_profile(user):
             # single-school roles (PR/VT) sit in exactly one district too
             profile["district_id"] = str(school.district_id)
 
-    if user.role == Role.DISTRICT_MANAGER.value and len(user.districts) == 1:
+    if user.role in (Role.DISTRICT_MANAGER.value, Role.DEPARTMENT.value) and len(user.districts) == 1:
         profile["district_id"] = str(user.districts[0].id)
 
     if user.role == Role.TRAINER.value:

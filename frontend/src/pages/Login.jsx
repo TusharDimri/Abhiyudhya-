@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { apiError } from "../lib/api";
 
@@ -7,6 +8,7 @@ const DEMO = [
   ["Super Admin", "sa@rnaf.demo"],
   ["Org Admin", "oa@rnaf.demo"],
   ["District Mgr", "dm@rnaf.demo"],
+  ["Department", "dept@rnaf.demo"],
   ["Principal", "pr@rnaf.demo"],
   ["Trainer", "vt@rnaf.demo"],
 ];
@@ -16,6 +18,7 @@ export default function Login() {
   const nav = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -47,7 +50,13 @@ export default function Login() {
           </div>
           <div className="field">
             <label>Password</label>
-            <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+            <div className="password-wrap">
+              <input className="input" type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" />
+              <button type="button" className="password-toggle" onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"} title={showPassword ? "Hide password" : "Show password"}>
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
           {err && <div className="field-error" style={{ marginBottom: ".6rem" }}>{err}</div>}
           <button className="btn btn-primary btn-block" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>

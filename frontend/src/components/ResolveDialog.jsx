@@ -25,6 +25,10 @@ const KNOWN = {
     ["Raised by (Org Admin)", r.raised_by_name], ["Organisation", r.organisation_name],
     ["Date", toDMY(r.reporting_date)], ["Issue", r.details],
   ],
+  "dept-issues": (r) => [
+    ["Raised by (Department)", r.raised_by_name], ["Date", toDMY(r.reporting_date)],
+    ["Time", (r.reporting_time || "").slice(0, 5)], ["Issue", r.details],
+  ],
   "equipment-maintenance": (r) => [
     ["Lab equipment", r.equipment_name], ["Lab", r.lab_name], ["School", r.school_name],
     ["Logged by (VT)", r.logged_by], ["Date", toDMY(r.date)], ["Problem", r.issue],

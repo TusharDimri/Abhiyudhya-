@@ -10,7 +10,7 @@ const MAP = {
   studying: "info", "dropped out": "danger", "transferred out": "", "completed": "success",
   left: "danger", "leaving - tc pending": "warning", "leaving - tc issued": "warning",
   // maintenance log
-  reported: "warning", "under inspection": "info", "awaiting spare parts": "warning",
+  reported: "warning", "under progress": "info", "under inspection": "info", "awaiting spare parts": "warning",
   "sent for repair": "info", "under repair": "info", repaired: "success",
   "not repairable": "danger", replaced: "gold",
 };

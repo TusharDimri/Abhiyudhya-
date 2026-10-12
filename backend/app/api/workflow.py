@@ -5,7 +5,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, abort
 
 from app.extensions import db
-from app.models.operations import ClassAttendance, DailyAttendance, OrgIssue, PrincipalIssue, VTIssue
+from app.models.operations import ClassAttendance, DailyAttendance, DeptIssue, OrgIssue, PrincipalIssue, VTIssue
 from app.models.student import Student
 from app.rbac import login_required, current_user, can_access_row
 from app.rbac.roles import Role
@@ -129,15 +129,17 @@ def endorse_class_attendance(uid):
 
 
 ISSUE_KINDS = {"issues": ("vt", VTIssue, "vt_issue"), "principal-issues": ("pr", PrincipalIssue, "principal_issue"),
-               "org-issues": ("oa", OrgIssue, "org_issue")}
-# who resolves what: a trainer's issue - the org admin; a principal's issue -
-# the org admin or the district manager; an org admin's own - the super admin
-RESOLVERS = {"vt": (Role.ORG_ADMIN.value,),
+               "org-issues": ("oa", OrgIssue, "org_issue"), "dept-issues": ("dept", DeptIssue, "dept_issue")}
+# who resolves what: a trainer's or a principal's issue - the org admin or the
+# district manager; an org admin's own issue - the super admin; a department
+# login's issue - the org admin only
+RESOLVERS = {"vt": (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value),
              "pr": (Role.DISTRICT_MANAGER.value, Role.ORG_ADMIN.value),
-             "oa": (Role.SUPER_ADMIN.value,)}
+             "oa": (Role.SUPER_ADMIN.value,),
+             "dept": (Role.ORG_ADMIN.value,)}
 
 
-@bp.post("/<any(issues, 'principal-issues', 'org-issues'):which>/<uid>/transition")
+@bp.post("/<any(issues, 'principal-issues', 'org-issues', 'dept-issues'):which>/<uid>/transition")
 @login_required
 def transition_issue(which, uid):
     """Move a raised issue through open -> in-progress -> resolved (whoever
@@ -146,7 +148,7 @@ def transition_issue(which, uid):
     kind, model, table = ISSUE_KINDS[which]
     if user.role not in RESOLVERS[kind]:
         abort(403, description={"oa": "The super admin resolves org admin issues.",
-                                "vt": "The org admin resolves trainers' issues."}.get(
+                                "dept": "The org admin resolves department issues."}.get(
             kind, "Only the org admin or the district manager resolves issues."))
     rec = db.session.get(model, uid)
     if rec is None or rec.is_deleted:

@@ -52,10 +52,8 @@ def super_admins():
 
 
 def _issue_resolvers(issue, school, kind):
-    """A principal's issue: the org admins and the district's managers. A
-    trainer's: the org admins only (district managers don't see those)."""
-    if kind == "vt":
-        return org_admins(issue.organisation_id)
+    """A trainer's or a principal's issue: the org admins and the district's
+    managers - either of them resolves it."""
     return resolvers_of(issue.organisation_id, school)
 
 
@@ -223,6 +221,19 @@ def org_issue_raised(issue, actor):
           link=_org_issue_link(issue, "open"))
 
 
+def _dept_issue_link(issue, status):
+    return f"/app/dept-issues?{urlencode({'workflow_status': status, 'focus': str(issue.id)})}"
+
+
+def dept_issue_raised(issue, actor):
+    """A department login raised an issue: their org admins - and nobody else -
+    are told, to resolve it."""
+    _send(org_admins(issue.organisation_id), actor, org_id=issue.organisation_id,
+          title=f"New issue from {actor.full_name if actor else 'a department login'} (Department)",
+          body=(issue.details or "")[:300], category="issue",
+          link=_dept_issue_link(issue, "open"))
+
+
 def close_resolver_notices(record, actor, note=""):
     """Resolved by one admin: every resolver's notification about it (org
     admins', district managers', or the super admins' for an org admin's
@@ -230,7 +241,7 @@ def close_resolver_notices(record, actor, note=""):
     no longer waits to be read - nobody is left thinking it's still open."""
     who = actor.full_name if actor is not None else "an admin"
     notices = (db.session.query(Notification).join(User, User.id == Notification.user_id)
-               .filter(User.role.in_(("SA", "OA", "DM")), Notification.link.like(f"%focus={record.id}%"),
+               .filter(User.role.in_(ADMINS), Notification.link.like(f"%focus={record.id}%"),
                        Notification.category.in_(("issue", "maintenance"))).all())
     for n in notices:
         if not n.title.startswith("Resolved"):
@@ -242,6 +253,19 @@ def close_resolver_notices(record, actor, note=""):
 
 def issue_status_changed(issue, actor, kind, status):
     label = {"open": "Open", "in-progress": "In progress", "resolved": "Resolved"}.get(status, status)
+    if kind == "dept":    # a department login's issue - the org admin resolves it
+        if status == "resolved":
+            close_resolver_notices(issue, actor, issue.resolution_note or "")
+            _send(user_by_id(issue.raised_by), actor, org_id=issue.organisation_id,
+                  title="Your issue has been resolved",
+                  body=(issue.resolution_note or issue.details or "")[:300], category="issue",
+                  link=_dept_issue_link(issue, "resolved"))
+        else:
+            _send(org_admins(issue.organisation_id), actor, org_id=issue.organisation_id,
+                  title=f"Department issue is now {label}",
+                  body=(issue.details or "")[:300], category="issue",
+                  link=_dept_issue_link(issue, status))
+        return
     if kind == "oa":      # an org admin's own issue - the super admin resolves it
         if status == "resolved":
             close_resolver_notices(issue, actor, issue.resolution_note or "")
