@@ -1,0 +1,141 @@
+# Deploy: install a release tag on the server - after 6 PM, never during the
+# morning rush. Run it from GitHub: Actions -> Deploy -> Run workflow -> the tag.
+# (Rolling back is the same: run it with the previous tag.)
+#
+#   1. checks the tag, and runs CI (ci.yml) on it
+#   2. takes an RDS snapshot first if the release adds a database migration
+#   3. runs scripts/deploy.sh on the server through AWS Systems Manager - no
+#      SSH, no keys stored in GitHub: GitHub signs in to AWS with OIDC
+#   4. checks https://<site>/health/deep from outside
+#
+# Needs (Settings -> Secrets and variables -> Actions -> Variables):
+#   AWS_DEPLOY_ROLE_ARN  the role GitHub signs in as (abhiyudhya-github-deploy)
+#   EC2_INSTANCE_ID      i-... of abhiyudhya-server
+#   RDS_INSTANCE_ID      abhiyudhya-db
+#   SITE_URL             https://abhiyudhya.rnaf.org.in
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to install (e.g. v1.1.0). To roll back, the previous tag.
+        required: true
+        type: string
+
+concurrency:
+  group: production          # one release at a time, never cancelled half-way
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+
+jobs:
+  check:
+    name: Check the tag
+    runs-on: ubuntu-24.04
+    steps:
+      - name: A release tag, run from main
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$TAG' is not a release tag like v1.2.3"; exit 1; }
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::Run Deploy from main"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+  ci:
+    name: CI on the tag
+    needs: check
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.tag }}
+
+  deploy:
+    name: Install on the server
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      id-token: write        # to sign in to AWS with OIDC
+    env:
+      TAG: ${{ inputs.tag }}
+      INSTANCE: ${{ vars.EC2_INSTANCE_ID }}
+      DB: ${{ vars.RDS_INSTANCE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # every tag, to compare releases
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Helper - run a command on the server and wait for it
+        run: |
+          cat > "$RUNNER_TEMP/on-server.sh" <<'EOF'
+          #!/usr/bin/env bash
+          # on-server.sh "<command>" [timeout-seconds]: runs as the ubuntu user, prints its output
+          set -euo pipefail
+          CMD="sudo -u ubuntu -H bash -c $(printf '%q' "$1")"
+          ID=$(aws ssm send-command --instance-ids "$INSTANCE" --document-name AWS-RunShellScript \
+                --comment "Abhiyudhya deploy $TAG" \
+                --parameters "$(jq -n --arg c "$CMD" --arg t "${2:-600}" '{commands:[$c], executionTimeout:[$t]}')" \
+                --query Command.CommandId --output text)
+          while :; do
+            sleep 10
+            STATUS=$(aws ssm get-command-invocation --command-id "$ID" --instance-id "$INSTANCE" \
+                      --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Pending|InProgress|Delayed) continue ;; esac
+            break
+          done
+          aws ssm get-command-invocation --command-id "$ID" --instance-id "$INSTANCE" \
+            --query '[StandardOutputContent, StandardErrorContent]' --output text
+          [[ "$STATUS" == Success ]] || { echo "::error::On the server: $STATUS"; exit 1; }
+          EOF
+          chmod +x "$RUNNER_TEMP/on-server.sh"
+
+      - name: What's running now
+        id: now
+        run: |
+          RUNNING=$("$RUNNER_TEMP/on-server.sh" 'cd /opt/abhiyudhya && git describe --tags --exact-match 2>/dev/null || git rev-parse HEAD' | head -1 | tr -d '[:space:]')
+          echo "running=$RUNNING" >> "$GITHUB_OUTPUT"
+          echo "Server runs $RUNNING; installing $TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Snapshot the database if this release changes it
+        env:
+          RUNNING: ${{ steps.now.outputs.running }}
+        run: |
+          if git diff --quiet "$RUNNING" "$TAG" -- backend/migrations/versions; then
+            echo "No database migration between $RUNNING and $TAG - no snapshot needed"
+            exit 0
+          fi
+          SNAP="before-${TAG//./-}-$(date -u +%Y%m%d%H%M)"
+          echo "$TAG changes the database: snapshot $SNAP" | tee -a "$GITHUB_STEP_SUMMARY"
+          aws rds create-db-snapshot --db-instance-identifier "$DB" --db-snapshot-identifier "$SNAP" >/dev/null
+          aws rds wait db-snapshot-available --db-snapshot-identifier "$SNAP"
+
+      - name: Install the release (scripts/deploy.sh)
+        run: |
+          "$RUNNER_TEMP/on-server.sh" "cd /opt/abhiyudhya \
+            && git fetch --tags --force --quiet \
+            && git show '$TAG:scripts/deploy.sh' > /tmp/abhiyudhya-deploy.sh \
+            && bash /tmp/abhiyudhya-deploy.sh '$TAG'" 3600
+
+      - name: The site answers from outside
+        env:
+          SITE: ${{ vars.SITE_URL }}
+        run: |
+          for _ in $(seq 1 10); do
+            if curl -fsS --max-time 10 "$SITE/health/deep" | tee /dev/stderr | grep -q '"status": *"ok"'; then
+              echo "$TAG is live at $SITE" >> "$GITHUB_STEP_SUMMARY"; exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::$SITE/health/deep is not ok"; exit 1

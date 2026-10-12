@@ -1,0 +1,90 @@
+# CI: every push and pull request runs the backend tests (on PostgreSQL +
+# PostGIS, as production), builds the database from the migrations alone, and
+# builds the website. deploy.yml runs this same workflow before every release.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]               # a release tag is tested as soon as it's pushed
+  pull_request:
+    branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: The tag or commit to test
+        type: string
+        required: false
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgis/postgis:16-3.5
+        env:
+          POSTGRES_USER: rnaf
+          POSTGRES_PASSWORD: rnaf
+          POSTGRES_DB: rnaf
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U rnaf"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    env:
+      # the tests use the database next to this one, rnaf_test (app/config.py)
+      DATABASE_URL: postgresql+psycopg2://rnaf:rnaf@localhost:5432/rnaf
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/0
+      CELERY_RESULT_BACKEND: redis://localhost:6379/0
+      FLASK_APP: wsgi.py
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"          # as backend/Dockerfile
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - name: Install
+        run: pip install -r requirements-dev.txt
+      - name: Migrations build an empty database
+        # production builds its tables from the migrations, the tests from the
+        # models - this catches a migration that is missing or out of order
+        run: flask db upgrade && flask db current | grep -q "(head)"
+      - name: Tests
+        run: pytest -q -p no:cacheprovider
+
+  frontend:
+    name: Website build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"              # as frontend/Dockerfile
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
