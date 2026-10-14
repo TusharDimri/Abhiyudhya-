@@ -11,7 +11,7 @@ import DateRange from "../components/DateRange";
 import { isoDaysAgo } from "../lib/dates";
 import { cardHref, QUICK_ACTIONS, DASHBOARD_SUBTITLE, VERIFICATION_LABELS } from "../lib/roleUi";
 
-// each headline number's icon: a module's (Icon.jsx), or one of its own
+// each headline  number's icon: a module's (Icon.jsx), or one of its own
 const ICONS = {
   schools: "schools", labs: "labs", trainers: "trainers", students: "students", attendance: "attendance",
   guest_lectures: "guest-lectures", field_visits: "field-visits", open_issues: "issues",
