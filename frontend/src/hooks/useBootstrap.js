@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import api from "../lib/api";
 
-// Reference lists + per-resource permissions, fetched once and cached.
+// Reference  lists + per-resource permissions, fetched once and cached.
 export function useBootstrap() {
   return useQuery({
     queryKey: ["bootstrap"],
