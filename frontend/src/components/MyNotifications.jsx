@@ -42,7 +42,12 @@ export default function MyNotifications() {
       </div>
 
       <div className="card notif-list">
-        {q.isLoading && <div className="bell-empty muted">Loading…</div>}
+        {q.isLoading && Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="bell-item" aria-hidden="true">
+            <div className="skeleton" style={{ width: "55%", height: 13 }} />
+            <div className="skeleton" style={{ width: "85%", height: 11, marginTop: 6 }} />
+          </div>
+        ))}
         {q.isSuccess && items.length === 0 && (
           <div className="bell-empty muted">{unreadOnly ? "Nothing unread." : "No notifications yet."}</div>
         )}

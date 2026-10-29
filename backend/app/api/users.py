@@ -321,3 +321,50 @@ def create_district_manager(kind):
     audit.record(actor, "update", "app_user", u.id, after={"districts": [d.name for d in districts]})
     db.session.commit()
     return jsonify({"user": _dm_row(u), "login": {**login, "name": name}}), 201
+
+
+@bp.patch("/department-logins/<uid>")
+@login_required
+def edit_department_login(uid):
+    """The super admin corrects a department login they added: name, email
+    (their username - they log in with the new one), mobile, and the
+    districts they look after. Body: any of {full_name, email, phone, district_ids}."""
+    actor = current_user()
+    if actor.role != Role.SUPER_ADMIN.value:
+        abort(403, description="Only the super admin edits department logins.")
+    u = db.session.get(User, uid)
+    if u is None or u.is_deleted or u.role != Role.DEPARTMENT.value:
+        abort(404)
+    data = request.get_json(silent=True) or {}
+    before = _dm_row(u)
+    if "full_name" in data:
+        name = (data.get("full_name") or "").strip()
+        if not name:
+            abort(400, description="Please fill in: Full name.")
+        u.full_name = name
+    if "phone" in data:
+        phone = (data.get("phone") or "").strip()
+        if not MOBILE.match(phone):
+            abort(400, description="Mobile number must be 10 digits starting 6-9.")
+        u.phone = phone
+    if "email" in data:
+        email = (data.get("email") or "").strip().lower()
+        if not email:
+            abort(400, description="Please fill in: Email.")
+        if email != u.email:
+            if db.session.query(User.id).filter(User.email == email, User.id != u.id).first():
+                abort(409, description=f"A login with the email {email} already exists.")
+            u.email = email
+    if "district_ids" in data:
+        ids = [str(i) for i in (data.get("district_ids") or []) if i]
+        if not ids:
+            abort(400, description="Please fill in: District.")
+        districts = db.session.query(District).filter(District.id.in_(ids), District.organisation_id == u.organisation_id,
+                                                      District.is_deleted.is_(False)).all()
+        if len(districts) != len(set(ids)):
+            abort(400, description="Choose districts of that organisation.")
+        u.districts = districts
+    u.updated_by = actor.id
+    audit.record(actor, "update", "app_user", u.id, before=before, after=_dm_row(u))
+    db.session.commit()
+    return jsonify({"user": _dm_row(u)})

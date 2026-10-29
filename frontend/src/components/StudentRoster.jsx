@@ -78,7 +78,15 @@ export default function StudentRoster({ field, values, value, onChange }) {
       </div>
     );
   }
-  if (roster.isLoading) return <div className="roster roster-empty">Loading students…</div>;
+  if (roster.isLoading) {
+    return (
+      <div className="roster" aria-label="Loading students">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="skeleton" style={{ height: 36, marginBottom: 8, borderRadius: 8 }} />
+        ))}
+      </div>
+    );
+  }
   if (!students.length) {
     return (
       <div className="roster roster-empty">

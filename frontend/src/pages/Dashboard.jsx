@@ -148,20 +148,21 @@ export default function Dashboard() {
             title="Attendance entries over time"
             subtitle="Daily entries in the selected period"
             data={trend.data?.data}
+            loading={trend.isLoading}
           />
         )}
         {show("activity") && (
-          <BarCard title="Attendance by activity type" subtitle="What trainers spent time on" data={byAct.data?.data} labelKey="activity" valueKey="count" />
+          <BarCard title="Attendance by activity type" subtitle="What trainers spent time on" data={byAct.data?.data} loading={byAct.isLoading} labelKey="activity" valueKey="count" />
         )}
         {show("verification") && (
-          <StatusPie title="Student verification" subtitle="Registration status split" data={byVerif.data?.data} />
+          <StatusPie title="Student verification" subtitle="Registration status split" data={byVerif.data?.data} loading={byVerif.isLoading} />
         )}
         {show("endorsement") && (
           <StatusPie title="Attendance verification" subtitle="Verified by the Principal, or still waiting"
-            data={byEndorse.data?.data?.map((d) => ({ ...d, status: VERIFICATION_LABELS[d.status] || d.status }))} />
+            loading={byEndorse.isLoading} data={byEndorse.data?.data?.map((d) => ({ ...d, status: VERIFICATION_LABELS[d.status] || d.status }))} />
         )}
         {show("school") && (
-          <BarCard title="Students by school" subtitle="Top schools by enrolment" data={bySchool.data?.data} labelKey="school" valueKey="count" />
+          <BarCard title="Students by school" subtitle="Top schools by enrolment" data={bySchool.data?.data} loading={bySchool.isLoading} labelKey="school" valueKey="count" />
         )}
       </div>
     </div>

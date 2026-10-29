@@ -81,6 +81,9 @@ class ResourceConfig:
     # fields a role may set when creating but never change afterwards:
     # {role: {field: message shown when they try}}
     locked_on_update: dict = field(default_factory=dict)
+    # fields that can't change once other records hang off this one:
+    # {field: (in_use(record) -> bool, message)} - for every role
+    locked_once_used: dict = field(default_factory=dict)
     # stamp new records with where the user was (model mixes in
     # CapturesLocation); required from trainers
     captures_location: bool = False
@@ -130,6 +133,8 @@ class ResourceConfig:
             return self.name != "organisations"
         if role in (DM, DEPT):
             return True
+        if role == OA and self.name in ORG_ADMIN_EDITS:
+            return False
         return role in LOCKED_AFTER_SAVE and self.name not in PEOPLE_DATA
 
     def can_edit(self, role):
@@ -155,6 +160,9 @@ MASTER_DATA = {"states", "districts", "schools", "principals", "labs", "trainers
 ORG_ADMIN_CREATES = {"states", "districts", "schools", "principals", "labs", "trainers", "academic-years",
                      "sectors", "job-roles", "social-categories",
                      "org-issues"}   # ... and their own issues ("My Issues")
+# ... and edits it after saving (except a raised issue, which stays as raised);
+# fields other records depend on lock once used (locked_once_used)
+ORG_ADMIN_EDITS = ORG_ADMIN_CREATES - {"org-issues"}
 LOCKED_MESSAGE = "Saved records can't be edited or deleted."
 
 
@@ -205,6 +213,45 @@ def _future_date_error(value, label="Date"):
     if value and value > date.today() + timedelta(days=1):
         return f"{label} can't be in the future."
     return None
+
+
+# ---- once other records hang off a record, the fields they depend on lock
+def _any(model, *conds):
+    from app.extensions import db
+    return db.session.query(model.id).filter(model.is_deleted.is_(False), *conds).first() is not None
+
+
+def _district_in_use(d):
+    return _any(M.School, M.School.district_id == d.id)
+
+
+def _school_in_use(s):
+    return (_any(M.Lab, M.Lab.school_id == s.id) or _any(M.Student, M.Student.school_id == s.id)
+            or _any(M.Trainer, M.Trainer.school_id == s.id) or _any(M.Principal, M.Principal.linked_school_id == s.id))
+
+
+def _lab_in_use(lab):
+    return _any(M.Student, M.Student.lab_id == lab.id) or _any(M.Trainer, M.Trainer.lab_id == lab.id)
+
+
+def _job_role_in_use(j):
+    from sqlalchemy import or_
+    return (_any(M.Lab, or_(M.Lab.job_role_9_10_id == j.id, M.Lab.job_role_11_12_id == j.id))
+            or _any(M.Student, M.Student.job_role_id == j.id) or _any(M.Trainer, M.Trainer.job_role_id == j.id))
+
+
+def _year_in_use(y):
+    return (_any(M.Student, M.Student.organisation_id == y.organisation_id, M.Student.academic_year == y.label)
+            or _any(M.Lab, M.Lab.organisation_id == y.organisation_id, M.Lab.academic_year_of_setup == y.label))
+
+
+DISTRICT_LOCKS = {"state_id": (_district_in_use, "This district already has schools, so its state can't be changed.")}
+SCHOOL_LOCKS = {"district_id": (_school_in_use, "This school already has labs, staff or students, so its district can't be changed.")}
+_LAB_USED = "This lab already has students or trainers, so its school, trade and job roles can't be changed."
+LAB_LOCKS = {k: (_lab_in_use, _LAB_USED) for k in ("school_id", "sector_id", "job_role_9_10_id", "job_role_11_12_id")}
+_ROLE_USED = "This job role is already used by a lab, a student or a trainer, so its sector and class band can't be changed."
+JOB_ROLE_LOCKS = {k: (_job_role_in_use, _ROLE_USED) for k in ("sector_id", "class_band")}
+YEAR_LOCKS = {"label": (_year_in_use, "Records already use this academic year, so its name can't be changed.")}
 
 
 def _equipment_display(obj):
@@ -689,6 +736,7 @@ register(ResourceConfig(
     required={'name': 'District name', 'state_id': 'State'},
     write_roles=[SA, OA],
     writable=["name", "code", "state_id", "status"],
+    locked_once_used=DISTRICT_LOCKS,
     search=["name", "code"], filters=["state_id"], sortable=["name"],
     default_sort=("name", "asc"),
 ))
@@ -722,6 +770,7 @@ register(ResourceConfig(
     write_roles=[SA, OA, DM],
     writable=["name", "udise_code", "district_id", "block", "principal_id",
               "school_type", "board", "address", "email", "phone", "status"],
+    locked_once_used=SCHOOL_LOCKS,
     search=["name", "udise_code", "block"],
     filters=["district_id", "block", "school_type"],
     sortable=["name", "udise_code", "created_at"], default_sort=("name", "asc"),
@@ -820,6 +869,7 @@ register(ResourceConfig(
               "job_role_11_12_id", "curriculum_level", "sections_per_class",
               "sections_9", "sections_10", "sections_11", "sections_12",
               "academic_year_of_setup", "status"],
+    locked_once_used=LAB_LOCKS,
     search=["name"], filters=["school_id", "sector_id"],
     sortable=["name", "created_at"], default_sort=("name", "asc"),
     computed=_school_name,
@@ -847,6 +897,7 @@ register(ResourceConfig(
     required={'label': 'Label', 'start_date': 'Start date', 'end_date': 'End date'},
     write_roles=[SA, OA],
     writable=["label", "start_date", "end_date", "is_current", "status"],
+    locked_once_used=YEAR_LOCKS,
     search=["label"], filters=["is_current"], sortable=["label"],
     default_sort=("label", "desc"),
 ))
@@ -862,6 +913,7 @@ register(ResourceConfig(
     required={'name': 'Job role name', 'sector_id': 'Sector', 'class_band': 'Class band'},
     write_roles=[SA, OA, DM],
     writable=["name", "sector_id", "qp_code", "nsqf_level", "class_band", "status"],
+    locked_once_used=JOB_ROLE_LOCKS,
     search=["name", "qp_code"], filters=["sector_id", "nsqf_level", "class_band"],
     sortable=["name", "nsqf_level"], default_sort=("name", "asc"),
     computed=lambda o: {"sector_name": o.sector.name if o.sector else None},

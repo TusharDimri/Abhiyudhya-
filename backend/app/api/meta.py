@@ -55,7 +55,23 @@ def _org_branding(user):
     return {
         "id": str(org.id), "name": org.name, "org_code": org.org_code,
         "logo_url": org.logo_url,
+        # the logo is a private file in storage: the browser needs a signed link to it
+        "logo_src": _file_link(org.logo_url),
     }
+
+
+def _file_link(path):
+    """A link the browser can open for a stored file (signed, for an hour);
+    a web address or an inline picture is used as it is."""
+    if not path:
+        return None
+    if str(path).startswith(("http", "data:")):
+        return path
+    from app.services import storage
+    try:
+        return storage.presign_download(path)
+    except Exception:   # storage not set up (some local setups): no picture, not an error
+        return None
 
 
 def _current_academic_year(user):

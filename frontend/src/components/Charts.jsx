@@ -18,14 +18,18 @@ const STATUS_COLORS = {
 };
 const statusColor = (s) => STATUS_COLORS[String(s).toLowerCase()] || NAVY;
 
-function CardShell({ title, subtitle, children, empty }) {
+// while a chart's numbers load: a block the chart's size, not "no data"
+const ChartSkeleton = ({ height }) => <div className="skeleton" style={{ height, borderRadius: 10 }} aria-label="Loading" />;
+
+function CardShell({ title, subtitle, children, empty, loading, height }) {
   return (
     <div className="card chart-card">
       <div className="chart-head">
         <h3>{title}</h3>
         {subtitle && <span className="chart-sub">{subtitle}</span>}
       </div>
-      {empty ? <div className="empty" style={{ padding: "2rem 0" }}>No data yet.</div> : children}
+      {loading ? <ChartSkeleton height={height} />
+        : empty ? <div className="empty" style={{ padding: "2rem 0" }}>No data yet.</div> : children}
     </div>
   );
 }
@@ -35,10 +39,10 @@ const tooltipStyle = {
   cursor: { fill: "rgba(39,77,125,.06)" },
 };
 
-export function BarCard({ title, subtitle, data, labelKey, valueKey, height = 300 }) {
+export function BarCard({ title, subtitle, data, labelKey, valueKey, height = 300, loading }) {
   const rows = (data || []).map((d) => ({ label: String(d[labelKey] ?? "—"), value: d[valueKey] }));
   return (
-    <CardShell title={title} subtitle={subtitle} empty={rows.length === 0}>
+    <CardShell title={title} subtitle={subtitle} empty={rows.length === 0} loading={loading} height={height}>
       <ResponsiveContainer width="100%" height={height}>
         <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 28, bottom: 4, left: 8 }} barCategoryGap={10}>
           <CartesianGrid horizontal={false} stroke={GRID} />
@@ -52,7 +56,7 @@ export function BarCard({ title, subtitle, data, labelKey, valueKey, height = 30
   );
 }
 
-export function TrendCard({ title, subtitle, data, height = 260, span = 2 }) {
+export function TrendCard({ title, subtitle, data, height = 260, span = 2, loading }) {
   const rows = (data || []).map((d) => ({ date: d.date, value: d.count }));
   return (
     <div className="card chart-card" style={{ gridColumn: `span ${span}` }}>
@@ -60,7 +64,7 @@ export function TrendCard({ title, subtitle, data, height = 260, span = 2 }) {
         <h3>{title}</h3>
         {subtitle && <span className="chart-sub">{subtitle}</span>}
       </div>
-      {rows.length === 0 ? (
+      {loading ? <ChartSkeleton height={height} /> : rows.length === 0 ? (
         <div className="empty" style={{ padding: "2rem 0" }}>No activity in this period.</div>
       ) : (
         <ResponsiveContainer width="100%" height={height}>
@@ -84,11 +88,11 @@ export function TrendCard({ title, subtitle, data, height = 260, span = 2 }) {
   );
 }
 
-export function StatusPie({ title, subtitle, data, height = 300 }) {
+export function StatusPie({ title, subtitle, data, height = 300, loading }) {
   const rows = (data || []).map((d) => ({ name: d.status, value: d.count }));
   const total = rows.reduce((a, b) => a + b.value, 0);
   return (
-    <CardShell title={title} subtitle={subtitle} empty={total === 0}>
+    <CardShell title={title} subtitle={subtitle} empty={total === 0} loading={loading} height={height}>
       <ResponsiveContainer width="100%" height={height}>
         <PieChart>
           <Pie data={rows} dataKey="value" nameKey="name" innerRadius={62} outerRadius={92} paddingAngle={2}

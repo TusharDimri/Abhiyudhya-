@@ -11,7 +11,7 @@ import PhotoInput from "./PhotoInput";
 import { toDMY } from "../lib/dates";
 import { useLocationFix, locationPayload, locationErrorMessage } from "../lib/location";
 import { staticOptionsFor, enumList, splitList, joinList, optionText } from "../lib/fieldOptions";
-import { useReviewGate, ReviewNotice, reviewLabel } from "./ReviewGate";
+import { useReviewGate, ReviewNotice, reviewLabel, needsReview } from "./ReviewGate";
 
 // display label for an async-loaded option row
 const displayFor = (row) =>
@@ -116,7 +116,8 @@ export default function ResourceForm({
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState("");
   const [locating, setLocating] = useState(false);
-  const review = useReviewGate();
+  // the review waits 30 seconds on a trainer's daily records only (ReviewGate.jsx)
+  const review = useReviewGate(needsReview(role, resource));
   const drawerRef = useRef(null);
   const loc = useLocationFix();
   // a trainer's new record is stamped with where they were (never shown here)
@@ -162,7 +163,8 @@ export default function ResourceForm({
   const asyncResults = useQueries({
     queries: asyncFields.map((f) => {
       const deps = depsOf(f);
-      const routeName = f._resource || f.optionsKey;
+      // (the API's name for the list: job_roles is served at /job-roles)
+      const routeName = f._resource || OPTIONKEY_RESOURCE[f.optionsKey] || f.optionsKey;
       const params = new URLSearchParams({ page_size: "200" });
       for (const d of deps) if (values[d.field]) params.set(d.param, values[d.field]);
       for (const [k, val] of Object.entries(f.staticParams || {})) params.set(k, val);
@@ -176,6 +178,8 @@ export default function ResourceForm({
   });
   const asyncMap = {};
   asyncFields.forEach((f, i) => { asyncMap[f.name] = asyncResults[i]?.data || []; });
+  // a dropdown still waiting for its choices
+  const loadingOptions = (f) => { const i = asyncFields.indexOf(f); return i >= 0 && !!asyncResults[i]?.isFetching; };
 
   // Context handed to every derive/dynamicOptions function: the reference
   // lists, the fixed enums, this user's own scope, and the rows already
@@ -362,6 +366,10 @@ export default function ResourceForm({
 
   // Only hard-disable a dependent select when it needs its parent to fetch
   // options. A field with dynamicOptions has a safe fallback list.
+  // a field other records already depend on (a lab's job roles once it has
+  // students ...): shown, not changed - the server says which, and why
+  const lockedMsg = (f) => (!isNew && initial?.locked_fields?.[f.name]) || null;
+
   const fieldDisabled = (f) => {
     if (f.disabledWhen) return !!f.disabledWhen(values);
     const deps = depsOf(f);
@@ -462,7 +470,7 @@ export default function ResourceForm({
           <option value="">
             {fieldDisabled(f)
               ? `Select ${(f.dependsLabel || depsOf(f)[0]?.field || "").replace(/_id$/, "").replace(/_/g, " ")} first`
-              : "— Select —"}
+              : loadingOptions(f) ? "Loading…" : "— Select —"}
           </option>
           {[...keep, ...opts].map((o) => <option key={o.value} value={o.value}>{optionText(o.label)}</option>)}
         </select>
@@ -587,8 +595,13 @@ export default function ResourceForm({
                         <div className="input derived-value" aria-readonly="true">{knownLabel(f)}</div>
                         {f.deriveNote && <span className="hint">{f.deriveNote}</span>}
                       </>
+                    ) : lockedMsg(f) ? (
+                      <>
+                        <div className="input derived-value" aria-readonly="true">{knownLabel(f) || "—"}</div>
+                        <span className="hint">{lockedMsg(f)}</span>
+                      </>
                     ) : renderControl(f)}
-                    {f.hint && !isDerived(f) && <span className="hint">{f.hint}</span>}
+                    {f.hint && !isDerived(f) && !lockedMsg(f) && <span className="hint">{f.hint}</span>}
                     {errors[f.name] && <span className="field-error">{errors[f.name]}</span>}
                   </div>
                 ))}

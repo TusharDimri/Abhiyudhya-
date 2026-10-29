@@ -138,7 +138,7 @@ export default function RecordView({ mod, resource, row, onClose, title, subtitl
                 {sec.fields.map((f) => (
                   <div key={f.name} className={`view-item ${["textarea", "studentmarks", "file"].includes(f.type) ? "wide" : ""}`}>
                     <dt>{f.label}</dt>
-                    <dd>{isLoading && ["studentmarks", "file"].includes(f.type) ? <span className="muted">Loading…</span> : valueOf(f, rec, boot)}</dd>
+                    <dd>{isLoading && ["studentmarks", "file"].includes(f.type) ? <div className="skeleton" style={{ width: "60%", height: 14 }} aria-label="Loading" /> : valueOf(f, rec, boot)}</dd>
                   </div>
                 ))}
               </dl>

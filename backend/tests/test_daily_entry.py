@@ -337,7 +337,7 @@ def test_admin_sets_a_schools_location(client, world):
     sa.set_password("Password@123")
     db.session.add_all([oa, sa])
     db.session.commit()
-    # an org admin gives the location when adding the school, and can't change a saved one
+    # an org admin gives the location when adding the school, and can correct it later
     oa_h = _login(client, email="oa@x.com")
     made = client.post("/api/schools", headers=oa_h, json={
         "name": "New School", "udise_code": "27999999999", "location_lat": 18.6, "location_lng": 73.9})
@@ -348,8 +348,10 @@ def test_admin_sets_a_schools_location(client, world):
         "location_lat": 18.6, "location_lng": 73.9})
     assert made.status_code == 201, made.get_json()
     assert (made.get_json()["location_lat"], made.get_json()["location_lng"]) == (18.6, 73.9)
-    locked = client.patch(f"/api/schools/{made.get_json()['id']}", headers=oa_h, json={"phone": "020-1"})
-    assert locked.status_code == 403 and "can't be edited" in locked.get_json()["message"]
+    fixed = client.patch(f"/api/schools/{made.get_json()['id']}", headers=oa_h,
+                         json={"phone": "02011112222", "location_lat": 18.61, "location_lng": 73.91})
+    assert fixed.status_code == 200, fixed.get_json()
+    assert (fixed.get_json()["location_lat"], fixed.get_json()["location_lng"]) == (18.61, 73.91)
     # the super admin only reads: they don't change it either
     h = _as(client, "sa@x.com")
     url = f"/api/schools/{world['school'].id}"
@@ -703,6 +705,23 @@ def test_super_admin_adds_department_logins(client, world):
                        json={"new_password": "Fresh@2026y"}).status_code == 403
     signed = client.post("/api/auth/login", json={"email": "asha.dept@x.com", "password": "Fresh@2026x"})
     assert signed.status_code == 200 and signed.get_json()["user"]["role"] == "DEPT"
+    # ... and the super admin edits it: name, mobile, districts and email (the username)
+    from app.models.geography import District
+    other = District(organisation_id=world["org"].id, state_id=db.session.get(District, district).state_id, name="D2")
+    db.session.add(other)
+    db.session.commit()
+    url = f"/api/users/department-logins/{dept['id']}"
+    assert client.patch(url, headers=_as(client, "oa@x.com"), json={"full_name": "X"}).status_code == 403
+    h = _as(client, "sa@x.com")
+    assert client.patch(url, headers=h, json={"phone": "123"}).status_code == 400
+    assert client.patch(url, headers=h, json={"email": "oa@x.com"}).status_code == 409
+    r = client.patch(url, headers=h, json={"full_name": "Asha Rawat", "phone": "9123456780",
+                                            "email": "asha.rawat@x.com", "district_ids": [str(other.id)]})
+    assert r.status_code == 200, r.get_json()
+    u = r.get_json()["user"]
+    assert (u["full_name"], u["phone"], u["email"]) == ("Asha Rawat", "9123456780", "asha.rawat@x.com")
+    assert [d["name"] for d in u["districts"]] == ["D2"]
+    assert client.post("/api/auth/login", json={"email": "asha.rawat@x.com", "password": "Fresh@2026x"}).status_code == 200
 
 
 def test_org_admin_sees_and_manages_only_their_schools_staff(client, world, principal, principal_record):
@@ -1694,6 +1713,58 @@ def test_org_admin_adds_only_master_data(client, world):
     assert client.post("/api/equipment", headers=h, json=_equipment(world)).status_code == 403
 
 
+def test_org_admin_edits_what_they_add_but_not_what_records_depend_on(client, world):
+    """An org admin edits the Master Data they add. A field other records
+    already depend on stays as it is - a lab's school, trade and job roles once
+    it has students, a school's district once it has a lab, a district's state
+    once it has schools, a job role's sector and band once in use, a year's
+    name once records carry it - and the edit form is told which, and why."""
+    from app.models.geography import State
+    from app.models.masters import AcademicYear, JobRole
+    from app.models.lab import Lab
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    school = world["school"]
+    school.board, school.email, school.phone, school.address = "CBSE", "sch@x.com", "02012345678", "Somewhere"
+    world["students"][0].academic_year = "2025-26"      # records carry the year's name
+    other_state = State(organisation_id=world["org"].id, name="S2")
+    spare_9_10 = JobRole(organisation_id=world["org"].id, name="Spare", sector_id=world["lab"].sector_id, class_band="9-10")
+    db.session.add_all([other_state, spare_9_10])
+    db.session.flush()
+    empty_lab = Lab(organisation_id=world["org"].id, name="Empty Lab", school_id=school.id,
+                    sector_id=world["lab"].sector_id, job_role_9_10_id=world["jr_low"].id,
+                    job_role_11_12_id=world["jr_high"].id)
+    db.session.add(empty_lab)
+    db.session.commit()
+    h = _as(client, "oa@x.com")
+    res = client.get("/api/meta/bootstrap", headers=h).get_json()["resources"]
+    for master in ("states", "districts", "schools", "labs", "academic-years", "sectors", "job-roles",
+                   "social-categories", "principals", "trainers"):
+        assert res[master]["can_edit"] is True, master
+    assert res["org-issues"]["can_edit"] is False          # a raised issue stays as raised
+
+    lab, district, year = world["lab"], school.district_id, db.session.query(AcademicYear).filter_by(label="2025-26").one()
+    patch = lambda url, body: client.patch(url, headers=h, json=body)
+    # free fields change
+    assert patch(f"/api/labs/{lab.id}", {"name": "Renamed Lab"}).status_code == 200
+    assert patch(f"/api/schools/{school.id}", {"name": "Renamed School"}).status_code == 200
+    assert patch(f"/api/job-roles/{world['jr_low'].id}", {"name": "DDEO (renamed)"}).status_code == 200
+    # ... locked ones don't, with the reason
+    r = patch(f"/api/labs/{lab.id}", {"job_role_9_10_id": str(spare_9_10.id)})
+    assert r.status_code == 400 and "students or trainers" in r.get_json()["message"]
+    assert patch(f"/api/schools/{school.id}", {"district_id": str(district)}).status_code == 200   # unchanged: fine
+    assert patch(f"/api/districts/{district}", {"state_id": str(other_state.id)}).status_code == 400
+    assert patch(f"/api/job-roles/{world['jr_low'].id}", {"class_band": "11-12"}).status_code == 400
+    assert patch(f"/api/academic-years/{year.id}", {"label": "2025-27"}).status_code == 400
+    # a lab nobody uses yet can still be set up differently
+    assert patch(f"/api/labs/{empty_lab.id}", {"job_role_9_10_id": str(spare_9_10.id)}).status_code == 200
+    # the edit form is told which fields are locked, and why
+    locked = client.get(f"/api/labs/{lab.id}", headers=h).get_json()["locked_fields"]
+    assert set(locked) == {"school_id", "sector_id", "job_role_9_10_id", "job_role_11_12_id"}
+    assert client.get(f"/api/labs/{empty_lab.id}", headers=h).get_json()["locked_fields"] == {}
+
+
 def test_org_admin_resolves_issues_and_maintenance(client, world):
     from app.models.operations import VTIssue
     oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
@@ -2196,3 +2267,24 @@ def test_department_issue_goes_only_to_the_org_admin_who_resolves_it(client, wor
     assert len(told) == 1 and "/app/dept-issues" in told[0]["link"] and issue["id"] in told[0]["link"]
     oa_notice = next(n for n in _mine(client, "oa@x.com")["data"] if f"focus={issue['id']}" in n["link"])
     assert oa_notice["title"].startswith("Resolved")
+
+
+def test_the_organisation_logo_reaches_the_browser_as_a_link(client, world):
+    """The logo is a private file in storage: the header gets a signed link
+    to it (never the bare path, which the browser can't open). A web address
+    or an inline picture is passed on as it is."""
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    org = world["org"]
+    for stored, wanted in (("data:image/svg+xml;utf8,<svg/>", "data:image/svg+xml;utf8,<svg/>"),
+                           ("https://cdn.example.org/logo.png", "https://cdn.example.org/logo.png"),
+                           ("uploads/abc/logo.png", None)):
+        org.logo_url = stored
+        db.session.commit()
+        got = client.get("/api/meta/bootstrap", headers=_as(client, "oa@x.com")).get_json()["organisation"]["logo_src"]
+        if wanted:
+            assert got == wanted
+        else:   # a stored file: a signed link (or nothing, where storage isn't set up) - never the bare path
+            assert got != stored and (got is None or (got.startswith("http") and "logo.png" in got))

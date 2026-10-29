@@ -25,29 +25,38 @@ const KINDS = {
   "department-logins": { title: "Department Logins", one: "Department Login", few: "department logins", adder: "SA", crumb: "Administration" },
 };
 
-function NewDistrictManager({ kind, orgId, districts, onClose, onDone }) {
+// adds a login - or, given `editing` (a department login), corrects one
+function NewDistrictManager({ kind, orgId, districts, onClose, onDone, editing = null }) {
   const k = KINDS[kind];
   const { push } = useToast();
-  const review = useReviewGate();
+  // the review has no 30-second wait here (ReviewGate.jsx: TIMED_FORMS)
+  const review = useReviewGate(false);
   const box = useRef(null);
-  const [f, setF] = useState({ full_name: "", email: "", phone: "", district_ids: [] });
+  const [f, setF] = useState(() => editing
+    ? { full_name: editing.full_name || "", email: editing.email || "", phone: editing.phone || "",
+        district_ids: editing.districts.map((d) => String(d.id)) }
+    : { full_name: "", email: "", phone: "", district_ids: [] });
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   const toggle = (id) => set("district_ids", f.district_ids.includes(id) ? f.district_ids.filter((d) => d !== id) : [...f.district_ids, id]);
   const filled = f.full_name.trim() && f.email.trim() && /^[6-9]\d{9}$/.test(f.phone.trim()) && f.district_ids.length;
 
   const save = useMutation({
-    mutationFn: async () => (await api.post(`/users/${kind}`, { ...f, organisation_id: orgId })).data,
-    onSuccess: (r) => { push(`${k.one} added`, "success"); onDone(r.login); },
+    mutationFn: async () => (editing
+      ? await api.patch(`/users/${kind}/${editing.id}`, f)
+      : await api.post(`/users/${kind}`, { ...f, organisation_id: orgId })).data,
+    onSuccess: (r) => { push(editing ? `${k.one} updated` : `${k.one} added`, "success"); onDone(editing ? null : r.login); },
     onError: (e) => push(apiError(e), "error"),
   });
 
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="drawer" style={{ width: "min(680px,100%)" }} ref={box} role="dialog" aria-label={`New ${k.one}`}>
+      <div className="drawer" style={{ width: "min(680px,100%)" }} ref={box} role="dialog" aria-label={`${editing ? "Edit" : "New"} ${k.one}`}>
         <header>
           <div>
-            <h3 style={{ margin: 0 }}>New {k.one}</h3>
-            <span className="drawer-sub">Their login is made when you save - you'll see the username and password.</span>
+            <h3 style={{ margin: 0 }}>{editing ? "Edit" : "New"} {k.one}</h3>
+            <span className="drawer-sub">{editing
+              ? "Change their details. Their password stays as it is (reset it from Users & Access)."
+              : "Their login is made when you save - you'll see the username and password."}</span>
           </div>
           <button type="button" className="close" onClick={onClose} aria-label="Close"><X size={18} strokeWidth={2} /></button>
         </header>
@@ -59,7 +68,7 @@ function NewDistrictManager({ kind, orgId, districts, onClose, onDone }) {
             </div>
             <div className="field"><label>Email <span className="req">*</span></label>
               <input className="input" type="email" value={f.email} onChange={(e) => set("email", e.target.value)} />
-              <span className="hint">Their username for logging in.</span>
+              <span className="hint">{editing ? "Their username - if you change it, they log in with the new email." : "Their username for logging in."}</span>
             </div>
             <div className="field"><label>Mobile <span className="req">*</span></label>
               <input className="input" type="tel" placeholder="10 digits" value={f.phone} onChange={(e) => set("phone", e.target.value)} />
@@ -81,7 +90,7 @@ function NewDistrictManager({ kind, orgId, districts, onClose, onDone }) {
           <button type="button" className="btn btn-primary"
             disabled={!filled || save.isPending || (review.reviewing && !review.ready)}
             onClick={() => (review.reviewing ? save.mutate() : review.start(box.current))}>
-            {reviewLabel(review, { busy: save.isPending, submitText: `Add ${k.one}` })}
+            {reviewLabel(review, { busy: save.isPending, submitText: editing ? "Save changes" : `Add ${k.one}` })}
           </button>
         </footer>
       </div>
@@ -102,10 +111,13 @@ export default function DistrictManagers({ kind = "district-managers" }) {
   const [scope, setScope] = useOrgScope(kind);
   const [district, setDistrict] = useState("");
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);   // a department login being corrected
   const [login, setLogin] = useState(null);
   const orgId = isSA ? scope.organisation_id : user?.organisation_id;
   // the org admin adds district managers; the super admin department logins, once an organisation is picked
   const canAdd = user?.role === k.adder && !!orgId;
+  // the super admin corrects the department logins they added
+  const canEdit = kind === "department-logins" && user?.role === "SA";
 
   const districtsOfOrg = useQuery({
     queryKey: ["scope-options", "districts", orgId, "dm"],
@@ -157,11 +169,11 @@ export default function DistrictManagers({ kind = "district-managers" }) {
             <div className="table-wrap">
               <table className="data">
                 <thead>
-                  <tr><th>Name</th><th>Email</th><th>Mobile</th><th>Districts</th><th>Status</th><th>Last login</th></tr>
+                  <tr><th>Name</th><th>Email</th><th>Mobile</th><th>Districts</th><th>Status</th><th>Last login</th>{canEdit && <th>Actions</th>}</tr>
                 </thead>
                 <tbody>
                   {list.isLoading
-                    ? Array.from({ length: 4 }).map((_, i) => <tr key={i}><td colSpan={6}><div className="skeleton" style={{ width: "60%" }} /></td></tr>)
+                    ? Array.from({ length: 4 }).map((_, i) => <tr key={i}><td colSpan={canEdit ? 7 : 6}><div className="skeleton" style={{ width: "60%" }} /></td></tr>)
                     : rows.map((u) => (
                         <tr key={u.id}>
                           <td>{u.full_name}</td>
@@ -170,6 +182,9 @@ export default function DistrictManagers({ kind = "district-managers" }) {
                           <td>{u.districts.map((d) => d.name).join(", ") || "—"}</td>
                           <td><Badge value={u.status} /></td>
                           <td className="muted">{u.last_login_at ? toDMY(u.last_login_at) : "—"}</td>
+                          {canEdit && (
+                            <td><button className="btn btn-ghost btn-sm" onClick={() => setEditing(u)}>Edit</button></td>
+                          )}
                         </tr>
                       ))}
                 </tbody>
@@ -186,6 +201,10 @@ export default function DistrictManagers({ kind = "district-managers" }) {
       {adding && (
         <NewDistrictManager kind={kind} orgId={orgId} districts={districts} onClose={() => setAdding(false)}
           onDone={(l) => { setAdding(false); setLogin(l); qc.invalidateQueries({ queryKey: [kind] }); qc.invalidateQueries({ queryKey: ["users"] }); }} />
+      )}
+      {editing && (
+        <NewDistrictManager kind={kind} orgId={orgId} districts={districts} editing={editing} onClose={() => setEditing(null)}
+          onDone={() => { setEditing(null); qc.invalidateQueries({ queryKey: [kind] }); qc.invalidateQueries({ queryKey: ["users"] }); }} />
       )}
       {login && <LoginCreated {...login} onDone={() => setLogin(null)} />}
     </div>
