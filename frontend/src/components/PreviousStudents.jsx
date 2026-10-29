@@ -14,7 +14,8 @@ const STATUS_TEXT = { Completed: "Finished Class 10", "Dropped Out": "Left in Cl
 export default function PreviousStudents({ lab, section, onClose }) {
   const qc = useQueryClient();
   const { push } = useToast();
-  const review = useReviewGate();
+  // the review has no 30-second wait here (ReviewGate.jsx: TIMED_FORMS)
+  const review = useReviewGate(false);
   const [picked, setPicked] = useState(() => new Set());
   const list = useQuery({
     queryKey: ["previous-students", lab.value],

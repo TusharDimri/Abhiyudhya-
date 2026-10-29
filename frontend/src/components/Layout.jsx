@@ -70,8 +70,8 @@ export default function Layout() {
             not a tenant of someone else's. The platform name stays underneath
             so it is still clear what they are logged into. */}
         <div className="brand">
-          {org?.logo_url ? (
-            <img src={org.logo_url} alt="" className="brand-logo" />
+          {org?.logo_src ? (
+            <img src={org.logo_src} alt="" className="brand-logo" />
           ) : (
             <div className="brand-icon">
               {boot?.is_platform_admin ? <Globe size={18} /> : (org?.name || "Abhiyudhya").slice(0, 1).toUpperCase()}
@@ -141,8 +141,8 @@ export default function Layout() {
 
           {org ? (
             <div className="org-brand" title={org.name}>
-              {org.logo_url
-                ? <img src={org.logo_url} alt={org.name} className="org-logo" />
+              {org.logo_src
+                ? <img src={org.logo_src} alt={org.name} className="org-logo" />
                 : <div className="org-logo-fallback">{(org.name || "?").slice(0, 2).toUpperCase()}</div>}
               <span className="org-name">{org.name}</span>
             </div>

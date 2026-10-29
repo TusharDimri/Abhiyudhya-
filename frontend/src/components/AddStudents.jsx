@@ -78,7 +78,8 @@ export default function AddStudents() {
   const [rows, setRows] = useState(() => Array.from({ length: START_ROWS }, blank));
   const [errors, setErrors] = useState({});   // row index -> message
   const [done, setDone] = useState(null);
-  const review = useReviewGate();
+  // the review has no 30-second wait here (ReviewGate.jsx: TIMED_FORMS)
+  const review = useReviewGate(false);
   const topRef = useRef(null);
   const put = (i, k, v) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
   const filled = rows.map((r, i) => [r, i]).filter(([r]) => !isBlank(r));

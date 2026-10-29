@@ -21,10 +21,24 @@ const StudentsHub = lazy(() => import("./components/StudentsHub"));
 const OrgStudents = lazy(() => import("./components/OrgStudents"));
 const MyNotifications = lazy(() => import("./components/MyNotifications"));
 
+// while the app checks who is logged in: the app's outline - sidebar, top bar
+// and a page of blocks - rather than an empty screen
 function FullSpinner() {
   return (
-    <div style={{ height: "100vh", display: "grid", placeItems: "center" }}>
-      <div className="skeleton" style={{ width: 180, height: 20 }} />
+    <div className="app-skeleton" aria-label="Loading" aria-busy="true">
+      <aside className="app-skeleton-side">
+        {Array.from({ length: 7 }).map((_, i) => <div key={i} className="skeleton" />)}
+      </aside>
+      <div className="app-skeleton-main">
+        <div className="app-skeleton-top"><div className="skeleton" style={{ width: 140, height: 18 }} /></div>
+        <div className="app-skeleton-page">
+          <div className="skeleton" style={{ width: 220, height: 26 }} />
+          <div className="app-skeleton-cards">
+            {Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton" />)}
+          </div>
+          <div className="skeleton" style={{ height: 260, borderRadius: 12 }} />
+        </div>
+      </div>
     </div>
   );
 }

@@ -43,6 +43,11 @@ def _serialise(cfg, obj):
     data = obj.to_dict()
     # from an academic year that has ended: closed, the screens offer no changes
     data["past_year"] = is_past_year(obj)
+    if cfg.locked_once_used:
+        # the fields an edit form shows read-only, and why (each check asked once)
+        used = {}
+        data["locked_fields"] = {k: msg for k, (in_use, msg) in cfg.locked_once_used.items()
+                                 if used.setdefault(in_use, in_use(obj))}
     if cfg.computed:
         try:
             data.update(cfg.computed(obj) or {})
@@ -524,6 +529,9 @@ def update_resource(resource, uid):
             payload = {kk: vv for kk, vv in payload.items() if kk != k}   # shown masked, sent back as-is
     for k, msg in cfg.locked_on_update.get(user.role, {}).items():
         if k in payload and str(_coerce(cfg.model, k, payload[k])) != str(getattr(obj, k)):
+            abort(400, description=msg)
+    for k, (in_use, msg) in cfg.locked_once_used.items():
+        if k in payload and str(_coerce(cfg.model, k, payload[k])) != str(getattr(obj, k)) and in_use(obj):
             abort(400, description=msg)
     old = {k: getattr(obj, k, None) for k in cfg.writable}
     for k in cfg.writable:

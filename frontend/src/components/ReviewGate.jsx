@@ -1,11 +1,21 @@
 /* Saved records can't be deleted (and most can't be edited), so every form asks for a second look
-   before it saves: the first press ("Proceed") checks the form, jumps back to
-   the top and starts a 30-second review; Submit unlocks when it runs out. */
+   before it saves: the first press ("Proceed") checks the form and jumps back to
+   the top; Submit is pressed next. On a trainer's daily records the review
+   lasts 30 seconds - Submit unlocks when it runs out; elsewhere at once. */
 import { useEffect, useState } from "react";
 
 export const REVIEW_SECONDS = 30;
 
-export function useReviewGate(seconds = REVIEW_SECONDS) {
+// The forms whose review lasts 30 seconds - a trainer's daily records. On
+// every other form, Submit is ready as soon as Proceed is pressed.
+const TIMED_FORMS = {
+  VT: ["attendance", "class-attendance", "assessments", "field-visits", "guest-lectures", "ojt-placements"],
+};
+export const needsReview = (role, form) => !!TIMED_FORMS[role]?.includes(form);
+
+// `timed`: false - no wait; Submit is ready as soon as Proceed is pressed
+export function useReviewGate(timed = true) {
+  const seconds = timed ? REVIEW_SECONDS : 0;
   const [until, setUntil] = useState(null);   // null: still filling in
   const [now, setNow] = useState(() => Date.now());
   const left = until ? Math.max(0, Math.ceil((until - now) / 1000)) : seconds;

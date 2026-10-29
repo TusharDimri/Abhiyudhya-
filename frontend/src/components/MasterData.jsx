@@ -28,7 +28,14 @@ export default function MasterData() {
     const at = tabs.findIndex(([k]) => k === extra.after);
     tabs.splice(at >= 0 ? at + 1 : tabs.length, 0, [key, extra]);
   }
-  if (!boot) return null;
+  if (!boot) {
+    return (
+      <div className="stack" style={{ gap: ".9rem" }} aria-label="Loading">
+        <div className="skeleton" style={{ height: 40, borderRadius: 10 }} />
+        <div className="skeleton" style={{ height: 320, borderRadius: 12 }} />
+      </div>
+    );
+  }
   if (!tabs.length) return <Navigate to="/app/dashboard" replace />;
   if (!resource || !tabs.some(([k]) => k === resource)) {
     return <Navigate to={`/app/master/${tabs[0][0]}${search}`} replace />;

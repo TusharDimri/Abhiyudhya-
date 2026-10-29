@@ -13,7 +13,8 @@ import { useReviewGate, ReviewNotice, reviewLabel } from "./ReviewGate";
 
 export default function TcIssueDialog({ row, onClose, onDone }) {
   const { push } = useToast();
-  const review = useReviewGate();
+  // the review has no 30-second wait here (ReviewGate.jsx: TIMED_FORMS)
+  const review = useReviewGate(false);
   const drawer = useRef(null);
   const [tcUrl, setTcUrl] = useState("");
   const [preview, setPreview] = useState("");

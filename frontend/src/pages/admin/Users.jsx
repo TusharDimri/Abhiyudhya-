@@ -120,7 +120,8 @@ function CreateUser({ boot, roles, isSA, onClose, onDone }) {
   const { push } = useToast();
   const [f, setF] = useState({ role: roles[0] || "VT", full_name: "", email: "", password: "", organisation_id: "", school_id: "", lab_ids: [], district_ids: [] });
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
-  const review = useReviewGate();
+  // the review has no 30-second wait here (ReviewGate.jsx: TIMED_FORMS)
+  const review = useReviewGate(false);
   const drawerRef = useRef(null);
   const [made, setMade] = useState(null);   // the login just created, to hand over
   const bootOpts = boot?.options || {};

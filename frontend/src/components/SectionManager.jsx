@@ -117,6 +117,9 @@ export default function SectionManager({ lab, classGrade, section, sections, onC
             </p>
           )}
           {empty && <div className="prefill-note">Section {section} is empty and can be removed.</div>}
+          {list.isLoading && Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="skeleton" style={{ height: 34, marginBottom: 8, borderRadius: 8 }} />
+          ))}
           {students.length > 0 && (
             <div className="table-wrap view-table-wrap">
               <table className="data view-table">
