@@ -84,7 +84,7 @@ def run_test_schools():
             vt.labs.append(lab)
         if db.session.query(Trainer).filter_by(user_id=vt.id).first() is None:
             db.session.add(Trainer(organisation_id=org.id, full_name=f"Trainer {key.upper()}", school_id=school.id,
-                                   lab_id=lab.id, job_role_id=jr_low.id, email=vt.email, phone=f"98000001{n}0",
+                                   lab_id=lab.id, job_role_ids=str(jr_low.id), email=vt.email, phone=f"98000001{n}0",
                                    gender="Female", trainer_status="active", user_id=vt.id,
                                    date_of_joining=date(2025, 7, 1), vtp_name="Test Skills Pvt. Ltd.",
                                    appointment_nature="Contractual"))

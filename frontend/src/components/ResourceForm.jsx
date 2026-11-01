@@ -97,7 +97,7 @@ export default function ResourceForm({
         else if (f.defaults && role && f.defaults[role] != null) val = f.defaults[role];
         else if (f.defaultValue != null)
           val = typeof f.defaultValue === "function"
-            ? f.defaultValue({ options, profile: ctx, role })
+            ? f.defaultValue({ options, profile: ctx, role, boot })
             : f.defaultValue;
         if ((val === "" || val == null) && f.remember && user?.id) {
           const mem = recall(memoryKey(user.id, resource, f.name));
@@ -223,6 +223,22 @@ export default function ResourceForm({
     // chosen under the old one no longer applies
     setValues((v) => clearDescendants({ ...v, ...Object.fromEntries(changes) }, ...changes.map(([k]) => k)));
   }, [derivedKey]); // eslint-disable-line
+
+  // `fillOnChange`: a field filled in afresh whenever the one it follows
+  // changes, and still changeable (a trainer's job roles start as all the lab's)
+  const followers = fields.filter((f) => f.fillOnChange);
+  const followed = useRef(Object.fromEntries(followers.map((f) => [f.name, values[f.fillOnChange.field]])));
+  const followedKey = followers.map((f) => String(values[f.fillOnChange.field] ?? "")).join("|");
+  useEffect(() => {
+    const changes = {};
+    for (const f of followers) {
+      const cur = values[f.fillOnChange.field];
+      if (String(cur ?? "") === String(followed.current[f.name] ?? "")) continue;
+      followed.current[f.name] = cur;
+      changes[f.name] = f.fillOnChange.value(values, dctx) ?? "";
+    }
+    if (Object.keys(changes).length) setValues((v) => ({ ...v, ...changes }));
+  }, [followedKey]); // eslint-disable-line
 
   const set = (name, val) => setValues((v) => clearDescendants({ ...v, [name]: val }, name));
 

@@ -256,7 +256,7 @@ export const MODULES = {
       { name: "udise_code", label: "UDISE code", required: true, group: "School" },
       { name: "district_id", label: "District", type: "select", ...DISTRICT, required: true, autoFor: ["DM"], group: "School" },
       { name: "block", label: "Block", group: "School" },
-      { name: "school_type", label: "School type", type: "select", enumKey: "school_types", required: true, group: "School" },
+      { name: "school_type", label: "School type", type: "select", enumKey: "school_types", group: "School" },   // optional for now
       { name: "board", label: "Board of school", type: "select", enumKey: "school_boards", required: true, group: "School" },
       { name: "address", label: "Full address", type: "textarea", required: true, group: "Contact" },
       { name: "email", label: "Email", type: "email", required: true, group: "Contact" },
@@ -312,8 +312,8 @@ export const MODULES = {
       { name: "school_id", label: "School", type: "select", ...SCHOOL, required: true, group: "Lab" },
       { name: "sector_id", label: "Trade / Sector", type: "select", ...SECTOR, required: true, group: "Lab", hint: "The industry taught here, e.g. IT/ITeS." },
       { name: "academic_year_of_setup", label: "AY of setup", type: "select", ...AY, valueKey: "label", required: true, group: "Lab" },
-      { name: "job_role_9_10_id", label: "Job Role (Class 9-10)", type: "select", ...JOBROLE_9_10, required: true, group: "Job roles", hint: "Entry-level title, e.g. Data Entry Operator. Pick a sector first." },
-      { name: "job_role_11_12_id", label: "Job Role (Class 11-12)", type: "select", ...JOBROLE_11_12, required: true, group: "Job roles", hint: "Advanced title, e.g. Junior Software Developer. Use the same role in both slots if the lab runs one role across all four years." },
+      { name: "job_role_9_10_id", label: "Job Role (Class 9-10)", type: "select", ...JOBROLE_9_10, group: "Job roles", hint: "Entry-level title, e.g. Data Entry Operator. Pick a sector first. Leave empty if the lab has no 9-10 role." },
+      { name: "job_role_11_12_id", label: "Job Role (Class 11-12)", type: "select", ...JOBROLE_11_12, group: "Job roles", hint: "Advanced title, e.g. Junior Software Developer. Use the same role in both slots if the lab runs one role across all four years. A lab needs at least one of the two." },
       { name: "curriculum_level", label: "Curriculum levels", placeholder: "e.g. 1-4", group: "Job roles", hint: "Level 1 in Class 9 through Level 4 in Class 12." },
     ],
   },
@@ -327,7 +327,7 @@ export const MODULES = {
       { key: "email", label: "Email" },
       { key: "trainer_status", label: "Status", badge: true },
     ],
-    formHint: "One trainer per job role in a lab — the 9-10 role and the 11-12 role each get their own. "
+    formHint: "A trainer usually teaches both of their lab's job roles; each job role in a lab has one trainer. "
       + "Everything on the trainer's profile page is here too: start a section and fill its main fields; the rest can wait.",
     fetchOnEdit: true,
     fields: [
@@ -339,11 +339,16 @@ export const MODULES = {
       { name: "qualification", label: "Qualification", group: "Personal details" },
       { name: "school_id", label: "School", type: "select", ...SCHOOL, required: true, group: "Posting" },
       { name: "lab_id", label: "Lab", type: "select", ...LAB_BY_SCHOOL, required: true, group: "Posting" },
-      { name: "job_role_id", label: "Job role", type: "select", dynamicOptions: JOBROLE_BY_LAB, required: true, group: "Posting", hint: "Only the roles this lab teaches." },
+      // both of the lab's roles to start with - most trainers teach both
+      { name: "job_role_ids", label: "Job role(s)", type: "multiselect", dynamicOptions: JOBROLE_BY_LAB, required: true, group: "Posting",
+        fillOnChange: { field: "lab_id", value: (v, c) => { const lab = labById(c.boot, v.lab_id); return lab ? labJobRoleIds(lab).join(",") : ""; } },
+        emptyHint: "Pick a lab first.", hint: "The roles this lab teaches - untick one this trainer doesn't." },
       { name: "date_of_joining", label: "Date of joining", type: "date", required: true, group: "Posting" },
       { name: "date_of_exit", label: "Date of exit", type: "date", group: "Posting" },
       { name: "trainer_status", label: "Status", type: "select", enumKey: "trainer_status", defaultValue: "active", group: "Posting" },
-      { name: "vtp_name", label: "VTP (training provider)", required: true, group: "Posting", hint: "The company that employs this trainer." },
+      // the organisation, by its initials - set by the server, never typed in
+      { name: "vtp_name", label: "VTP (training provider)", group: "Posting", readOnlyFor: ["SA", "OA", "DM"],
+        defaultValue: ({ boot }) => boot?.organisation?.initials },
       { name: "appointment_nature", label: "Nature of appointment", type: "select", enumKey: "appointment_nature", group: "Posting" },
       // ... and the rest of the trainer's profile
       ...trainerProfileFields(["full_name", "gender", "email", "phone", "vtp_name"]),

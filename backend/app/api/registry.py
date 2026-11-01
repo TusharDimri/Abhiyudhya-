@@ -237,7 +237,7 @@ def _lab_in_use(lab):
 def _job_role_in_use(j):
     from sqlalchemy import or_
     return (_any(M.Lab, or_(M.Lab.job_role_9_10_id == j.id, M.Lab.job_role_11_12_id == j.id))
-            or _any(M.Student, M.Student.job_role_id == j.id) or _any(M.Trainer, M.Trainer.job_role_id == j.id))
+            or _any(M.Student, M.Student.job_role_id == j.id) or _any(M.Trainer, M.Trainer.job_role_ids.contains(str(j.id))))
 
 
 def _year_in_use(y):
@@ -648,29 +648,49 @@ def _validate_student(instance, user, is_create=False):
 
 
 def _validate_trainer(instance, user, is_create=False):
-    """One trainer per job role in a lab (spec 1.5) - a second active trainer
-    on the same slot would make 'whose class is this?' ambiguous."""
+    """A trainer teaches one or both of their lab's job roles, and each job
+    role in a lab has one trainer (spec 1.5) - a second active trainer on the
+    same role would make 'whose class is this?' ambiguous."""
+    import re
     from app.extensions import db
 
-    if not instance.lab_id or not instance.job_role_id:
+    # kept as "id1,id2" whatever the form sent (a list, spaces, repeats)
+    ids = list(dict.fromkeys(re.findall(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                                        str(instance.job_role_ids or "").lower())))
+    instance.job_role_ids = ",".join(ids) or None
+    if not instance.lab_id or not ids:
         return None
+    lab = db.session.get(M.Lab, instance.lab_id)
+    taught = {str(x) for x in (lab.job_role_9_10_id, lab.job_role_11_12_id) if x} if lab else set()
+    if any(i not in taught for i in ids):
+        return "Choose from the job roles this lab teaches."
     if instance.trainer_status == "exited":
         return None
-    clash = (
+    others = (
         db.session.query(M.Trainer)
         .filter(
             M.Trainer.lab_id == instance.lab_id,
-            M.Trainer.job_role_id == instance.job_role_id,
             M.Trainer.id != instance.id,
             M.Trainer.is_deleted.is_(False),
             M.Trainer.trainer_status != "exited",
         )
-        .first()
     )
-    if clash:
-        return (f"{clash.full_name} already holds this job role in this lab. "
-                "Mark them as exited/substitute first, or pick the other job role.")
+    for other in others:
+        shared = set(ids) & set(other.job_role_id_list)
+        if shared:
+            role = db.session.get(M.JobRole, next(iter(shared)))
+            return (f"{other.full_name} already holds {role.name if role else 'this job role'} in this lab. "
+                    "Mark them as exited/substitute first, or pick the other job role.")
     return None
+
+
+def _stamp_vtp(trainer, user, created, changed):
+    """A trainer's VTP is their organisation, by its initials - never typed in."""
+    from app.extensions import db
+    from app.models.organisation import Organisation
+    org = db.session.get(Organisation, trainer.organisation_id)
+    if org:
+        trainer.vtp_name = org.initials
 
 
 def _validate_lab(instance, user, is_create=False):
@@ -684,6 +704,9 @@ def _validate_lab(instance, user, is_create=False):
         if not instance.sections_for(grade):
             setattr(instance, f"sections_{grade}", "A")
 
+    # a lab may teach one band only (e.g. an 11-12 role and no 9-10 one yet)
+    if not instance.job_role_9_10_id and not instance.job_role_11_12_id:
+        return "Choose at least one job role: for Class 9-10 or for Class 11-12."
     for field_name, band in (("job_role_9_10_id", "9-10"), ("job_role_11_12_id", "11-12")):
         jr_id = getattr(instance, field_name)
         if not jr_id:
@@ -760,7 +783,8 @@ def _validate_school(instance, user, is_create=False):
 
 register(ResourceConfig(
     name="schools", model=M.School, label="School",
-    required={'name': 'School name', 'udise_code': 'UDISE code', 'district_id': 'District', 'school_type': 'School type',
+    # (school type is optional for now: the seed data has none)
+    required={'name': 'School name', 'udise_code': 'UDISE code', 'district_id': 'District',
               'board': 'Board of school', 'address': 'Full address', 'email': 'Email', 'phone': 'Phone',
               'location': 'Location'},
     validate=_validate_school,
@@ -863,7 +887,8 @@ register(ResourceConfig(
 
 register(ResourceConfig(
     name="labs", model=M.Lab, label="Lab",
-    required={'name': 'Lab name', 'school_id': 'School', 'sector_id': 'Trade / Sector', 'job_role_9_10_id': 'Job role (Class 9-10)', 'job_role_11_12_id': 'Job role (Class 11-12)', 'academic_year_of_setup': 'AY of setup'},
+    # (and at least one of the two job roles - _validate_lab)
+    required={'name': 'Lab name', 'school_id': 'School', 'sector_id': 'Trade / Sector', 'academic_year_of_setup': 'AY of setup'},
     write_roles=[SA, OA, DM],
     writable=["name", "sector_id", "school_id", "job_role_9_10_id",
               "job_role_11_12_id", "curriculum_level", "sections_per_class",
@@ -878,10 +903,11 @@ register(ResourceConfig(
 
 register(ResourceConfig(
     name="trainers", model=M.Trainer, label="Vocational Trainer",
-    required={'full_name': 'Full name', 'gender': 'Gender', 'email': 'Email', 'phone': 'Mobile no.', 'school_id': 'School', 'lab_id': 'Lab', 'job_role_id': 'Job role', 'date_of_joining': 'Date of joining', 'vtp_name': 'VTP (training provider)'},
+    # (the VTP is filled in on save: _stamp_vtp)
+    required={'full_name': 'Full name', 'gender': 'Gender', 'email': 'Email', 'phone': 'Mobile no.', 'school_id': 'School', 'lab_id': 'Lab', 'job_role_ids': 'Job role(s)', 'date_of_joining': 'Date of joining'},
     profile_role=VT,
     write_roles=[SA, OA, DM],
-    writable=["full_name", "school_id", "lab_id", "job_role_id", "email", "phone",
+    writable=["full_name", "school_id", "lab_id", "job_role_ids", "email", "phone",
               "gender", "date_of_joining", "date_of_exit", "trainer_status",
               "qualification", "vtp_name", "appointment_nature", "user_id", "status"],
     search=["full_name", "email", "phone"],
@@ -889,6 +915,7 @@ register(ResourceConfig(
     sortable=["full_name", "created_at"], default_sort=("full_name", "asc"),
     computed=_school_name,
     validate=_validate_trainer,
+    on_saved=_stamp_vtp,
 ))
 
 # ---- masters ----

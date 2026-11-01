@@ -186,13 +186,13 @@ def seed_base():
     # trainer profiles - one per job role in the lab (spec 1.5): the
     # 9-10 trainer is the one with the demo login.
     tr = Trainer(organisation_id=org.id, full_name="Vocational Trainer", school_id=s1.id,
-                 lab_id=lab1.id, job_role_id=jr_ddeo.id, email="vt@rnaf.demo",
+                 lab_id=lab1.id, job_role_ids=str(jr_ddeo.id), email="vt@rnaf.demo",
                  trainer_status="active", user_id=vt.id,
                  # what the admin records when the trainer is taken on (fictional)
                  phone="9800000011", gender="Female", date_of_joining=date(2024, 7, 1),
                  vtp_name="Demo Skills Pvt. Ltd.", appointment_nature="Contractual")
     tr2 = Trainer(organisation_id=org.id, full_name="Senior Vocational Trainer", school_id=s1.id,
-                  lab_id=lab1.id, job_role_id=jr_jsd.id, email="vt2@rnaf.demo",
+                  lab_id=lab1.id, job_role_ids=str(jr_jsd.id), email="vt2@rnaf.demo",
                   trainer_status="active")
     db.session.add_all([tr, tr2])
 

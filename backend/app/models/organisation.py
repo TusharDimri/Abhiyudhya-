@@ -17,5 +17,14 @@ class Organisation(BaseModel):
     affiliation_cert_number = db.Column(db.String(120))
     affiliation_valid_till = db.Column(db.Date)
 
+    @property
+    def initials(self):
+        """'Sahyog Skills Foundation' -> 'SSF' - a trainer's VTP. A word already
+        in capitals ('RNAF') is kept whole; 'of', 'and', '&' ... are skipped."""
+        import re
+        words = [w for w in re.findall(r"[A-Za-z]+", self.name or "")
+                 if w.lower() not in ("of", "and", "the", "for", "in")]
+        return "".join(w if len(w) > 1 and w.isupper() else w[0].upper() for w in words)
+
     def __repr__(self):
         return f"<Organisation {self.org_code}>"
