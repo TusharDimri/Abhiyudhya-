@@ -169,6 +169,7 @@ def bootstrap():
                 "label": cfg.label,
                 "can_write": cfg.can_create(user.role),
                 "can_edit": cfg.can_edit(user.role),
+                "can_delete": cfg.can_delete(user.role),     # soft delete + restore
                 "filters": cfg.filters,
                 "sortable": cfg.sortable,
                 "search": cfg.search,

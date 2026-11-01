@@ -27,6 +27,17 @@ import { visibleFilters, visibleColumns } from "../lib/scope";
 import { EMPTY_HINTS } from "../lib/roleUi";
 import { toDMY } from "../lib/dates";
 
+// An org admin's soft delete: deleted records stay listed (marked, with
+// Restore) unless they narrow it with this filter. Nothing is ever removed.
+const DELETED_FILTER = {
+  name: "deleted", label: "Records",
+  options: [{ value: "active", label: "Active only" }, { value: "only", label: "Deleted only" }],
+};
+// the lists an org admin can also search, from the place-picker row
+const OA_SEARCH = new Set(["districts", "schools", "principals", "labs", "trainers"]);
+const DELETED_COLUMN = { key: "deleted_state", label: "Deleted", badge: true, sortable: false,
+  valueLabels: { deleted: "Yes", false: "No" } };
+
 const CONTROL_KEYS = ["page", "page_size", "q", "sort", "order", "new"];
 const PAGE_SIZES = [15, 25, 50, 100];
 
@@ -73,10 +84,12 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
 
   const perm = boot?.resources?.[resource];
   const canWrite = perm?.can_write && !readOnly;            // may add
-  const canEdit = canWrite && perm?.can_edit !== false;       // may change (nothing is ever deleted)
+  const canEdit = canWrite && perm?.can_edit !== false;       // may change
+  const canDelete = !readOnly && !!perm?.can_delete;          // may (soft) delete and restore
   // a role may be offered just the filters that matter to it
   const roleFilters = mod?.filtersFor?.[user?.role];
-  const filterCols = (perm?.filters || []).filter((c) => !roleFilters || roleFilters.includes(c));
+  const filterCols = [...(perm?.filters || []).filter((c) => !roleFilters || roleFilters.includes(c)),
+    ...(canDelete ? ["deleted"] : [])];
   const isSA = !!boot?.is_platform_admin;
   const orgOptions = boot?.options?.organisations || [];
   const orgScoped = resource !== "organisations";
@@ -171,13 +184,14 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     if (q) p.set("search", q);
     if (sort) { p.set("sort", sort); p.set("order", order); }
     for (const [k, v] of Object.entries(filterValues)) if (v !== "" && k !== "new") p.set(k, v);
+    if (canDelete && !filterValues.deleted) p.set("deleted", "all");
     if (isSA && orgFilter && orgScoped && !gate) p.set("organisation_id", orgFilter);
     if (gate?.withOrg && orgScope.organisation_id) p.set("organisation_id", orgScope.organisation_id);
     if (gate?.param && gateValue) p.set(gate.param, gateValue);
     for (const [k, v] of Object.entries(fixedParams || {})) p.set(k, v);
     if (focusId) p.set("focus", focusId);   // the server picks the page that holds it
     return p.toString();
-  }, [page, pageSize, q, sort, order, filterValues, isSA, orgFilter, orgScoped, gate?.param, gate?.withOrg, gateValue, orgScope.organisation_id, fixedParams, focusId]); // eslint-disable-line
+  }, [page, pageSize, q, sort, order, filterValues, canDelete, isSA, orgFilter, orgScoped, gate?.param, gate?.withOrg, gateValue, orgScope.organisation_id, fixedParams, focusId]); // eslint-disable-line
 
   const list = useQuery({
     queryKey: ["list", resource, apiParams],
@@ -281,6 +295,28 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
     setAll: (ids) => setPicked(new Set(ids)),
   } : null;
 
+  const rows = useMemo(() => {
+    const data = list.data?.data || [];
+    return canDelete ? data.map((r) => ({ ...r, deleted_state: r.is_deleted ? "deleted" : "false" })) : data;
+  }, [list.data, canDelete]);
+  const tableColumns = canDelete ? [...shownColumns, DELETED_COLUMN] : shownColumns;
+
+  const [deleting, setDeleting] = useState(null);       // the row waiting for "Yes, delete"
+  const afterChange = () => {
+    for (const k of [["list", resource], ["dashboard"]]) qc.invalidateQueries({ queryKey: k });
+    qc.invalidateQueries({ queryKey: ["bootstrap"] });   // dropdowns drop / regain it
+  };
+  const remove = useMutation({
+    mutationFn: async (r) => (await api.delete(`/${resource}/${r.id}`)).data,
+    onSuccess: () => { push(`${mod?.singular} deleted - it can be restored from this list`, "success"); setDeleting(null); afterChange(); },
+    onError: (e) => { push(apiError(e), "error"); setDeleting(null); },
+  });
+  const restore = useMutation({
+    mutationFn: async (r) => (await api.post(`/${resource}/${r.id}/restore`)).data,
+    onSuccess: () => { push(`${mod?.singular} restored`, "success"); afterChange(); },
+    onError: (e) => push(apiError(e), "error"),
+  });
+
   if (!mod) return <div className="card card-pad">Unknown module: {resource}</div>;
 
   const onSort = (key) => {
@@ -293,13 +329,13 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
   // org admins narrow things down with the district / school picker and filters instead
   const showSearch = mod.searchable !== false && (perm?.search?.length ?? 0) > 0 && !["OA", "DM", "DEPT", "SA"].includes(user?.role);
   const toolbarRow = showSearch || (isSA && orgScoped && !gate);
+  const scopeSearch = user?.role === "OA" && !!gate && OA_SEARCH.has(resource) && (perm?.search?.length ?? 0) > 0;
   const pageSizeBox = (
     <select className="select pagesize" value={pageSize} onChange={(e) => patch({ page_size: e.target.value })} aria-label="Rows per page">
       {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} / page</option>)}
     </select>
   );
 
-  const rows = list.data?.data || [];
   const pg = list.data?.pagination || { total: 0, pages: 1, page };
   const from = pg.total === 0 ? 0 : (pg.page - 1) * pageSize + 1;
   const to = Math.min(pg.page * pageSize, pg.total);
@@ -324,7 +360,21 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
       )}
 
       {gate && <ScopePicker needs={gate.needs} scope={orgScope} isSA={!!gate.withOrg}
-        setScope={(next) => { setOrgScope(next); patch({}); }} boot={boot} />}
+        setScope={(next) => { setOrgScope(next); patch({}); }} boot={boot}
+        aside={scopeSearch && (
+          <div className="search-wrap">
+            <span className="search-ico"><Search size={15} /></span>
+            <input
+              className="input search"
+              placeholder={gateOpen ? `${mod.searchHint || `Search ${mod.label.toLowerCase()}`}…` : "Pick above first, then search…"}
+              value={searchInput}
+              disabled={!gateOpen}
+              onChange={(e) => setSearchInput(e.target.value)}
+              aria-label={`Search ${mod.label.toLowerCase()}`}
+            />
+            {searchInput && <button className="search-clear" onClick={() => setSearchInput("")} aria-label="Clear search">×</button>}
+          </div>
+        )} />}
 
       {!gateOpen && <ScopeEmpty needs={gate.needs} label={labelOf(mod, user?.role)} isSA={!!gate.withOrg} />}
 
@@ -366,7 +416,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
 
       <Filters
         filters={visibleFilterCols}
-        fields={mod.fields}
+        fields={canDelete ? [...mod.fields, DELETED_FILTER] : mod.fields}
         boot={boot}
         values={filterValues}
         onChange={(col, val) => patch({ [col]: val })}
@@ -379,7 +429,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
       {shownColumns.some((c) => c.dot === "endorsement") && <EndorsementLegend />}
 
       <DataTable
-        columns={shownColumns}
+        columns={tableColumns}
         rows={rows}
         flashId={flashId}
         loading={list.isLoading}
@@ -389,6 +439,9 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         canWrite={canEdit}
         rowActions={rowActions}
         onEdit={openEdit}
+        onDelete={canDelete ? setDeleting : undefined}
+        onRestore={canDelete ? (r) => restore.mutate(r) : undefined}
+        restoring={restore.isPending ? restore.variables?.id : null}
         onRowAction={(action, r) => setWorkflow({ action, row: r })}
         emptyHint={EMPTY_HINTS[resource]?.[user?.role]}
         emptyAction={canWrite && !hideCreate ? (mod.addLabel || `New ${mod.singular}`) : null}
@@ -450,6 +503,27 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
       )}
 
       {newLogin && <LoginCreated {...newLogin} onDone={() => setNewLogin(null)} />}
+
+      {deleting && (
+        <div className="overlay center" onMouseDown={(e) => e.target === e.currentTarget && !remove.isPending && setDeleting(null)}>
+          <div className="modal modal-confirm" role="dialog" aria-label={`Delete ${mod.singular}`}>
+            <header><h3 style={{ margin: 0 }}>Delete this {mod.singular.toLowerCase()}?</h3></header>
+            <div className="body">
+              <p><strong>{deleting.name || deleting.full_name || deleting.label || "This record"}</strong>
+                {deleting.school_name ? ` · ${deleting.school_name}` : ""}</p>
+              <p className="muted">It's marked as deleted and hidden from the rest of the portal
+                {mod.singular === "Vocational Trainer" || mod.singular === "Principal" ? ", and their login stops working" : ""}.
+                Nothing is erased: choose <strong>Restore</strong> on its row to bring it back.</p>
+            </div>
+            <footer className="row" style={{ justifyContent: "flex-end" }}>
+              <button type="button" className="btn btn-ghost" disabled={remove.isPending} onClick={() => setDeleting(null)}>Cancel</button>
+              <button type="button" className="btn btn-danger" disabled={remove.isPending} onClick={() => remove.mutate(deleting)}>
+                {remove.isPending ? "Deleting…" : "Yes, delete"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {workflow?.action === "view" && (
         <RecordView mod={mod} resource={resource} row={workflow.row} onClose={() => setWorkflow(null)} />

@@ -13,8 +13,8 @@ const LEAVING_NOTE = { requested: "Leaving · TC pending", tc_issued: "Leaving �
 /* `select` (optional) puts a tick box on each row it allows, and one in the
    header for every such row on this page: { can(row), ids: Set, toggle(id),
    setAll(ids) } - e.g. the Principal ticking attendance to verify at once. */
-export default function DataTable({ columns, rows, loading, sort, order, onSort, onEdit, onDelete, onRowAction, rowActions, canWrite, emptyHint, emptyAction, onEmptyAction, flashId, select }) {
-  const showActions = canWrite || (rowActions && rowActions.length);
+export default function DataTable({ columns, rows, loading, sort, order, onSort, onEdit, onDelete, onRestore, restoring, onRowAction, rowActions, canWrite, emptyHint, emptyAction, onEmptyAction, flashId, select }) {
+  const showActions = canWrite || onDelete || (rowActions && rowActions.length);
   const pickable = select && !loading ? rows.filter((r) => select.can(r)).map((r) => String(r.id)) : [];
   const picked = pickable.filter((id) => select.ids.has(id)).length;
   const allBox = useRef(null);
@@ -70,7 +70,8 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
               : rows.map((r) => (
                   <tr key={r.id} ref={flashId && String(r.id) === String(flashId) ? flashRow : null}
                     className={[flashId && String(r.id) === String(flashId) ? "row-flash" : "",
-                      select?.ids.has(String(r.id)) ? "row-picked" : ""].filter(Boolean).join(" ") || undefined}>
+                      select?.ids.has(String(r.id)) ? "row-picked" : "",
+                      r.is_deleted ? "row-deleted" : ""].filter(Boolean).join(" ") || undefined}>
                     {select && (
                       <td className="select-col">
                         {select.can(r) && (
@@ -88,7 +89,16 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                     ))}
                     {showActions ? (
                       <td>
-                        {isGone(r) && rowActions?.includes("record") ? (
+                        {r.is_deleted ? (
+                        // soft-deleted (still in the database): it can only come back
+                        <div className="cell-actions">
+                          {onRestore && (
+                            <button className="btn btn-accent btn-sm" disabled={String(restoring) === String(r.id)} onClick={() => onRestore(r)}>
+                              {String(restoring) === String(r.id) ? "Restoring…" : "Restore"}
+                            </button>
+                          )}
+                        </div>
+                        ) : isGone(r) && rowActions?.includes("record") ? (
                         // a student who has left: their record and history, nothing more
                         <div className="cell-actions">
                           <button className="btn btn-ghost btn-sm" onClick={() => onRowAction("record", r)}>View</button>
@@ -138,7 +148,7 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                             <span className="closed-note" title="From a previous academic year - it can't be changed">Closed year</span>
                           )}
                           {canWrite && !r.past_year && <button className="btn btn-ghost btn-sm" onClick={() => onEdit(r)}>Edit</button>}
-                          {canWrite && onDelete && <button className="btn btn-danger btn-sm" onClick={() => onDelete(r)}>Delete</button>}
+                          {onDelete && <button className="btn btn-danger btn-sm" onClick={() => onDelete(r)}>Delete</button>}
                         </div>
                         )}
                       </td>

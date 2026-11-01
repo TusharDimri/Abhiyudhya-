@@ -30,7 +30,8 @@ function useOrgList(resource, orgId, extra = "", enabled = true) {
   });
 }
 
-export default function ScopePicker({ needs, scope, setScope, boot, isSA }) {
+// `aside`: shown at the right end of the row (an org admin's search box)
+export default function ScopePicker({ needs, scope, setScope, boot, isSA, aside }) {
   const opts = boot?.options || {};
   const org = scope.organisation_id;
   const wantsPlace = needs !== "org";
@@ -66,6 +67,7 @@ export default function ScopePicker({ needs, scope, setScope, boot, isSA }) {
           placeholder={scope.district_id ? "Select a school" : "Select a district first"}
           onChange={(v) => setScope({ ...scope, school_id: v })} />
       )}
+      {aside && <div className="scope-aside">{aside}</div>}
     </div>
   );
 }
