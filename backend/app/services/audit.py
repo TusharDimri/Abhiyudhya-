@@ -17,7 +17,9 @@ def _serialise(obj):
         return str(obj)
 
 
-def record(user, action, entity, entity_id, before=None, after=None):
+def record(user, action, entity, entity_id, before=None, after=None, tell_super_admin=True):
+    """tell_super_admin=False: a bulk load (flask import-seed) - one
+    notification per record would bury the super admin."""
     log = AuditLog(
         id=uuid.uuid4(),
         organisation_id=getattr(user, "organisation_id", None),
@@ -33,6 +35,6 @@ def record(user, action, entity, entity_id, before=None, after=None):
     )
     db.session.add(log)
     # the super admin hears what org admins do
-    if getattr(user, "role", None) == "OA":
+    if tell_super_admin and getattr(user, "role", None) == "OA":
         from app.services import notify
         notify.org_admin_action(user, action, entity, entity_id, before, after)
