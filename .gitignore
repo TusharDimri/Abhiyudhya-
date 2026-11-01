@@ -26,3 +26,9 @@ certbot/
 .sf/
 
 *.xlsx
+# seed data for the import - holds personal data, never commit
+seed-data/
+*.xlsx
+
+
+*.docx

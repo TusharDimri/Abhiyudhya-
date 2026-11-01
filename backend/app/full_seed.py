@@ -310,8 +310,8 @@ def _trainer(org, school, lab, role, name, email, gender):
         u.labs.append(lab)
     t = db.session.query(Trainer).filter_by(user_id=u.id).first()
     if t is None:
-        t = (db.session.query(Trainer).filter_by(lab_id=lab.id, job_role_id=role.id, user_id=None).first()
-             or Trainer(organisation_id=org.id, full_name=name, school_id=school.id, lab_id=lab.id, job_role_id=role.id))
+        t = (db.session.query(Trainer).filter_by(lab_id=lab.id, job_role_ids=str(role.id), user_id=None).first()
+             or Trainer(organisation_id=org.id, full_name=name, school_id=school.id, lab_id=lab.id, job_role_ids=str(role.id)))
         t.user_id, t.email = u.id, email
         db.session.add(t)
     t.trainer_status = t.trainer_status or "active"

@@ -70,7 +70,9 @@ function valueOf(f, data, boot) {
   if (f.type === "date" || /(^|_)date$/.test(f.name)) return toDMY(v);
   if (f.type === "time") return String(v).slice(0, 5);
   if (f.name === "class_grade") return `Class ${v}`;
-  if (f.type === "multiselect") return (Array.isArray(v) ? v : String(v).split(",")).map((x) => String(x).trim()).join(", ");
+  // (ids - a trainer's job roles - shown by name; names stay as they are)
+  if (f.type === "multiselect")
+    return (Array.isArray(v) ? v : String(v).split(",")).map((x) => nameFor({ name: "" }, String(x).trim(), {}, boot)).join(", ");
   if (f.type === "select") return f.optionsKey || f.name.endsWith("_id") ? nameFor(f, v, data, boot) : optionText(String(v));
   return <span className="view-text">{String(v)}</span>;
 }

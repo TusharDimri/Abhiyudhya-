@@ -75,7 +75,8 @@ class Trainer(BaseModel):
     full_name = db.Column(db.String(160), nullable=False)
     school_id = db.Column(GUID(), db.ForeignKey("school.id"), index=True)
     lab_id = db.Column(GUID(), db.ForeignKey("lab.id"), index=True)
-    job_role_id = db.Column(GUID(), db.ForeignKey("job_role.id"))
+    # the lab's job role(s) they teach - usually both: "id1,id2" (like sections)
+    job_role_ids = db.Column(db.Text)
     email = db.Column(db.String(120))
     phone = db.Column(db.String(30))
     gender = db.Column(db.String(20))
@@ -125,6 +126,10 @@ class Trainer(BaseModel):
 
     school = db.relationship("School", lazy="joined")
     lab = db.relationship("Lab", lazy="joined")
+
+    @property
+    def job_role_id_list(self):
+        return [s.strip() for s in (self.job_role_ids or "").split(",") if s.strip()]
 
     # Personal, bank and salary details live on the trainer's own profile
     # (api/profile.py). They never go out with the ordinary trainer list -

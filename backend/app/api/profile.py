@@ -106,7 +106,7 @@ def _trainer_extras(tr):
     school = db.session.get(School, tr.school_id) if tr.school_id else None
     lab = db.session.get(Lab, tr.lab_id) if tr.lab_id else None
     sector = db.session.get(Sector, lab.sector_id) if lab and lab.sector_id else None
-    role = db.session.get(JobRole, tr.job_role_id) if tr.job_role_id else None
+    roles = [r for r in (db.session.get(JobRole, i) for i in tr.job_role_id_list) if r]
     return {
         "total_experience_years": round(past + current, 1),
         "net_salary": round(tr.gross_salary - deductions, 2) if tr.gross_salary is not None else None,
@@ -118,7 +118,7 @@ def _trainer_extras(tr):
             "school_year": academic_year_for(tr.organisation_id, tr.date_of_joining) if tr.date_of_joining else None,
             "lab_name": lab.name if lab else None,
             "skill_name": sector.name if sector else None,
-            "job_role": role.name if role else None,
+            "job_role": ", ".join(r.name for r in roles) or None,
             "date_of_joining": tr.date_of_joining.isoformat() if tr.date_of_joining else None,
             "appointment_nature": tr.appointment_nature,
             "trainer_status": tr.trainer_status,

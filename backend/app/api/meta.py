@@ -54,6 +54,7 @@ def _org_branding(user):
         return None
     return {
         "id": str(org.id), "name": org.name, "org_code": org.org_code,
+        "initials": org.initials,      # a trainer's VTP
         "logo_url": org.logo_url,
         # the logo is a private file in storage: the browser needs a signed link to it
         "logo_src": _file_link(org.logo_url),
@@ -199,7 +200,7 @@ def bootstrap():
             "trainers": _options(Trainer, user, label_attr="full_name", extra=lambda r: {
                 "school_id": str(r.school_id) if r.school_id else None,
                 "lab_id": str(r.lab_id) if r.lab_id else None,
-                "job_role_id": str(r.job_role_id) if r.job_role_id else None,
+                "job_role_ids": r.job_role_id_list,
             }),
             "organisations": org_options,  # populated for Super Admin only
         },

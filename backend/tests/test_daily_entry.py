@@ -87,7 +87,7 @@ def world(app):
     db.session.flush()
     vt.labs.append(lab)
     db.session.add(Trainer(organisation_id=org.id, full_name="VT", school_id=school.id,
-                           lab_id=lab.id, job_role_id=jr_low.id, user_id=vt.id))
+                           lab_id=lab.id, job_role_ids=str(jr_low.id), user_id=vt.id))
     db.session.commit()
     return {
         "org": org, "school": school, "lab": lab, "jr_low": jr_low, "jr_high": jr_high,
@@ -286,7 +286,7 @@ def test_a_new_school_has_its_board_email_and_phone(client, world):
     assert r.status_code == 201, r.get_json()
     assert (r.get_json()["board"], r.get_json()["phone"]) == ("CBSE", "02023456789")
     boards = [o["value"] for o in client.get("/api/meta/bootstrap", headers=h).get_json()["enums"]["school_boards"]]
-    assert boards == ["CBSE", "RamNagar", "PM Shri", "UK Board"]
+    assert boards == ["CBSE", "RamNagar", "PM Shri", "UK Board", "Samagra Shiksha"]
 
 
 def test_admin_adds_a_principal_with_just_the_basics_and_a_prabhari(client, world):
@@ -414,7 +414,7 @@ def test_sessions_can_be_listed_by_module(client, world):
 def _trainer_body(world, **extra):
     return {"full_name": "A Trainer", "gender": "Female", "email": "a.trainer@x.com", "phone": "9876500001",
             "school_id": str(world["school"].id), "lab_id": str(world["lab"].id),
-            "job_role_id": str(world["jr_low"].id), "date_of_joining": "2024-06-15", "vtp_name": "Skills Co", **extra}
+            "job_role_ids": str(world["jr_low"].id), "date_of_joining": "2024-06-15", **extra}
 
 
 def test_admin_form_needs_the_required_fields(client, world):
@@ -425,7 +425,8 @@ def test_admin_form_needs_the_required_fields(client, world):
     h = _login(client, "oa@x.com")
     r = client.post("/api/trainers", headers=h, json={"full_name": "Half Done", "school_id": str(world["school"].id)})
     assert r.status_code == 400
-    assert r.get_json()["message"].startswith("Please fill in:") and "VTP" in r.get_json()["message"]
+    assert r.get_json()["message"].startswith("Please fill in:") and "Job role(s)" in r.get_json()["message"]
+    assert "VTP" not in r.get_json()["message"]     # filled in for them
     # a district needs its state (the database insists - now with a message, not a crash)
     r = client.post("/api/districts", headers=h, json={"name": "No State"})
     assert r.status_code == 400 and "State" in r.get_json()["message"]
@@ -775,12 +776,64 @@ def test_one_trainer_per_job_role_in_a_lab(client, world):
     h = _login(client, "oa@x.com")
     r = client.post("/api/trainers", headers=h, json=_trainer_body(world, full_name="Second VT", email="second.vt@x.com"))
     assert r.status_code == 400
-    assert "already holds this job role" in r.get_json()["message"]
+    assert "already holds DDEO in this lab" in r.get_json()["message"]
 
     # the other slot is free
     ok = client.post("/api/trainers", headers=h, json=_trainer_body(
-        world, full_name="Senior VT", email="senior.vt@x.com", job_role_id=str(world["jr_high"].id)))
+        world, full_name="Senior VT", email="senior.vt@x.com", job_role_ids=str(world["jr_high"].id)))
     assert ok.status_code == 201, ok.get_json()
+
+
+def test_a_trainer_teaches_both_job_roles_with_the_orgs_initials_as_vtp(client, world):
+    world["org"].name = "Rural Nurture and Advancement Foundation"
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    # the lab's 9-10 role already has the fixture's trainer: move them to another lab
+    db.session.query(Trainer).update({"job_role_ids": None})
+    db.session.commit()
+    h = _login(client, "oa@x.com")
+    low, high = str(world["jr_low"].id), str(world["jr_high"].id)
+    both = _trainer_body(world, full_name="Both VT", email="both.vt@x.com", job_role_ids=[high, low, low],
+                         vtp_name="Typed In Ltd.")
+    r = client.post("/api/trainers", headers=h, json=both)
+    assert r.status_code == 201, r.get_json()
+    saved = client.get(f"/api/trainers/{r.get_json()['id']}", headers=h).get_json()
+    assert saved["job_role_ids"] == f"{high},{low}"          # tidied: no repeats
+    assert saved["vtp_name"] == "RNAF"                       # never what was typed
+    # a second trainer can't take either of those roles
+    again = client.post("/api/trainers", headers=h, json=_trainer_body(
+        world, full_name="Other VT", email="other.vt@x.com", job_role_ids=high))
+    assert again.status_code == 400 and "already holds JSD" in again.get_json()["message"]
+    # ... and only the lab's own roles are offered
+    stray = JobRole(organisation_id=world["org"].id, name="Stray", sector_id=world["lab"].sector_id, class_band="9-10")
+    db.session.add(stray)
+    db.session.commit()
+    odd = client.post("/api/trainers", headers=h, json=_trainer_body(
+        world, full_name="Odd VT", email="odd.vt@x.com", job_role_ids=str(stray.id)))
+    assert odd.status_code == 400 and "this lab teaches" in odd.get_json()["message"]
+    boot = client.get("/api/meta/bootstrap", headers=h).get_json()
+    assert boot["organisation"]["initials"] == "RNAF"
+
+
+def test_organisation_initials():
+    assert Organisation(name="Sahyog Skills Foundation").initials == "SSF"
+    assert Organisation(name="RNAF Demo Organisation").initials == "RNAFDO"
+    assert Organisation(name="Society for Skills & Education of India").initials == "SSEI"
+
+
+def test_a_lab_may_teach_one_class_band_only(client, world):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    h = _login(client, "oa@x.com")
+    lab = {"name": "Drone Lab", "school_id": str(world["school"].id), "sector_id": str(world["lab"].sector_id),
+           "academic_year_of_setup": "2025-26"}
+    only_high = client.post("/api/labs", headers=h, json={**lab, "job_role_11_12_id": str(world["jr_high"].id)})
+    assert only_high.status_code == 201, only_high.get_json()
+    none = client.post("/api/labs", headers=h, json=lab)
+    assert none.status_code == 400 and "at least one job role" in none.get_json()["message"]
 
 
 def test_admin_adds_a_trainer_with_their_profile(client, world):
@@ -789,7 +842,7 @@ def test_admin_adds_a_trainer_with_their_profile(client, world):
     db.session.add(oa)
     db.session.commit()
     h = _login(client, "oa@x.com")
-    base = _trainer_body(world, full_name="New VT", job_role_id=str(world["jr_high"].id), phone="9876543210",
+    base = _trainer_body(world, full_name="New VT", job_role_ids=str(world["jr_high"].id), phone="9876543210",
                          email="new.vt@x.com")
     general = {"father_name": "Ramesh", "dob": "1990-04-01", "gender": "Male", "aadhaar_number": "123412341234"}
     # a started section must be complete, and formats are checked
@@ -2038,7 +2091,7 @@ def test_trainer_uploads_their_monthly_attendance_mapp(client, world, principal)
     db.session.flush()
     other.labs.append(world["lab"])                                  # same lab, a colleague
     db.session.add(Trainer(organisation_id=world["org"].id, full_name="VT Two", school_id=world["school"].id,
-                           lab_id=world["lab"].id, job_role_id=world["jr_low"].id, user_id=other.id))
+                           lab_id=world["lab"].id, job_role_ids=str(world["jr_low"].id), user_id=other.id))
     db.session.commit()
 
     h = _as(client, "vt@x.com")
@@ -2288,3 +2341,29 @@ def test_the_organisation_logo_reaches_the_browser_as_a_link(client, world):
             assert got == wanted
         else:   # a stored file: a signed link (or nothing, where storage isn't set up) - never the bare path
             assert got != stored and (got is None or (got.startswith("http") and "logo.png" in got))
+
+
+def test_a_school_loads_without_a_type_but_needs_its_map_point(client, world):
+    """School type is optional for now (the seed data has none); the map point
+    stays required. A Samagra Shiksha school is accepted."""
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    r = client.post("/api/schools", headers=_as(client, "oa@x.com"), json={
+        **SCHOOL_CONTACT, "name": "G.I.C. Test", "udise_code": "05090517902",
+        "district_id": str(world["school"].district_id), "board": "Samagra Shiksha", "address": "G.I.C. Test, Almora",
+        "location_lat": 29.5543, "location_lng": 79.7978})
+    assert r.status_code == 201, r.get_json()
+    made = r.get_json()
+    assert made["school_type"] is None and made["board"] == "Samagra Shiksha"
+    # ... but not without its map point
+    no_point = client.post("/api/schools", headers=_as(client, "oa@x.com"), json={
+        **SCHOOL_CONTACT, "name": "G.I.C. Test 2", "udise_code": "05090517904",
+        "district_id": str(world["school"].district_id), "board": "Samagra Shiksha", "address": "G.I.C. Test 2, Almora"})
+    assert no_point.status_code == 400 and "Location" in no_point.get_json()["message"]
+    # an unknown board is still refused
+    bad = client.post("/api/schools", headers=_as(client, "oa@x.com"), json={
+        **SCHOOL_CONTACT, "name": "X", "udise_code": "05090517903",
+        "district_id": str(world["school"].district_id), "board": "SAMAGRA", "address": "X"})
+    assert bad.status_code == 400
