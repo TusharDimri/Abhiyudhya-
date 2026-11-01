@@ -153,3 +153,17 @@ def test_only_this_organisations_admin_may_load_it(app, org_admin, tmp_path):
     db.session.commit()
     r = app.test_cli_runner().invoke(args=["import-seed", _workbook(str(tmp_path)), "--org", "RNAF", "--by", "other@x.com"])
     assert r.exit_code != 0 and "must be this organisation's Org Admin" in r.output
+
+
+def test_two_districts_of_one_name_stop_the_load(app, org_admin, tmp_path):
+    # an older, misspelt state already holds an 'ALMORA': the sheet's 'Almora' could be either
+    from app.models.geography import State, District
+    old = State(organisation_id=org_admin.organisation_id, name="UTTRAKHAND")
+    db.session.add(old)
+    db.session.flush()
+    db.session.add(District(organisation_id=org_admin.organisation_id, state_id=old.id, name="ALMORA"))
+    db.session.commit()
+    r = _run(app, _workbook(str(tmp_path)), "--commit")
+    assert r.exit_code == 1
+    assert "6 Schools, row 2: There are 2 districts called 'Almora' (in different states)" in r.output
+    assert db.session.query(School).count() == 0

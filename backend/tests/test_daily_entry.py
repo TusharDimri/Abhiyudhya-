@@ -2367,3 +2367,82 @@ def test_a_school_loads_without_a_type_but_needs_its_map_point(client, world):
         **SCHOOL_CONTACT, "name": "X", "udise_code": "05090517903",
         "district_id": str(world["school"].district_id), "board": "SAMAGRA", "address": "X"})
     assert bad.status_code == 400
+
+
+# ------------------------------------------------- soft delete (org admin)
+def test_org_admin_soft_deletes_and_restores_what_they_add(client, world):
+    """An org admin deletes Master Data records: they're only marked deleted
+    (never removed), listed for them with is_deleted, and restorable. A record
+    others still hang off can't be deleted; a deleted parent blocks a restore."""
+    from app.models.masters import JobRole, Sector
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    db.session.commit()
+    h = _as(client, "oa@x.com")
+
+    # the school has a lab, a trainer and students under it
+    r = client.delete(f"/api/schools/{world['school'].id}", headers=h)
+    assert r.status_code == 400 and "still has labs, trainers, principals or students" in r.get_json()["message"]
+
+    # a trainer: marked deleted, kept in the database, their login switched off
+    tr = db.session.query(Trainer).filter_by(full_name="VT").one()
+    tid = str(tr.id)
+    assert client.delete(f"/api/trainers/{tid}", headers=h).status_code == 200
+    db.session.expire_all()
+    kept = db.session.get(Trainer, tid)
+    assert kept is not None and kept.is_deleted is True and kept.status == "deleted"
+    g_clear = client.post("/api/auth/login", json={"email": "vt@x.com", "password": "Password@123"})
+    assert g_clear.status_code == 403
+    # gone from the ordinary list (and dropdowns), shown with ?deleted=all / only
+    h = _as(client, "oa@x.com")
+    ids = lambda q="": {row["id"]: row["is_deleted"] for row in client.get(f"/api/trainers{q}", headers=h).get_json()["data"]}  # noqa: E731
+    assert tid not in ids()
+    assert ids("?deleted=all")[tid] is True and list(ids("?deleted=only")) == [tid]
+    boot = client.get("/api/meta/bootstrap", headers=h).get_json()
+    assert tid not in {o["value"] for o in boot["options"]["trainers"]}
+    assert boot["resources"]["trainers"]["can_delete"] is True
+    # deleting twice: not found
+    assert client.delete(f"/api/trainers/{tid}", headers=h).status_code == 404
+
+    # restored: back in the list, and they can sign in again
+    assert client.post(f"/api/trainers/{tid}/restore", headers=h).status_code == 200
+    assert tid in ids()
+    assert client.post("/api/auth/login", json={"email": "vt@x.com", "password": "Password@123"}).status_code == 200
+
+    # a job role under a sector: delete both, and the role waits for its sector
+    h = _as(client, "oa@x.com")
+    sec = Sector(organisation_id=world["org"].id, name="Drones")
+    db.session.add(sec)
+    db.session.flush()
+    jr = JobRole(organisation_id=world["org"].id, name="Drone Pilot", sector_id=sec.id, class_band="9-10")
+    db.session.add(jr)
+    db.session.commit()
+    assert client.delete(f"/api/sectors/{sec.id}", headers=h).status_code == 400      # the role is under it
+    assert client.delete(f"/api/job-roles/{jr.id}", headers=h).status_code == 200
+    assert client.delete(f"/api/sectors/{sec.id}", headers=h).status_code == 200
+    r = client.post(f"/api/job-roles/{jr.id}/restore", headers=h)
+    assert r.status_code == 400 and "Restore its sector 'Drones' first." in r.get_json()["message"]
+    assert client.post(f"/api/sectors/{sec.id}/restore", headers=h).status_code == 200
+    assert client.post(f"/api/job-roles/{jr.id}/restore", headers=h).status_code == 200
+
+
+def test_only_the_org_admin_deletes_and_only_set_up_records(client, world):
+    oa = User(organisation_id=world["org"].id, full_name="OA", email="oa@x.com", role="OA")
+    oa.set_password("Password@123")
+    db.session.add(oa)
+    dm = User(organisation_id=world["org"].id, full_name="DM", email="dm@x.com", role="DM")
+    dm.set_password("Password@123")
+    db.session.add(dm)
+    db.session.commit()
+    lab = str(world["lab"].id)
+    for email in ("vt@x.com", "dm@x.com"):
+        r = client.delete(f"/api/labs/{lab}", headers=_as(client, email))
+        assert r.status_code == 403, email
+        # ... nor do they see deleted rows, whatever they ask for
+        listed = client.get("/api/labs?deleted=only", headers=_as(client, email))
+        assert listed.status_code != 200 or listed.get_json()["data"] == [] or \
+            all(not row["is_deleted"] for row in listed.get_json()["data"])
+    # daily records aren't the org admin's to delete either
+    sid = str(world["students"][0].id)
+    assert client.delete(f"/api/students/{sid}", headers=_as(client, "oa@x.com")).status_code == 403

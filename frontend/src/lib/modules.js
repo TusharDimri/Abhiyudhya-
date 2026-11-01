@@ -232,6 +232,7 @@ export const MODULES = {
   },
   districts: {
     label: "Districts", singular: "District", icon: "📍", group: "Master Data",
+    searchHint: "Search by name or code",
     columns: [{ key: "name", label: "Name" }, { key: "code", label: "Code" }],
     fields: [
       { name: "name", label: "District name", required: true },

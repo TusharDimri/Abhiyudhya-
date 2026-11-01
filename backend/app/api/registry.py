@@ -142,6 +142,12 @@ class ResourceConfig:
             return False
         return role in (self.write_roles if self.edit_roles is None else self.edit_roles)
 
+    def can_delete(self, role):
+        """An org admin deletes - and restores - what they may add (the Master
+        Data tabs). A soft delete: the row is only marked is_deleted, never
+        removed from the database."""
+        return role == OA and self.name in ORG_ADMIN_EDITS
+
 
 REGISTRY = {}
 
@@ -238,6 +244,32 @@ def _job_role_in_use(j):
     from sqlalchemy import or_
     return (_any(M.Lab, or_(M.Lab.job_role_9_10_id == j.id, M.Lab.job_role_11_12_id == j.id))
             or _any(M.Student, M.Student.job_role_id == j.id) or _any(M.Trainer, M.Trainer.job_role_ids.contains(str(j.id))))
+
+
+def _state_in_use(st):
+    return _any(M.District, M.District.state_id == st.id)
+
+
+def _sector_in_use(sec):
+    return _any(M.JobRole, M.JobRole.sector_id == sec.id) or _any(M.Lab, M.Lab.sector_id == sec.id)
+
+
+def _category_in_use(c):
+    return _any(M.Student, M.Student.social_category_id == c.id)
+
+
+# what a record can't be deleted under while it's still there (deleted ones
+# don't count): delete those first, or move them
+DELETE_BLOCKERS = {
+    "states": (_state_in_use, "districts"),
+    "districts": (_district_in_use, "schools"),
+    "schools": (_school_in_use, "labs, trainers, principals or students"),
+    "labs": (_lab_in_use, "trainers or students"),
+    "sectors": (_sector_in_use, "job roles or labs"),
+    "job-roles": (lambda j: _job_role_in_use(j), "labs, trainers or students"),
+    "academic-years": (lambda y: _year_in_use(y), "students or labs"),
+    "social-categories": (_category_in_use, "students"),
+}
 
 
 def _year_in_use(y):

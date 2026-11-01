@@ -11,7 +11,7 @@ typed in.
 - Safe to rerun: a record already there (same name / UDISE code / email) is
   left as it is and counted as "already there".
 - The trainers' logins go to a new workbook next to the input, written only
-  when the load is saved - the one place their first passwords are ever shown.
+  when the load is saved - the one place their passwords are ever shown.
 """
 import os
 import re
@@ -212,7 +212,13 @@ class Loader:
                     if there.organisation_id != self.org.id:
                         raise RowError(f"UDISE code {code} belongs to a school in another organisation.")
                     return False
-                dist = self.need(self.named(M.District, r.get("District")), "District", r.get("District"))
+                # the sheet names a district only: two of that name (in two
+                # states) and it can't tell which - say so, never guess
+                same = self.mine(M.District, func.lower(M.District.name) == _key(r.get("District"))).all()
+                if len(same) > 1:
+                    raise RowError(f"There are {len(same)} districts called '{r.get('District')}' (in different states) - "
+                                   "keep one, then load again.")
+                dist = self.need(same[0] if same else None, "District", r.get("District"))
                 self.make("schools", {
                     "name": _text(r.get("School name")), "udise_code": code, "district_id": dist.id,
                     "block": _text(r.get("Block")), "school_type": _text(r.get("School type")),
@@ -282,7 +288,7 @@ class Loader:
 
 
 def write_logins(rows, path, org):
-    """The trainers' first passwords - confidential, shown only here."""
+    """The trainers' passwords - confidential, shown only here."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill
     wb = openpyxl.Workbook()
@@ -291,7 +297,7 @@ def write_logins(rows, path, org):
     for i, line in enumerate([
         f"{org.name} - Vocational Trainer logins (CONFIDENTIAL)",
         f"{len(rows)} logins made by `flask import-seed` on {datetime.now():%d/%m/%Y %H:%M}. The username is the trainer's email.",
-        "Each password works once: the trainer must change it when they first sign in.",
+        "Each trainer signs in at the portal with their email and this password. It keeps working.",
         "Share each login with its trainer only, privately. Don't email or forward this file; delete copies once shared.",
         "A lost password: an Org Admin resets it from the portal's Users page.",
     ], start=1):

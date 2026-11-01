@@ -16,7 +16,7 @@ from sqlalchemy import or_, asc, desc
 
 from app.extensions import db
 from app.models.base import GUID
-from app.api.registry import LOCKED_MESSAGE, REGISTRY
+from app.api.registry import DELETE_BLOCKERS, LOCKED_MESSAGE, REGISTRY
 from app.rbac import login_required, current_user, apply_scope, can_access_row
 from app.rbac.roles import Role
 from app.services import audit
@@ -236,7 +236,13 @@ def list_resource(resource):
 
     q = db.session.query(model)
     if hasattr(model, "is_deleted"):
-        q = q.filter(model.is_deleted.is_(False))
+        # ?deleted=all / only: an org admin's list shows what they deleted
+        # too (to restore it); everyone else - and every dropdown - never does
+        shown = request.args.get("deleted") if cfg.can_delete(user.role) else None
+        if shown == "only":
+            q = q.filter(model.is_deleted.is_(True))
+        elif shown != "all":
+            q = q.filter(model.is_deleted.is_(False))
     q = apply_scope(q, model, user)
 
     # Super Admin is cross-org: let them slice any tenant list by organisation.
@@ -326,7 +332,7 @@ def list_trash(resource):
     """Soft-deleted rows (Recycle Bin) - visible to writers, for restore."""
     cfg = _cfg(resource)
     user = current_user()
-    if not cfg.can_edit(user.role):
+    if not cfg.can_delete(user.role):
         abort(403, description="Only editors can view the recycle bin")
     model = cfg.model
     if not hasattr(model, "is_deleted"):
@@ -347,22 +353,66 @@ def list_trash(resource):
     })
 
 
+# the set-up records others hang off: one of these deleted means what's
+# under it can't come back until it does
+PARENT_TABLES = {"state": "state", "district": "district", "school": "school", "lab": "lab",
+                 "sector": "sector", "job_role": "job role"}
+
+
+def _deleted_parent(obj):
+    """The deleted record this one sits under (a lab's school ...), if any."""
+    for col in obj.__table__.columns:
+        for fk in col.foreign_keys:
+            table = fk.column.table
+            if table.name not in PARENT_TABLES or getattr(obj, col.name, None) is None:
+                continue
+            parent = db.session.execute(
+                db.select(table.c.is_deleted, *[c for c in (table.c.get("name"),) if c is not None])
+                .where(table.c.id == getattr(obj, col.name))).first()
+            if parent and parent[0]:
+                name = f" '{parent[1]}'" if len(parent) > 1 else ""
+                return f"Restore its {PARENT_TABLES[table.name]}{name} first."
+    return None
+
+
+def _login_of(obj, status):
+    """A deleted trainer / principal can't sign in; restored, they can again
+    (the login is switched off, never removed)."""
+    from app.models.user import User
+    if getattr(obj, "user_id", None):
+        login = db.session.get(User, obj.user_id)
+        if login and not login.is_deleted:
+            login.status = status
+
+
 @bp.post("/<resource>/<uid>/restore")
 @login_required
 def restore_resource(resource, uid):
     cfg = _cfg(resource)
     user = current_user()
-    if not cfg.can_edit(user.role):
+    if not cfg.can_delete(user.role):
         abort(403, description="You cannot restore this record")
     obj = db.session.get(cfg.model, uid)
     if obj is None or not getattr(obj, "is_deleted", False):
         abort(404)
     if not can_access_row(obj, user):
         abort(403, description="Outside your scope")
+    blocked = _deleted_parent(obj)
+    if blocked:
+        abort(400, description=blocked)
     obj.is_deleted = False
     obj.status = "active"
     if hasattr(obj, "updated_by"):
         obj.updated_by = user.id
+    db.session.flush()
+    # back in the list, it must still fit (e.g. a trainer's job role taken meanwhile)
+    if cfg.validate:
+        err = cfg.validate(obj, user, False)
+        if err:
+            db.session.rollback()
+            abort(400, description=err)
+    if cfg.profile_role:
+        _login_of(obj, "active")
     audit.record(user, "restore", cfg.model.__tablename__, obj.id, after={"restored": True})
     db.session.commit()
     return jsonify({"restored": True, "id": str(obj.id)})
@@ -571,7 +621,29 @@ def update_resource(resource, uid):
 @bp.delete("/<resource>/<uid>")
 @login_required
 def delete_resource(resource, uid):
-    """Nothing is deleted once saved - by anyone. Forms ask for a 30-second
-    review before they save instead; mistakes are fixed by editing."""
-    _cfg(resource)
-    abort(403, description="Saved records can't be deleted. Edit the record to correct it.")
+    """An org admin deletes what they may add - a soft delete: the record is
+    marked is_deleted and stays in the database, ready to restore. Nothing is
+    ever removed. Everyone else: saved records can't be deleted."""
+    cfg = _cfg(resource)
+    user = current_user()
+    if not cfg.can_delete(user.role):
+        abort(403, description="Saved records can't be deleted. Edit the record to correct it.")
+    obj = db.session.get(cfg.model, uid)
+    if obj is None or getattr(obj, "is_deleted", False):
+        abort(404)
+    if not can_access_row(obj, user):
+        abort(403, description="Outside your scope")
+    blocker = DELETE_BLOCKERS.get(resource)
+    if blocker and blocker[0](obj):
+        abort(400, description=f"This {cfg.label.lower()} still has {blocker[1]} under it. "
+                               "Delete or move those first.")
+    before = obj.to_dict()
+    obj.is_deleted = True
+    obj.status = "deleted"
+    if hasattr(obj, "updated_by"):
+        obj.updated_by = user.id
+    if cfg.profile_role:
+        _login_of(obj, "disabled")
+    audit.record(user, "delete", cfg.model.__tablename__, obj.id, before=before)
+    db.session.commit()
+    return jsonify({"deleted": True, "id": str(obj.id)})
