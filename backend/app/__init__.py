@@ -191,6 +191,24 @@ def _register_cli(app):
         click.echo(f"Super Admin created.\n  Username: {email}\n  Password: {password}\n"
                    "This password is shown only now - put it in the password manager.")
 
+    @app.cli.command("import-seed")
+    @click.argument("workbook", type=click.Path(exists=True, dir_okay=False))
+    @click.option("--org", "org_code", required=True, help="The organisation's code, e.g. RNAF.")
+    @click.option("--by", "by_email", required=True, help="The Org Admin (or Super Admin) the records are made in the name of.")
+    @click.option("--commit", is_flag=True, help="Save it. Without this it's a dry run: everything checked, nothing kept.")
+    def import_seed(workbook, org_code, by_email, commit):
+        """Load the clean seed workbook (State ... Trainers) into one
+        organisation, with the same checks as the admin's forms. All or
+        nothing, safe to rerun; the trainers' logins go to a new workbook
+        beside it."""
+        from app.seed_import import RowError, run_import
+        try:
+            ok = run_import(workbook, org_code, by_email, commit, click.echo)
+        except RowError as exc:
+            raise click.ClickException(str(exc))
+        if not ok:
+            raise SystemExit(1)
+
     @app.cli.command("seed")
     def seed():
         from app.seed import run_seed
