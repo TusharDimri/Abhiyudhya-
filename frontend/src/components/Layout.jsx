@@ -41,7 +41,9 @@ export default function Layout() {
   const loc = useLocation();
 
   const visible = boot?.resources || {};
-  const org = organisation || boot?.organisation;
+  // the bootstrap's copy carries the logo's signed link (logo_src); the
+  // sign-in one only has where it is stored, so it stands in until that loads
+  const org = boot?.organisation || organisation;
 
   // group visible modules (backend already filtered by role via view_roles)
   const grouped = {};
