@@ -41,7 +41,7 @@ class School(BaseModel):
     email = db.Column(db.String(120))
     school_type = db.Column(db.String(20))  # Boys / Girls / Co-education
     board = db.Column(db.String(30))        # enums.SCHOOL_BOARDS: CBSE / RamNagar / PM Shri / UK Board
-    # where the school is - trainers' attendance must be marked within 1 km
+    # where the school is - trainers' attendance records how far from here it was marked
     location = db.Column(Geography(geometry_type="POINT", srid=4326, spatial_index=False))
     phone = db.Column(db.String(30))
     enrolment_count = db.Column(db.Integer, default=0)  # derived, refreshed by service

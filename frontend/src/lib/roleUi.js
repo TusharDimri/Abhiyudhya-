@@ -58,6 +58,9 @@ export const VERIFICATION_LABELS = {
   submitted: "Pending verification",
 };
 
+// a trainer's daily attendance, twice a day (in this order)
+export const PUNCH_LABELS = { in: "Punch In", out: "Punch Out" };
+
 // What each role most likely opened the app to do.
 export const QUICK_ACTIONS = {
   SA: [

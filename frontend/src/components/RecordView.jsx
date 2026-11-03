@@ -101,6 +101,8 @@ export default function RecordView({ mod, resource, row, onClose, title, subtitl
   });
   const rec = data || row;
   const when = rec.date || rec.reporting_date;
+  // which of the day's two it is (daily attendance)
+  const punch = mod.punch?.labels[rec[mod.punch.key]];
   const sections = sectionsOf(mod.fields);
 
   return (
@@ -108,7 +110,7 @@ export default function RecordView({ mod, resource, row, onClose, title, subtitl
       <div className="modal" role="dialog" aria-label={`${mod.singular} details`}>
         <header>
           <div>
-            <h3 style={{ margin: 0 }}>{title || `${mod.singular}${when ? ` · ${toDMY(when)}` : ""}`}</h3>
+            <h3 style={{ margin: 0 }}>{title || `${mod.singular}${punch ? ` · ${punch}` : ""}${when ? ` · ${toDMY(when)}` : ""}`}</h3>
             <span className="drawer-sub">
               {subtitle || <>
                 {rec.trainer_name ? `Filled in by ${rec.trainer_name}` : "Filled in by the trainer"}

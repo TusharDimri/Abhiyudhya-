@@ -1,12 +1,12 @@
 /* Saved records can't be deleted (and most can't be edited), so every form asks for a second look
    before it saves: the first press ("Proceed") checks the form and jumps back to
    the top; Submit is pressed next. On a trainer's daily records the review
-   lasts 30 seconds - Submit unlocks when it runs out; elsewhere at once. */
+   lasts 5 seconds - Submit unlocks when it runs out; elsewhere at once. */
 import { useEffect, useState } from "react";
 
-export const REVIEW_SECONDS = 30;
+export const REVIEW_SECONDS = 5;
 
-// The forms whose review lasts 30 seconds - a trainer's daily records. On
+// The forms whose review lasts 5 seconds - a trainer's daily records. On
 // every other form, Submit is ready as soon as Proceed is pressed.
 const TIMED_FORMS = {
   VT: ["attendance", "class-attendance", "assessments", "field-visits", "guest-lectures", "ojt-placements"],

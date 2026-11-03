@@ -20,7 +20,7 @@ import {
   labById, jobRoleForClass, labJobRoleIds, labSections,
 } from "./fieldOptions";
 import { todayISO } from "./dates";
-import { ISSUE_STATUS_LABELS, VERIFICATION_LABELS } from "./roleUi";
+import { ISSUE_STATUS_LABELS, PUNCH_LABELS, VERIFICATION_LABELS } from "./roleUi";
 import { trainerProfileFields } from "../components/ProfileFields";
 
 // shared option-key shortcuts
@@ -264,7 +264,7 @@ export const MODULES = {
       { name: "phone", label: "Phone", type: "tel", required: true, placeholder: "10 digits (11 with the STD code's 0)", group: "Contact" },
       {
         name: "location_lat", label: "Location", type: "geopoint", lngField: "location_lng", required: true, group: "Location",
-        hint: "Trainers can only mark attendance within 1 km of this point. Stand at the school and use your current location, or copy the coordinates from Google Maps (right-click the school).",
+        hint: "Each trainer's attendance shows how far from this point it was marked. Stand at the school and use your current location, or copy the coordinates from Google Maps (right-click the school).",
       },
       { name: "location_lng", label: "Longitude", hidden: true },
     ],
@@ -576,14 +576,20 @@ export const MODULES = {
   attendance: {
     label: "Daily Attendance", singular: "Attendance", icon: "🗓️", group: "Daily Operations",
     searchable: false,
-    // the trainer's own attendance for the day: marked at the school (within
-    // 1 km - checked by the server against the school's location)
+    // the trainer's own attendance for the day, with how far from the school
+    // it was marked (measured by the server; never refused for distance)
     captureLocation: true,
     filtersFor: { PR: ["trainer_id", "lab_id", "date", "endorsement_status"] },
+    // marked twice a day - the first is Punch In, the second Punch Out (the
+    // server decides which). The list shows each trainer's day as its two
+    // rows, the date (and trainer) written once beside them.
+    punch: { key: "punch", labels: PUNCH_LABELS, by: ["date", "trainer_id"], span: ["date", "trainer_name"] },
+    pageNoun: "days",
     columns: [
       { key: "date", label: "Date" },
-      { key: "attendance_time", label: "Time" },
       { key: "trainer_name", label: "Trainer" },
+      { key: "punch", label: "Punch", sortable: false, tag: PUNCH_LABELS },
+      { key: "attendance_time", label: "Time" },
       { key: "details", label: "Comment" },
       { key: "endorsement_status", label: "Verification", badge: true, valueLabels: VERIFICATION_LABELS,
         forRole: { VT: { label: "Verified?", badge: false, dot: "endorsement" } } },

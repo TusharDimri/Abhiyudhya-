@@ -191,11 +191,13 @@ def test_within_a_kilometre_is_fine(client, world):
     assert 700 < r.get_json()["distance_from_school_m"] < 900
 
 
-def test_too_far_from_the_school_is_refused(client, world):
+def test_far_from_the_school_is_saved_with_the_real_distance(client, world):
+    """However far away, attendance is saved - with how far it really was, for
+    the reviewers to see (Pune to Mumbai: about 120 km)."""
     _school_located(world)
     r = _save(client, "/api/attendance", _day(world), **MUMBAI)
-    assert r.status_code == 400
-    assert "within 1.0 km" in r.get_json()["message"]
+    assert r.status_code == 201, r.get_json()
+    assert 110_000 < r.get_json()["distance_from_school_m"] < 130_000
 
 
 def test_school_must_have_a_location(client, world):
@@ -204,12 +206,20 @@ def test_school_must_have_a_location(client, world):
     assert "location hasn't been set up" in r.get_json()["message"]
 
 
-def test_attendance_once_a_day_and_only_for_today(client, world):
+def test_attendance_twice_a_day_and_only_for_today(client, world):
     _school_located(world)
-    assert _save(client, "/api/attendance", _day(world)).status_code == 201
-    again = _save(client, "/api/attendance", _day(world))
-    assert again.status_code == 400
-    assert "already marked" in again.get_json()["message"]
+    first = _save(client, "/api/attendance", _day(world))
+    assert first.status_code == 201 and first.get_json()["punch"] == "in"
+    second = _save(client, "/api/attendance", _day(world))
+    assert second.status_code == 201 and second.get_json()["punch"] == "out"
+    third = _save(client, "/api/attendance", _day(world))
+    assert third.status_code == 400
+    assert "Punch In and Punch Out are both marked" in third.get_json()["message"]
+    # the server decides which one it is - not what the form sends
+    db.session.query(DailyAttendance).update({"is_deleted": True})
+    db.session.commit()
+    sent = _save(client, "/api/attendance", _day(world, punch="out"))
+    assert sent.status_code == 201 and sent.get_json()["punch"] == "in"
     # (a day either side is allowed - the server runs on UTC)
     earlier = _save(client, "/api/attendance", _day(world, date=(date.today() - timedelta(days=3)).isoformat()))
     assert earlier.status_code == 400
@@ -257,11 +267,11 @@ def test_class_attendance_required_answers(client, world, change, message):
     assert message in r.get_json()["message"]
 
 
-def test_class_attendance_too_far_is_refused(client, world):
+def test_class_attendance_far_away_is_saved_with_the_real_distance(client, world):
     _school_located(world)
     r = _save(client, "/api/class-attendance", _class(world), **MUMBAI)
-    assert r.status_code == 400
-    assert "within 1.0 km" in r.get_json()["message"]
+    assert r.status_code == 201, r.get_json()
+    assert 110_000 < r.get_json()["distance_from_school_m"] < 130_000
 
 
 # ---------------------------------------------------------- school location
@@ -2150,6 +2160,57 @@ def test_principal_verifies_many_attendance_records_at_once(client, world, princ
     assert len(told) == 1 and told[0]["title"] == "3 attendance records verified"
     # nothing left to verify the second time
     assert client.post(url, headers=_as(client, "pr@x.com"), json={"ids": ids}).get_json() == {"verified": 0, "skipped": 5}
+
+
+def test_attendance_pages_hold_whole_days(client, world, principal):
+    """A trainer's day - Punch In then Punch Out - is never split across pages,
+    and paging counts days; a day with no Punch Out still has its own page."""
+    from datetime import time as clock
+    tr = db.session.query(Trainer).first()
+    other = Trainer(organisation_id=world["org"].id, full_name="VT Two", school_id=world["school"].id,
+                    lab_id=world["lab"].id, job_role_ids=str(world["jr_high"].id))
+    db.session.add(other)
+    db.session.flush()
+    base = dict(organisation_id=world["org"].id, school_id=world["school"].id, lab_id=world["lab"].id,
+                academic_year="2025-26")
+    today = date.today()
+    recs = [  # (trainer, days ago, punch, time) - added out of order on purpose
+        (tr, 0, "out", clock(16, 5)), (other, 0, "in", clock(9)), (tr, 1, "in", clock(9, 2)),
+        (tr, 0, "in", clock(8, 50)), (tr, 1, "out", clock(15)), (other, 0, "out", clock(15, 30)),
+    ]
+    db.session.add_all([DailyAttendance(**base, trainer_id=t.id, date=today - timedelta(days=d),
+                                        punch=p, attendance_time=at) for t, d, p, at in recs])
+    gone = DailyAttendance(**base, trainer_id=other.id, date=today - timedelta(days=1), punch="in",
+                           attendance_time=clock(9), is_deleted=True)
+    db.session.add(gone)
+    db.session.commit()
+
+    h = _as(client, "pr@x.com")
+    seen = []
+    for page in (1, 2, 3):
+        body = client.get(f"/api/attendance?page={page}&page_size=1", headers=h).get_json()
+        assert body["pagination"]["total"] == 3 and body["pagination"]["pages"] == 3
+        days = {(r["date"], r["trainer_id"]) for r in body["data"]}
+        assert len(days) == 1, body["data"]                    # one whole day per page
+        assert [r["punch"] for r in body["data"]] == ["in", "out"]
+        seen.append(body["data"][0]["date"])
+    assert seen[0] == seen[1] == today.isoformat() and seen[2] < seen[0]     # newest first
+    # a notification's record opens on the page with its day
+    target = db.session.query(DailyAttendance).filter_by(trainer_id=tr.id, punch="out",
+                                                         date=today - timedelta(days=1)).one()
+    body = client.get(f"/api/attendance?page_size=1&focus={target.id}", headers=h).get_json()
+    assert body["focus"] == {"id": str(target.id), "found": True, "page": 3}
+    assert client.get("/api/attendance?focus=nonsense", headers=h).get_json()["focus"]["found"] is False
+    # filters still apply - here, one trainer's days
+    mine = client.get(f"/api/attendance?trainer_id={tr.id}", headers=h).get_json()
+    assert mine["pagination"]["total"] == 2 and {r["trainer_id"] for r in mine["data"]} == {str(tr.id)}
+    assert [r["punch"] for r in mine["data"]] == ["in", "out", "in", "out"]
+    # a trainer sees only their own days - not a colleague's in the same lab
+    vt = _as(client, "vt@x.com")
+    own = client.get("/api/attendance", headers=vt).get_json()
+    assert own["pagination"]["total"] == 2 and {r["trainer_id"] for r in own["data"]} == {str(tr.id)}
+    theirs = db.session.query(DailyAttendance).filter_by(trainer_id=other.id, is_deleted=False).first()
+    assert client.get(f"/api/attendance/{theirs.id}", headers=vt).status_code in (403, 404)
 
     # class attendance the same way
     _as(client, "vt@x.com")

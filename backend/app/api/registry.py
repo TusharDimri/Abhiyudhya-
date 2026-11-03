@@ -87,6 +87,9 @@ class ResourceConfig:
     # stamp new records with where the user was (model mixes in
     # CapturesLocation); required from trainers
     captures_location: bool = False
+    # list pages hold whole groups of rows, never split: (group columns, the
+    # order inside a group) - a trainer's day, its Punch In then Punch Out
+    page_by: Optional[Tuple[Tuple[str, ...], Tuple[str, ...]]] = None
     # a `location` point typed in by an admin (location_lat / location_lng) -
     # e.g. where a school is
     manual_location: bool = False
@@ -461,15 +464,18 @@ def _validate_vt_attendance(instance, user, is_create=False):
         if not own:
             return "Your login isn't linked to a trainer profile yet - ask your admin."
         instance.trainer_id = own
-        # once a day
-        already = db.session.query(M.DailyAttendance.id).filter(
-            M.DailyAttendance.trainer_id == own,
+    if is_create:
+        # twice a day: the first is Punch In, the second Punch Out
+        marked = db.session.query(M.DailyAttendance.id).filter(
+            M.DailyAttendance.trainer_id == instance.trainer_id,
             M.DailyAttendance.date == instance.date,
             M.DailyAttendance.is_deleted.is_(False),
             M.DailyAttendance.id != instance.id,
-        ).first()
-        if already:
-            return f"You've already marked your attendance for {instance.date:%d/%m/%Y}."
+        ).count()
+        if marked >= 2:
+            return f"Punch In and Punch Out are both marked for {instance.date:%d/%m/%Y}."
+        instance.punch = "out" if marked else "in"
+    if user.role == VT and is_create:
         return school_distance_error(instance, instance.school_id)
     return None
 
@@ -1122,12 +1128,13 @@ register(ResourceConfig(
     on_saved=_saved_attendance("daily"),
     write_roles=[SA, OA, DM, VT],
     # the trainer's own daily attendance: date, time, photo, comment - and where
-    # they were (within 1 km of the school). Older activity-branch columns keep
+    # they were (how far from the school is recorded). Older activity-branch columns keep
     # past answers but are no longer written.
     writable=["trainer_id", "lab_id", "date", "attendance_time", "photo_url", "details", "status"],
     search=["details"],
     filters=["school_id", "trainer_id", "lab_id", "academic_year", "date", "endorsement_status"],
     sortable=["date", "created_at"], default_sort=("date", "desc"),
+    page_by=(("date", "trainer_id"), ("punch", "attendance_time", "created_at")),
     computed=_attendance_display,
     validate=_validate_vt_attendance,
     captures_location=True,

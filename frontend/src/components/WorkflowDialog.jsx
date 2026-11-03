@@ -6,6 +6,7 @@ import { useToast } from "../lib/toast";
 import { useBootstrap } from "../hooks/useBootstrap";
 import DateInput from "./DateInput";
 import { todayISO } from "../lib/dates";
+import { PUNCH_LABELS } from "../lib/roleUi";
 
 // Principal endorsement + DM/OA issue transition (spec Part 5.21 / 3.12).
 export default function WorkflowDialog({ resource, action, row, onClose, onDone }) {
@@ -46,7 +47,8 @@ export default function WorkflowDialog({ resource, action, row, onClose, onDone 
   });
 
   const TITLES = {
-    endorse: resource === "class-attendance" ? "Verify Class Attendance" : "Verify Attendance",
+    endorse: resource === "class-attendance" ? "Verify Class Attendance"
+      : `Verify Attendance${PUNCH_LABELS[row.punch] ? ` · ${PUNCH_LABELS[row.punch]}` : ""}`,
     verify: "Verify Student", transition: "Update issue status", maintenance: "Update maintenance status",
     status: `Mark ${row.full_name || "the student"} as left`,
   };

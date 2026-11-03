@@ -100,7 +100,7 @@ def seed_base():
                 email="school1@rnaf.demo", phone="9820000001")
     s2 = School(organisation_id=org.id, district_id=d2.id, name="Govt High School Nagpur",
                 udise_code="27000000002", block="Nagpur Rural", email="school2@rnaf.demo")
-    # where the schools are: trainers mark attendance within 1 km of these
+    # where the schools are: trainers' attendance records its distance from these
     s1.location = point_wkt(18.5204, 73.8567)   # Pune
     s1.school_type, s2.school_type = "Co-education", "Boys"
     s2.location = point_wkt(21.1458, 79.0882)   # Nagpur

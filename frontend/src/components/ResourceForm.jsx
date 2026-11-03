@@ -116,7 +116,7 @@ export default function ResourceForm({
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState("");
   const [locating, setLocating] = useState(false);
-  // the review waits 30 seconds on a trainer's daily records only (ReviewGate.jsx)
+  // the review waits 5 seconds on a trainer's daily records only (ReviewGate.jsx)
   const review = useReviewGate(needsReview(role, resource));
   const drawerRef = useRef(null);
   const loc = useLocationFix();
@@ -134,6 +134,26 @@ export default function ResourceForm({
     enabled: !!lookupField && isNew && !!resource,
     staleTime: 60000,
   });
+  // marked twice a day (mod.punch): say which one this is - Punch In if it's
+  // the trainer's first that day, Punch Out if their second. (The server
+  // decides when it's saved; this only tells them beforehand.)
+  const punch = mod.punch;
+  const punchSlots = punch ? Object.keys(punch.labels) : [];
+  const dayPunches = useQuery({
+    queryKey: ["punches", resource, values.trainer_id, values.date],
+    queryFn: async () => (await api.get(`/${resource}`, {
+      params: { trainer_id: values.trainer_id, date: values.date, page_size: 10 },
+    })).data.data,
+    enabled: !!punch && isNew && !!values.trainer_id && !!values.date,
+  });
+  const punchNow = !punch ? null
+    : !isNew ? initial?.[punch.key]
+    : dayPunches.data ? (punchSlots[dayPunches.data.length] || "done") : null;
+  const punchFlag = punchNow && (
+    <span className={`punch-flag punch-${punchNow}`}>
+      {punchNow === "done" ? "Punch In and Punch Out already marked" : punch.labels[punchNow]}
+    </span>
+  );
   const pastByName = useMemo(() => {
     const m = new Map();
     if (!lookupField) return m;
@@ -585,9 +605,12 @@ export default function ResourceForm({
             <div className="prefill-note">Select the organisation first — dependent lists load for that organisation.</div>
           )}
 
-          {autoFields.length > 0 && (
+          {autoFields.length > 0 ? (
             <div className="known-panel">
-              <div className="known-title"><Check size={14} /> Already filled in — you don't need to enter these</div>
+              <div className="known-head">
+                <div className="known-title"><Check size={14} /> Already filled in — you don't need to enter these</div>
+                {punchFlag}
+              </div>
               <div className="known-grid">
                 {autoFields.map((f) => (
                   <div className="known-item" key={f.name}>
@@ -597,7 +620,7 @@ export default function ResourceForm({
                 ))}
               </div>
             </div>
-          )}
+          ) : punchFlag && <div className="known-head">{punchFlag}</div>}
 
           {groups.map((g) => (
             <fieldset className="fgroup" key={g.name}>

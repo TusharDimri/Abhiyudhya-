@@ -5,7 +5,9 @@
 export const ON_CAMPUS_M = 750;
 export const NEARBY_M = 1200;
 
-const describe = (m) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`);
+// (far away - nothing refuses it - reads "1,172 km")
+const describe = (m) => (m < 1000 ? `${Math.round(m)} m`
+  : m < 100000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m / 1000).toLocaleString("en-IN")} km`);
 
 export default function DistanceDot({ metres }) {
   if (metres == null || metres === "") {

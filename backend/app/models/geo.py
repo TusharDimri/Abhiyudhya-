@@ -47,24 +47,18 @@ class CapturesLocation:
         self.location_captured_at = captured_at or datetime.utcnow()
 
 
-# How close to their school a trainer must be to mark attendance.
-ATTENDANCE_RADIUS_M = 1000
-
-
 def point_wkt(lat, lng):
     return WKTElement(f"POINT({lng} {lat})", srid=4326)
 
 
-def _km(metres):
-    return f"{metres / 1000:,.1f} km" if metres < 100_000 else f"{metres / 1000:,.0f} km"
-
-
-def school_distance_error(instance, school_id, radius_m=ATTENDANCE_RADIUS_M):
-    """Record how far the device was from the school and refuse anything
-    outside the radius. Measured by PostGIS on the globe, in metres.
+def school_distance_error(instance, school_id):
+    """Record how far the device was from the school - measured by PostGIS on
+    the globe, in metres. However far it is, the record is saved: reviewers
+    see the distance (its dot) and judge it themselves.
 
     Only applies when the record carries a location (a trainer's); sets
-    `instance.distance_from_school_m`. Returns an error message or None."""
+    `instance.distance_from_school_m`. Returns an error message (the school
+    has no location to measure from) or None."""
     from sqlalchemy import func
     from app.models.geography import School
 
@@ -80,9 +74,6 @@ def school_distance_error(instance, school_id, radius_m=ATTENDANCE_RADIUS_M):
         func.ST_Distance(School.location, func.ST_GeogFromText(f"SRID=4326;POINT({lng} {lat})"))
     ).filter(School.id == school.id).scalar()
     instance.distance_from_school_m = round(float(metres), 1)
-    if metres > radius_m:
-        return (f"You're about {_km(metres)} from {school.name}. Attendance can only be "
-                f"marked within {_km(radius_m)} of the school.")
     return None
 
 

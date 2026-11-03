@@ -174,7 +174,7 @@ def _near(lat, lng, max_m=450, min_m=15):
 
 def _stamp(rec, school_latlng, when, distance=True):
     """Where the device was: mostly at the school (green, up to 750 m), now
-    and then 751-980 m out (yellow) - never past the 1 km the app accepts."""
+    and then 751-980 m out (yellow)."""
     far = R.random() < 0.15
     lat, lng, dist = _near(*school_latlng, min_m=760, max_m=980) if far else _near(*school_latlng, max_m=700)
     rec.set_location(lat, lng, round(R.uniform(8, 40), 1), when)
@@ -638,7 +638,7 @@ def _fill_lab(org, school, lab, sector_code, vt_low, vt_high, pr_user, size, clo
             status = _verified(day, today)
             d = DailyAttendance(organisation_id=oid, trainer_id=t.id, school_id=school.id, lab_id=lab.id,
                                 academic_year=clock.this_label, date=day, day_type="Working day",
-                                attendance_time=at.time(), endorsement_status=status, created_by=u.id,
+                                attendance_time=at.time(), punch="in", endorsement_status=status, created_by=u.id,
                                 details=R.choice([None, None, None, "Staff meeting after school"]),
                                 endorsed_by=pr_user.id if status == "endorsed" else None,
                                 endorsed_on=datetime.combine(day + timedelta(days=2), time(16)) if status == "endorsed" else None)

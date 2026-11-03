@@ -343,6 +343,25 @@ table.data tbody tr.row-picked > td { background: #eff6ff; }
 table.data tbody tr.row-deleted > td { background: #fafafa; color: var(--muted); }
 table.data tbody tr.row-deleted > td:last-child { color: inherit; }
 .modal.modal-confirm { width: min(460px, 100%); }
+
+/* ---- a trainer's day: Punch In and Punch Out rows under one date (DataTable `group`) */
+table.data.grouped th, table.data.grouped td { padding-left: .7rem; padding-right: .7rem; }
+table.data.grouped tbody td { border-bottom: 0; }
+table.data.grouped tbody tr + tr > td { border-top: 1px dashed var(--line); }
+table.data.grouped tbody tr + tr.row-group-start > td { border-top: 1px solid #d5dbe5; }
+table.data.grouped td.cell-span { vertical-align: middle; background: #fff; border-right: 1px solid var(--line); color: var(--ink); font-weight: 500; }
+table.data.grouped tbody tr.row-missing > td:not(.cell-span) { background: #fcfcfd; }
+.punch-tag, .punch-flag { display: inline-flex; align-items: center; gap: .3rem; font-size: .72rem; font-weight: 700;
+  padding: .12rem .55rem; border-radius: 999px; white-space: nowrap; letter-spacing: .01em; }
+.punch-tag::before, .punch-flag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.punch-in { background: var(--success-bg); color: var(--success); }
+.punch-out { background: var(--gold-100); color: #8a6420; }
+.punch-done { background: var(--navy-050); color: var(--ink-2); }
+.punch-done::before { display: none; }
+.known-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; margin-bottom: .5rem; }
+.known-head .known-title { margin-bottom: 0; }
+.known-head .punch-flag { font-size: .8rem; padding: .25rem .75rem; }
+.drawer .body > .known-head { margin-bottom: 1rem; }
 .bulk-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 16px;
   background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 .bulk-bar .grow { flex: 1; }
