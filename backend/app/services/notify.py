@@ -356,10 +356,19 @@ def tc_to_verify(s, actor):
 
 
 # ------------------------------------------------------------- principal
+PUNCH_LABELS = {"in": "Punch In", "out": "Punch Out"}
+
+
+def _daily_what(rec):
+    """'Daily attendance (Punch In)' - which of the day's two it is."""
+    punch = PUNCH_LABELS.get(getattr(rec, "punch", None))
+    return f"Daily attendance ({punch})" if punch else "Daily attendance"
+
+
 def attendance_submitted(rec, actor, kind):
     """kind: 'daily' or 'class'."""
     path = "attendance" if kind == "daily" else "class-attendance"
-    what = "Daily attendance" if kind == "daily" else f"Class {rec.class_grade} attendance"
+    what = _daily_what(rec) if kind == "daily" else f"Class {rec.class_grade} attendance"
     _send(principals_of(rec.school_id), actor, org_id=rec.organisation_id,
           title=f"{what} to verify",
           body=f"{actor.full_name if actor else 'A trainer'} marked {what.lower()} for {dmy(rec.date)}.",
@@ -376,7 +385,7 @@ def guest_lecture_added(rec, actor):
 # --------------------------------------------------------------- trainer
 def attendance_verified(rec, actor, kind):
     path = "attendance" if kind == "daily" else "class-attendance"
-    what = "daily attendance" if kind == "daily" else f"Class {rec.class_grade} attendance"
+    what = _daily_what(rec).lower().replace("punch", "Punch") if kind == "daily" else f"Class {rec.class_grade} attendance"
     _send(user_by_id(rec.created_by) or trainer_user(rec.trainer_id), actor, org_id=rec.organisation_id,
           title="Attendance verified",
           body=f"Your {what} for {dmy(rec.date)} was verified by the principal.",
@@ -395,7 +404,8 @@ def attendance_verified_many(recs, actor, kind):
             continue
         first = group[0]
         what = "daily attendance" if kind == "daily" else "class attendance"
-        dates = ", ".join(dmy(r.date) for r in sorted(group, key=lambda r: r.date))
+        # (a day's Punch In and Punch Out: its date once)
+        dates = ", ".join(dmy(d) for d in sorted({r.date for r in group}))
         _send(user_by_id(first.created_by) or trainer_user(first.trainer_id), actor, org_id=first.organisation_id,
               title=f"{len(group)} attendance records verified",
               body=f"Your {what} for {dates} was verified by the principal."[:300],

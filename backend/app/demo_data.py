@@ -5,7 +5,7 @@ Run after `flask seed`:   flask demo-data
 Everything is fictional - names, phone numbers, Aadhaar/PAN/bank numbers,
 companies - and generated from a fixed random seed, so every run produces the
 same data. It follows the same rules the app enforces: attendance is marked
-within 1 km of the school, dates are never in the future, a record's year
+near the school, dates are never in the future, a record's year
 follows its date, a class's job role follows the lab's slot, and so on.
 
 Adds (for the Pune school, both of its trainers):
@@ -225,7 +225,7 @@ def run_demo_data():
             status = _endorsement(day, today)
             daily = DailyAttendance(
                 organisation_id=org_id, trainer_id=t.id, school_id=school.id, lab_id=lab.id,
-                academic_year=year_now, date=day, day_type="Working day", attendance_time=at.time(),
+                academic_year=year_now, date=day, day_type="Working day", attendance_time=at.time(), punch="in",
                 details=R.choice([None, None, None, "Reached early to set up the lab", "Staff meeting after school"]),
                 endorsement_status=status, created_by=vt_user.id if t is tr else None,
                 endorsed_by=pr_user.id if status != "submitted" else None,

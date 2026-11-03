@@ -9,12 +9,42 @@ const isGone = (r) => r.leaving_stage === "left" || ["Dropped Out", "Transferred
 // where a leaving student is, for those who aren't the next to act
 const LEAVING_NOTE = { requested: "Leaving · TC pending", tc_issued: "Leaving · TC issued" };
 
+/* `group` (a module's `punch`): each trainer's day as its own rows - Punch In,
+   then Punch Out - with the day's cells (date, trainer) written once beside
+   them. `showMissing`: a punch not marked gets a "Not marked" row. */
+function groupDays(rows, group, showMissing) {
+  const slots = Object.keys(group.labels);
+  const days = new Map();
+  for (const r of rows) {
+    const k = group.by.map((c) => r[c]).join("|");
+    if (!days.has(k)) days.set(k, []);
+    days.get(k).push(r);
+  }
+  return [...days.values()].flatMap((day) => {
+    const out = [...day];
+    if (showMissing) {
+      for (const slot of slots) {
+        if (day.some((r) => r[group.key] === slot)) continue;
+        const shared = Object.fromEntries([...group.by, ...group.span].map((c) => [c, day[0][c]]));
+        out.push({ ...shared, id: `${day[0].id}-${slot}`, [group.key]: slot, _missing: true });
+      }
+    }
+    const at = (r) => { const i = slots.indexOf(r[group.key]); return i < 0 ? slots.length : i; };
+    out.sort((a, b) => at(a) - at(b));
+    return out.map((r, i) => ({ ...r, _span: i === 0 ? out.length : 0 }));
+  });
+}
+
 // Presentational, server-driven table with sortable headers + skeleton loader.
 /* `select` (optional) puts a tick box on each row it allows, and one in the
    header for every such row on this page: { can(row), ids: Set, toggle(id),
    setAll(ids) } - e.g. the Principal ticking attendance to verify at once. */
-export default function DataTable({ columns, rows, loading, sort, order, onSort, onEdit, onDelete, onRestore, restoring, onRowAction, rowActions, canWrite, emptyHint, emptyAction, onEmptyAction, flashId, select }) {
+export default function DataTable({ columns, rows, loading, sort, order, onSort, onEdit, onDelete, onRestore, restoring, onRowAction, rowActions, canWrite, emptyHint, emptyAction, onEmptyAction, flashId, select, group, showMissing }) {
   const showActions = canWrite || onDelete || (rowActions && rowActions.length);
+  const shown = group ? groupDays(rows, group, showMissing) : rows;
+  const spans = new Set(group?.span || []);
+  // a "Not marked" row: one cell across everything after its punch
+  const restCount = columns.filter((c) => !spans.has(c.key) && c.key !== group?.key).length + (showActions ? 1 : 0);
   const pickable = select && !loading ? rows.filter((r) => select.can(r)).map((r) => String(r.id)) : [];
   const picked = pickable.filter((id) => select.ids.has(id)).length;
   const allBox = useRef(null);
@@ -30,7 +60,7 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
   return (
     <div className="card">
       <div className="table-wrap">
-        <table className="data">
+        <table className={group ? "data grouped" : "data"}>
           <thead>
             <tr>
               {select && (
@@ -67,11 +97,23 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                     {showActions ? <td><div className="skeleton" style={{ width: 70 }} /></td> : null}
                   </tr>
                 ))
-              : rows.map((r) => (
+              : shown.map((r) => r._missing ? (
+                  // a punch not marked that day
+                  <tr key={r.id} className={`row-missing ${r._span ? "row-group-start" : ""}`}>
+                    {select && <td className="select-col" />}
+                    {columns.filter((c) => (r._span || !spans.has(c.key)) && (spans.has(c.key) || c.key === group.key)).map((c) => (
+                      <td key={c.key} rowSpan={spans.has(c.key) ? r._span : undefined} className={spans.has(c.key) ? "cell-span" : undefined}>
+                        {cell(c, r)}
+                      </td>
+                    ))}
+                    <td colSpan={restCount} className="muted">Not marked</td>
+                  </tr>
+                ) : (
                   <tr key={r.id} ref={flashId && String(r.id) === String(flashId) ? flashRow : null}
                     className={[flashId && String(r.id) === String(flashId) ? "row-flash" : "",
                       select?.ids.has(String(r.id)) ? "row-picked" : "",
-                      r.is_deleted ? "row-deleted" : ""].filter(Boolean).join(" ") || undefined}>
+                      r.is_deleted ? "row-deleted" : "",
+                      group && r._span ? "row-group-start" : ""].filter(Boolean).join(" ") || undefined}>
                     {select && (
                       <td className="select-col">
                         {select.can(r) && (
@@ -80,11 +122,10 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
                         )}
                       </td>
                     )}
-                    {columns.map((c) => (
-                      <td key={c.key}>
-                        {c.dot === "distance" ? <DistanceDot metres={r[c.key]} />
-                          : c.dot === "endorsement" ? <EndorsementDot value={r[c.key]} />
-                          : c.badge ? <Badge value={r[c.key]} label={c.valueLabels?.[r[c.key]]} /> : format(r[c.key])}
+                    {columns.filter((c) => !group || r._span || !spans.has(c.key)).map((c) => (
+                      <td key={c.key} rowSpan={group && spans.has(c.key) ? r._span : undefined}
+                        className={group && spans.has(c.key) ? "cell-span" : undefined}>
+                        {cell(c, r)}
                       </td>
                     ))}
                     {showActions ? (
@@ -172,6 +213,14 @@ export default function DataTable({ columns, rows, loading, sort, order, onSort,
       )}
     </div>
   );
+}
+
+function cell(c, r) {
+  if (c.dot === "distance") return <DistanceDot metres={r[c.key]} />;
+  if (c.dot === "endorsement") return <EndorsementDot value={r[c.key]} />;
+  if (c.badge) return <Badge value={r[c.key]} label={c.valueLabels?.[r[c.key]]} />;
+  if (c.tag) return r[c.key] ? <span className={`punch-tag punch-${r[c.key]}`}>{c.tag[r[c.key]] || r[c.key]}</span> : format(null);
+  return format(r[c.key]);
 }
 
 function format(v) {

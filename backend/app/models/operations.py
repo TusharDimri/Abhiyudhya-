@@ -12,8 +12,12 @@ class DailyAttendance(CapturesLocation, BaseModel):
     column rather than free text inside `details`, so each one stays
     filterable, reportable and exportable; `details` remains the shared
     narrative box that every branch asks for.
+
+    A trainer sees only their own - not a colleague's in the same lab
+    (rbac/scope.py: vt_own_only).
     """
     __tablename__ = "daily_attendance"
+    vt_own_only = True
     organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
     trainer_id = db.Column(GUID(), db.ForeignKey("trainer.id"), index=True)
     school_id = db.Column(GUID(), db.ForeignKey("school.id"), index=True)
@@ -84,8 +88,10 @@ class DailyAttendance(CapturesLocation, BaseModel):
     # (the form is now just date, time, photo, comment; the activity branches
     # above keep what was recorded with the older form)
     attendance_time = db.Column(db.Time)  # trainer's local time
+    # twice a day: "in" (the day's first) then "out" - set by the server
+    punch = db.Column(db.String(10), index=True)
     photo_url = db.Column(db.String(500))
-    distance_from_school_m = db.Column(db.Float)  # checked against the 1 km rule
+    distance_from_school_m = db.Column(db.Float)  # how far from the school (never refused for it)
 
     # Endorsement (spec Part 5.21)
     endorsement_status = db.Column(db.String(20), default="submitted", index=True)
@@ -107,7 +113,7 @@ class AttendanceStudentMark(BaseModel):
 
 class ClassAttendance(CapturesLocation, BaseModel):
     """A trainer taking a class: which class and sections, what they did,
-    which students attended, a photo - marked at the school (within 1 km)."""
+    which students attended, a photo - and how far from the school it was marked."""
     __tablename__ = "class_attendance"
     organisation_id = db.Column(GUID(), db.ForeignKey("organisation.id"), nullable=False, index=True)
     trainer_id = db.Column(GUID(), db.ForeignKey("trainer.id"), index=True)

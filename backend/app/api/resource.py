@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, date, time
 
 from flask import Blueprint, request, jsonify, abort, current_app
-from sqlalchemy import or_, asc, desc
+from sqlalchemy import and_, or_, asc, desc
 
 from app.extensions import db
 from app.models.base import GUID
@@ -277,6 +277,9 @@ def list_resource(resource):
         if val:
             q = fn(q, model, _coerce(model, param, val))
 
+    if cfg.page_by:
+        return jsonify(_grouped_page(cfg, q))
+
     # --- sort ---
     sort_col, sort_dir = cfg.default_sort
     req_sort = request.args.get("sort")
@@ -289,17 +292,7 @@ def list_resource(resource):
         q = q.order_by(asc(col) if sort_dir == "asc" else desc(col))
     q = q.order_by(model.id)   # a fixed order for ties, so a row stays on the same page
 
-    # --- pagination ---
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-    except ValueError:
-        page = 1
-    max_size = current_app.config["MAX_PAGE_SIZE"]
-    try:
-        page_size = int(request.args.get("page_size", current_app.config["DEFAULT_PAGE_SIZE"]))
-    except ValueError:
-        page_size = current_app.config["DEFAULT_PAGE_SIZE"]
-    page_size = max(1, min(page_size, max_size))
+    page, page_size = _page_args()
 
     # ?focus=<id> (a notification's record): open on the page that holds it,
     # under these same filters and this order - and say whether it's there
@@ -323,6 +316,62 @@ def list_resource(resource):
         },
         **({"focus": focus} if focus else {}),
     })
+
+
+def _page_args():
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+    max_size = current_app.config["MAX_PAGE_SIZE"]
+    try:
+        page_size = int(request.args.get("page_size", current_app.config["DEFAULT_PAGE_SIZE"]))
+    except ValueError:
+        page_size = current_app.config["DEFAULT_PAGE_SIZE"]
+    return page, max(1, min(page_size, max_size))
+
+
+def _grouped_page(cfg, q):
+    """A page of whole groups (cfg.page_by - a trainer's day), so a Punch In
+    and its Punch Out never land on different pages. Paging counts groups;
+    the first group column (the date) is newest first unless ?order=asc."""
+    model = cfg.model
+    group_cols, inner = cfg.page_by
+    keys = [getattr(model, c) for c in group_cols]
+    newest = request.args.get("order") != "asc"
+    head = desc(keys[0]) if newest else asc(keys[0])
+    groups = q.with_entities(*keys).distinct().order_by(head, *keys[1:])
+    page, page_size = _page_args()
+
+    # ?focus=<id>: the page that holds the group the record is in
+    focus = None
+    if request.args.get("focus"):
+        wanted = str(request.args["focus"])
+        rid = _coerce(model, "id", wanted)
+        hit = (q.filter(model.id == rid).with_entities(*keys).first()
+               if isinstance(rid, uuid.UUID) else None)
+        order = [tuple(g) for g in groups.all()]
+        found = hit is not None and tuple(hit) in order
+        if found:
+            page = order.index(tuple(hit)) // page_size + 1
+        focus = {"id": wanted, "found": found, "page": page}
+
+    total = groups.count()
+    chosen = groups.limit(page_size).offset((page - 1) * page_size).all()
+    rows = []
+    if chosen:
+        # (== None is IS NULL - a record with no trainer still finds its group)
+        in_page = or_(*[and_(*[k == v for k, v in zip(keys, g)]) for g in chosen])
+        rows = q.filter(in_page).order_by(
+            head, *keys[1:], *[asc(getattr(model, c)) for c in inner], model.id).all()
+    return {
+        "data": [_serialise(cfg, r) for r in rows],
+        "pagination": {
+            "page": page, "page_size": page_size, "total": total,
+            "pages": (total + page_size - 1) // page_size,
+        },
+        **({"focus": focus} if focus else {}),
+    }
 
 
 @bp.get("/<resource>/trash")

@@ -447,6 +447,9 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
         emptyAction={canWrite && !hideCreate ? (mod.addLabel || `New ${mod.singular}`) : null}
         onEmptyAction={() => setEditing({})}
         select={select}
+        group={mod.punch}
+        // (looking for verified / pending ones: a punch left out may just not match)
+        showMissing={!filterValues.endorsement_status && !q}
       />
 
       {bulkVerify && rows.some((r) => select.can(r)) && (
@@ -456,7 +459,7 @@ export default function ResourcePage({ resourceKey, embedded, readOnly, onlyActi
 
       <div className="pager">
         <span className="info">
-          {list.isFetching ? "Loading…" : `Showing ${from}–${to} of ${pg.total}`}
+          {list.isFetching ? "Loading…" : `Showing ${from}–${to} of ${pg.total}${mod.pageNoun ? ` ${mod.pageNoun}` : ""}`}
         </span>
         <button className="btn btn-ghost btn-sm" aria-label="First page" disabled={pg.page <= 1} onClick={() => patch({ page: 1 }, false)}><ChevronsLeft size={15} /><span className="pager-word"> First</span></button>
         <button className="btn btn-ghost btn-sm" aria-label="Previous page" disabled={pg.page <= 1} onClick={() => patch({ page: pg.page - 1 }, false)}><ChevronLeft size={15} /><span className="pager-word"> Prev</span></button>
